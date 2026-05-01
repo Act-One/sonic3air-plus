@@ -11,6 +11,7 @@
 #include "oxygen/drawing/software/SoftwareDrawerTexture.h"
 #include "oxygen/drawing/software/SoftwareRasterizer.h"
 #include "oxygen/drawing/software/Blitter.h"
+#include "oxygen/application/Configuration.h"
 #include "oxygen/drawing/DrawCollection.h"
 #include "oxygen/drawing/DrawCommand.h"
 #include "oxygen/application/EngineMain.h"
@@ -116,11 +117,70 @@ namespace softwaredrawer
 
 		~Internal()
 		{
+			destroyScreenTarget();
+		}
+
+		bool useDirect3D11Presenter() const
+		{
+#if defined(PLATFORM_WINDOWS)
+			return (Configuration::instance().mRenderMethod == Configuration::RenderMethod::D3D11_SOFT);
+#else
+			return false;
+#endif
+		}
+
+		void destroyScreenTarget()
+		{
+			unlockScreenSurface();
+
+			if (nullptr != mScreenTexture)
+			{
+				SDL_DestroyTexture(mScreenTexture);
+				mScreenTexture = nullptr;
+			}
+			if (nullptr != mSDLRenderer)
+			{
+				SDL_DestroyRenderer(mSDLRenderer);
+				mSDLRenderer = nullptr;
+			}
+
+			mScreenBitmap = Bitmap();
+			mScreenSurface = nullptr;
+			mOutputWrapper = BitmapViewMutable<uint32>();
+			mOutputWindow = nullptr;
+		}
+
+		void setExternalOutputBitmap(Bitmap* bitmap)
+		{
+			mExternalOutputBitmap = bitmap;
+
+			// The external bitmap only matters when rendering directly to the window target. If an offscreen
+			// render target is currently active, keep the output wrapper pointed at that texture so later
+			// render batches (like menu/UI passes) continue drawing into the same target.
+			if (nullptr != mCurrentRenderTarget)
+			{
+				mOutputWrapper = BitmapViewMutable<uint32>(mCurrentRenderTarget->accessBitmap());
+				mScissorRect.set(Vec2i(), mCurrentRenderTarget->getSize());
+			}
+			else
+			{
+				mOutputWrapper = BitmapViewMutable<uint32>();
+				if (nullptr != bitmap && !bitmap->empty())
+				{
+					mScissorRect.set(0, 0, bitmap->getWidth(), bitmap->getHeight());
+				}
+				else
+				{
+					mScissorRect = Recti();
+				}
+			}
 		}
 
 		void setupScreenSurface(SDL_Window* window)
 		{
 			mOutputWindow = window;
+			mOutputWrapper = BitmapViewMutable<uint32>();
+			mIsScreenSurfaceLocked = false;
 
 			mScreenSurface = SDL_GetWindowSurface(window);
 			RMX_CHECK(nullptr != mScreenSurface, "Could not get SDL screen surface", return);
@@ -166,6 +226,179 @@ namespace softwaredrawer
 			}
 		}
 
+		void setupD3D11Renderer(SDL_Window* window)
+		{
+			mOutputWindow = window;
+			mOutputWrapper = BitmapViewMutable<uint32>();
+			mIsScreenSurfaceLocked = false;
+			mScreenSurface = nullptr;
+			mD3D11PresenterUsesVSync = Configuration::useVSync(Configuration::instance().mFrameSync);
+
+			SDL_SetHint(SDL_HINT_RENDER_DRIVER, "direct3d11");
+			uint32 rendererFlags = SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE;
+			if (mD3D11PresenterUsesVSync)
+			{
+				rendererFlags |= SDL_RENDERER_PRESENTVSYNC;
+			}
+			mSDLRenderer = SDL_CreateRenderer(window, -1, rendererFlags);
+			if (nullptr == mSDLRenderer)
+			{
+				RMX_LOG_INFO("Failed to create SDL D3D11 renderer, falling back to window surface path: " << SDL_GetError());
+				setupScreenSurface(window);
+				return;
+			}
+
+			SDL_RendererInfo rendererInfo;
+			if (SDL_GetRendererInfo(mSDLRenderer, &rendererInfo) == 0)
+			{
+				RMX_LOG_INFO("SoftwareDrawer presenter backend: " << rendererInfo.name);
+			}
+
+			recreateD3D11ScreenTexture();
+		}
+
+		void recreateD3D11ScreenTexture()
+		{
+			if (nullptr == mOutputWindow || nullptr == mSDLRenderer)
+				return;
+
+			int width = 0;
+			int height = 0;
+			SDL_GetWindowSize(mOutputWindow, &width, &height);
+			if (width < 1)
+				width = 1;
+			if (height < 1)
+				height = 1;
+
+			if (nullptr != mScreenTexture)
+			{
+				SDL_DestroyTexture(mScreenTexture);
+				mScreenTexture = nullptr;
+			}
+
+			mScreenBitmap.createReusingMemory(width, height, mScreenReservedSize);
+			mOutputWrapper = BitmapViewMutable<uint32>(mScreenBitmap);
+			mScissorRect.set(0, 0, width, height);
+
+			mScreenTexture = SDL_CreateTexture(mSDLRenderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, width, height);
+			if (nullptr == mScreenTexture)
+			{
+				RMX_LOG_INFO("Failed to create SDL streaming texture for D3D11 presenter, falling back to window surface path: " << SDL_GetError());
+				SDL_DestroyRenderer(mSDLRenderer);
+				mSDLRenderer = nullptr;
+				mScreenBitmap = Bitmap();
+				setupScreenSurface(mOutputWindow);
+			}
+		}
+
+		void ensureScreenTarget(SDL_Window* window)
+		{
+			if (nullptr != mExternalOutputBitmap)
+				return;
+
+			if (nullptr == window)
+			{
+				destroyScreenTarget();
+				return;
+			}
+
+			const bool wantD3D11Presenter = useDirect3D11Presenter();
+			const bool hasD3D11Presenter = (nullptr != mSDLRenderer);
+			const bool windowChanged = (mOutputWindow != window);
+			const bool presenterChanged = (wantD3D11Presenter != hasD3D11Presenter);
+			const bool targetMissing = wantD3D11Presenter ? (nullptr == mSDLRenderer || nullptr == mScreenTexture || mScreenBitmap.empty()) : (nullptr == mScreenSurface);
+
+			if (windowChanged || presenterChanged || targetMissing)
+			{
+				setupScreenTarget(window);
+			}
+		}
+
+		void setupScreenTarget(SDL_Window* window)
+		{
+			destroyScreenTarget();
+
+			if (useDirect3D11Presenter())
+			{
+				setupD3D11Renderer(window);
+			}
+			else
+			{
+				setupScreenSurface(window);
+			}
+		}
+
+		void refreshScreenSurfaceIfNeeded()
+		{
+			if (nullptr == mOutputWindow || nullptr != mCurrentRenderTarget)
+				return;
+
+			if (nullptr != mExternalOutputBitmap)
+			{
+				if (!mExternalOutputBitmap->empty())
+				{
+					mOutputWrapper = BitmapViewMutable<uint32>(*mExternalOutputBitmap);
+					mScissorRect.set(0, 0, mExternalOutputBitmap->getWidth(), mExternalOutputBitmap->getHeight());
+				}
+				else
+				{
+					mOutputWrapper = BitmapViewMutable<uint32>();
+					mScissorRect = Recti();
+				}
+				return;
+			}
+
+			const bool wantD3D11Presenter = useDirect3D11Presenter();
+			const bool hasD3D11Presenter = (nullptr != mSDLRenderer);
+			if (wantD3D11Presenter != hasD3D11Presenter)
+			{
+				setupScreenTarget(mOutputWindow);
+				return;
+			}
+
+			if (wantD3D11Presenter)
+			{
+				if (nullptr == mSDLRenderer)
+				{
+					setupScreenTarget(mOutputWindow);
+					return;
+				}
+
+				const bool wantsVSyncNow = Configuration::useVSync(Configuration::instance().mFrameSync);
+				if (mD3D11PresenterUsesVSync != wantsVSyncNow)
+				{
+					setupScreenTarget(mOutputWindow);
+					return;
+				}
+
+				int windowWidth = 0;
+				int windowHeight = 0;
+				SDL_GetWindowSize(mOutputWindow, &windowWidth, &windowHeight);
+				if (windowWidth < 1)
+					windowWidth = 1;
+				if (windowHeight < 1)
+					windowHeight = 1;
+
+				const bool textureMissing = (nullptr == mScreenTexture || mScreenBitmap.empty());
+				const bool sizeMismatch = (mScreenBitmap.getWidth() != windowWidth || mScreenBitmap.getHeight() != windowHeight);
+				if (textureMissing || sizeMismatch)
+				{
+					recreateD3D11ScreenTexture();
+				}
+				return;
+			}
+
+			const bool surfaceMissing = (nullptr == mScreenSurface);
+			const bool windowWasReshaped = FTX::Video.valid() && FTX::Video->reshaped();
+			const bool sizeMismatch = (!surfaceMissing && FTX::Video.valid() &&
+				(mScreenSurface->w != FTX::Video->getScreenWidth() || mScreenSurface->h != FTX::Video->getScreenHeight()));
+
+			if (surfaceMissing || windowWasReshaped || sizeMismatch)
+			{
+				setupScreenTarget(mOutputWindow);
+			}
+		}
+
 		SoftwareDrawerTexture* createTexture(DrawerTexture& outTexture)
 		{
 			SoftwareDrawerTexture* texture = new SoftwareDrawerTexture(outTexture);
@@ -185,7 +418,18 @@ namespace softwaredrawer
 			if (nullptr == mCurrentRenderTarget)
 			{
 				// Next call to "getOutputWrapper" will update the output wrapper accordingly
-				mScissorRect.set(0, 0, mScreenSurface->w, mScreenSurface->h);
+				if (nullptr != mExternalOutputBitmap && !mExternalOutputBitmap->empty())
+				{
+					mScissorRect.set(0, 0, mExternalOutputBitmap->getWidth(), mExternalOutputBitmap->getHeight());
+				}
+				else if (nullptr != mSDLRenderer)
+				{
+					mScissorRect.set(0, 0, mScreenBitmap.getWidth(), mScreenBitmap.getHeight());
+				}
+				else if (nullptr != mScreenSurface)
+				{
+					mScissorRect.set(0, 0, mScreenSurface->w, mScreenSurface->h);
+				}
 			}
 			else
 			{
@@ -203,13 +447,38 @@ namespace softwaredrawer
 		{
 			if (nullptr == mCurrentRenderTarget)
 			{
-				if (nullptr != mScreenSurface)
+				if (nullptr != mExternalOutputBitmap)
+				{
+					if (!mExternalOutputBitmap->empty())
+					{
+						mOutputWrapper = BitmapViewMutable<uint32>(*mExternalOutputBitmap);
+						mScissorRect.set(0, 0, mExternalOutputBitmap->getWidth(), mExternalOutputBitmap->getHeight());
+					}
+					else
+					{
+						mOutputWrapper = BitmapViewMutable<uint32>();
+					}
+				}
+				else
+				{
+					refreshScreenSurfaceIfNeeded();
+				}
+
+				if (nullptr != mExternalOutputBitmap)
+				{
+				}
+				else if (nullptr != mSDLRenderer)
+				{
+					mOutputWrapper = BitmapViewMutable<uint32>(mScreenBitmap);
+				}
+				else if (nullptr != mScreenSurface)
 				{
 					if (!mIsScreenSurfaceLocked)
 					{
 						SDL_LockSurface(mScreenSurface);
 						mIsScreenSurfaceLocked = true;
-						mOutputWrapper = BitmapViewMutable<uint32>((uint32*)mScreenSurface->pixels, Vec2i(mScreenSurface->w, mScreenSurface->h));
+						const size_t surfaceStride = (size_t)mScreenSurface->pitch / sizeof(uint32);
+						mOutputWrapper = BitmapViewMutable<uint32>((uint32*)mScreenSurface->pixels, Vec2i(mScreenSurface->w, mScreenSurface->h), surfaceStride);
 					}
 				}
 				else
@@ -223,7 +492,9 @@ namespace softwaredrawer
 
 		bool needSwapRedBlueChannels()
 		{
-			return (nullptr == mCurrentRenderTarget && mSurfaceSwapRedBlue);
+			if (nullptr != mExternalOutputBitmap)
+				return false;
+			return (nullptr == mCurrentRenderTarget && nullptr == mSDLRenderer && mSurfaceSwapRedBlue);
 		}
 
 		void swapRedBlueChannels(uint32* dst, const uint32* src, int numPixels)
@@ -414,7 +685,13 @@ namespace softwaredrawer
 	public:
 		SDL_Window* mOutputWindow = nullptr;
 		SDL_Surface* mScreenSurface = nullptr;
+		SDL_Renderer* mSDLRenderer = nullptr;
+		SDL_Texture* mScreenTexture = nullptr;
+		Bitmap mScreenBitmap;
+		int mScreenReservedSize = 0;
 		bool mSurfaceSwapRedBlue = false;
+		bool mD3D11PresenterUsesVSync = false;
+		Bitmap* mExternalOutputBitmap = nullptr;
 
 		BlendMode mCurrentBlendMode = BlendMode::OPAQUE;
 		SamplingMode mCurrentSamplingMode = SamplingMode::POINT;
@@ -458,7 +735,17 @@ void SoftwareDrawer::refreshTexture(DrawerTexture& texture)
 
 void SoftwareDrawer::setupRenderWindow(SDL_Window* window)
 {
-	mInternal.setupScreenSurface(window);
+	mInternal.ensureScreenTarget(window);
+}
+
+void SoftwareDrawer::setExternalOutputBitmap(Bitmap* bitmap)
+{
+	mInternal.setExternalOutputBitmap(bitmap);
+}
+
+void SoftwareDrawer::clearExternalOutputBitmap()
+{
+	mInternal.setExternalOutputBitmap(nullptr);
 }
 
 void SoftwareDrawer::performRendering(const DrawCollection& drawCollection)
@@ -695,7 +982,15 @@ void SoftwareDrawer::performRendering(const DrawCollection& drawCollection)
 				mInternal.mScissorStack.pop_back();
 				if (mInternal.mScissorStack.empty())
 				{
-					if (nullptr != mInternal.mScreenSurface)
+					if (nullptr != mInternal.mExternalOutputBitmap && !mInternal.mExternalOutputBitmap->empty())
+					{
+						mInternal.mScissorRect.set(0, 0, mInternal.mExternalOutputBitmap->getWidth(), mInternal.mExternalOutputBitmap->getHeight());
+					}
+					else if (nullptr != mInternal.mSDLRenderer)
+					{
+						mInternal.mScissorRect.set(0, 0, mInternal.mScreenBitmap.getWidth(), mInternal.mScreenBitmap.getHeight());
+					}
+					else if (nullptr != mInternal.mScreenSurface)
 					{
 						mInternal.mScissorRect.set(0, 0, mInternal.mScreenSurface->w, mInternal.mScreenSurface->h);
 					}
@@ -712,11 +1007,28 @@ void SoftwareDrawer::performRendering(const DrawCollection& drawCollection)
 
 void SoftwareDrawer::presentScreen()
 {
-	if (nullptr == mInternal.mScreenSurface)
+	if (nullptr != mInternal.mExternalOutputBitmap)
 		return;
 
-	mInternal.unlockScreenSurface();
-	SDL_UpdateWindowSurface(mInternal.mOutputWindow);
+	mInternal.refreshScreenSurfaceIfNeeded();
+	if (nullptr != mInternal.mSDLRenderer)
+	{
+		if (nullptr == mInternal.mScreenTexture)
+			return;
+
+		SDL_UpdateTexture(mInternal.mScreenTexture, nullptr, mInternal.mScreenBitmap.getData(), mInternal.mScreenBitmap.getWidth() * (int)sizeof(uint32));
+		SDL_RenderClear(mInternal.mSDLRenderer);
+		SDL_RenderCopy(mInternal.mSDLRenderer, mInternal.mScreenTexture, nullptr, nullptr);
+		SDL_RenderPresent(mInternal.mSDLRenderer);
+	}
+	else
+	{
+		if (nullptr == mInternal.mScreenSurface)
+			return;
+
+		mInternal.unlockScreenSurface();
+		SDL_UpdateWindowSurface(mInternal.mOutputWindow);
+	}
 }
 
 const BitmapViewMutable<uint32>& SoftwareDrawer::getRenderTarget() const

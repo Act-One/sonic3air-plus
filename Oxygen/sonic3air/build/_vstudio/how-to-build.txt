@@ -50,3 +50,8 @@ Alternatively or in case of errors:
 
 Open the "sonic3air.sln" right next to this text file. Choose "sonic3air" as startup project and
 build / run it. That's all.
+
+
+>>> Build for Xbox Series dev mode (UWP)
+
+For the UWP / Xbox Series x64 packaging flow, see "XboxDevModeUWP.md" next to this file.

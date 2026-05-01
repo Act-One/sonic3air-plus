@@ -21,7 +21,9 @@ namespace
 {
 	const char* getPlatformName()
 	{
-	#if defined(PLATFORM_WINDOWS)
+	#if defined(PLATFORM_UWP)
+		return "uwp";
+	#elif defined(PLATFORM_WINDOWS)
 		return "windows";
 	#elif defined(PLATFORM_LINUX)
 		return "linux";

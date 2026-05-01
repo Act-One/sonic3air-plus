@@ -321,6 +321,19 @@ void SoftwareRenderer::renderGeometry(const Geometry& geometry)
 
 void SoftwareRenderer::renderPlane(const PlaneGeometry& geometry)
 {
+	if (!PlaneManager::isRenderablePlaneIndex(geometry.mPlaneIndex))
+	{
+		static int sLoggedInvalidPlaneGeometryCount = 0;
+		if (sLoggedInvalidPlaneGeometryCount < 8)
+		{
+			++sLoggedInvalidPlaneGeometryCount;
+			RMX_LOG_INFO("SoftwareRenderer: skipping invalid plane geometry with plane index " << geometry.mPlaneIndex
+				<< ", rect=(" << geometry.mActiveRect.x << "," << geometry.mActiveRect.y << "," << geometry.mActiveRect.width << "," << geometry.mActiveRect.height
+				<< "), scrollOffsets=" << (int)geometry.mScrollOffsets << ", renderQueue=0x" << rmx::hexString(geometry.mRenderQueue, 4));
+		}
+		return;
+	}
+
 	Bitmap& gameScreenBitmap = mGameScreenTexture.accessBitmap();
 
 	Recti rect(0, 0, mGameResolution.x, mGameResolution.y);
@@ -373,7 +386,7 @@ void SoftwareRenderer::renderPlane(const PlaneGeometry& geometry)
 		bufferedPlaneData.mNonPrioBlocks.clear();
 		bufferedPlaneData.mNonPrioBlocks.reserve(0x800);
 
-		const uint16* planeData = planeManager.getPlaneDataInVRAM(geometry.mPlaneIndex);
+		const uint16* planeData = planeManager.getPlanePatternsBuffer((uint8)geometry.mPlaneIndex);
 		const uint16 numPatternsPerLine = (geometry.mPlaneIndex <= PlaneManager::PLANE_A) ? planeManager.getPlayfieldSizeInPatterns().x : 64;
 		const uint16* scrollOffsetsH = nullptr;
 		const uint16* scrollOffsetsV = nullptr;

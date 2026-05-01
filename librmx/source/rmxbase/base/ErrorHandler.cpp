@@ -9,7 +9,7 @@
 #include "rmxbase.h"
 #include <locale>
 
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	#define WIN32_LEAN_AND_MEAN
 	#include "CleanWindowsInclude.h"
 
@@ -38,7 +38,7 @@ namespace
 
 	static std::set<uint64> gIgnoredAssertHashes;
 
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 #ifdef USE_VISTA_STYLE
 	static void* mTaskDialogIndirectProcPointer = nullptr;
 	static bool mLoadedProcPointers = false;
@@ -170,7 +170,7 @@ namespace rmx
 
 	bool ErrorHandling::isDebuggerAttached()
 	{
-	#if defined(PLATFORM_WINDOWS)
+	#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 		return IsDebuggerPresent();
 	#else
 		return false;
@@ -218,7 +218,7 @@ namespace rmx
 		{
 			result = mMessageBoxImplementation->showMessageBox(dialogType, errorSeverity, message, filename, line);
 		}
-	#ifdef PLATFORM_WINDOWS
+	#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 		// Fallback, for Windows only
 		else
 		{

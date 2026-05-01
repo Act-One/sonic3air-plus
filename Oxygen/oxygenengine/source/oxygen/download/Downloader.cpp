@@ -9,7 +9,7 @@
 #include "oxygen/pch.h"
 #include "oxygen/download/Downloader.h"
 
-#if defined(PLATFORM_WINDOWS)
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	#define PLATFORM_SUPPORTS_DOWNLOADER
 	#define USING_CURL
 

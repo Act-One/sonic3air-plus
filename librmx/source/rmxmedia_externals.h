@@ -10,7 +10,7 @@
 
 
 // Library linking via pragma
-#if defined(PLATFORM_WINDOWS) && defined(RMX_LIB)
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP) && defined(RMX_LIB)
 	#pragma comment(lib, "sdl2main.lib")
 	#pragma comment(lib, "sdl2.lib")
 	#pragma comment(lib, "winmm.lib")
@@ -44,7 +44,10 @@
 
 
 // OpenGL
-#if defined(PLATFORM_WINDOWS)
+#if defined(PLATFORM_UWP)
+	// UWP/Xbox builds currently use the software renderer path only.
+
+#elif defined(PLATFORM_WINDOWS)
 	#define ALLOW_LEGACY_OPENGL
 	#define RMX_USE_GLEW
 

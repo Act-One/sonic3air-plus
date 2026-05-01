@@ -19,7 +19,6 @@
 
 namespace
 {
-
 	const char* getJoystickName(SDL_Joystick* joystick)
 	{
 		if (nullptr == joystick)
@@ -105,6 +104,102 @@ namespace
 		return false;
 	}
 
+	bool isGenericHidControllerName(const char* name)
+	{
+		return (nullptr != name && 0 == strcmp(name, "HID-compliant game controller"));
+	}
+
+	bool shouldApplyUwpGenericHidAxisWorkaround(const SDL_GameControllerButtonBind& leftXBinding, const SDL_GameControllerButtonBind& leftYBinding, const char* controllerName, const char* joystickName)
+	{
+#if defined(PLATFORM_UWP)
+		if ((leftXBinding.bindType == SDL_CONTROLLER_BINDTYPE_AXIS) &&
+			(leftYBinding.bindType == SDL_CONTROLLER_BINDTYPE_AXIS) &&
+			(leftXBinding.value.axis == 1) &&
+			(leftYBinding.value.axis == 0) &&
+			(isGenericHidControllerName(controllerName) || isGenericHidControllerName(joystickName)))
+		{
+			return true;
+		}
+#else
+		(void)leftXBinding;
+		(void)leftYBinding;
+		(void)controllerName;
+		(void)joystickName;
+#endif
+		return false;
+	}
+
+	void overwriteDirectionalAxisAssignment(InputConfig::ControlMapping& mapping, int rawAxisIndex, bool positiveDirection)
+	{
+		const uint32 remappedIndex = (uint32)(rawAxisIndex * 2 + (positiveDirection ? 1 : 0));
+		for (InputConfig::Assignment& assignment : mapping.mAssignments)
+		{
+			if (assignment.mType == InputConfig::Assignment::Type::AXIS)
+			{
+				assignment.mIndex = remappedIndex;
+				return;
+			}
+		}
+		mapping.mAssignments.emplace_back(InputConfig::Assignment::Type::AXIS, remappedIndex);
+	}
+
+	void stripAxisAssignments(InputConfig::ControlMapping& mapping)
+	{
+		for (size_t i = 0; i < mapping.mAssignments.size(); ++i)
+		{
+			if (mapping.mAssignments[i].mType == InputConfig::Assignment::Type::AXIS)
+			{
+				mapping.mAssignments.erase(mapping.mAssignments.begin() + i);
+				--i;
+			}
+		}
+	}
+
+	void appendBindingIfMissing(InputConfig::ControlMapping& mapping, const SDL_GameControllerButtonBind& binding)
+	{
+		InputConfig::Assignment assignment;
+		if (!getControlAssignmentBySDLBinding(assignment, binding, 0))
+			return;
+
+		for (const InputConfig::Assignment& existingAssignment : mapping.mAssignments)
+		{
+			if (existingAssignment.mType == assignment.mType && existingAssignment.mIndex == assignment.mIndex)
+				return;
+		}
+		mapping.mAssignments.emplace_back(assignment);
+	}
+
+	void repairUwpGenericHidDirectionalMapping(InputConfig::DeviceDefinition& inputDeviceDefinition, SDL_GameController& gameController)
+	{
+#if defined(PLATFORM_UWP)
+		const SDL_GameControllerButtonBind leftXBinding = SDL_GameControllerGetBindForAxis(&gameController, SDL_CONTROLLER_AXIS_LEFTX);
+		const SDL_GameControllerButtonBind leftYBinding = SDL_GameControllerGetBindForAxis(&gameController, SDL_CONTROLLER_AXIS_LEFTY);
+		if (!shouldApplyUwpGenericHidAxisWorkaround(leftXBinding, leftYBinding, getGameControllerName(&gameController), getJoystickName(SDL_GameControllerGetJoystick(&gameController))))
+			return;
+
+		using Button = InputConfig::DeviceDefinition::Button;
+		InputConfig::ControlMapping& upMapping = inputDeviceDefinition.mMappings[(size_t)Button::UP];
+		InputConfig::ControlMapping& downMapping = inputDeviceDefinition.mMappings[(size_t)Button::DOWN];
+		InputConfig::ControlMapping& leftMapping = inputDeviceDefinition.mMappings[(size_t)Button::LEFT];
+		InputConfig::ControlMapping& rightMapping = inputDeviceDefinition.mMappings[(size_t)Button::RIGHT];
+
+		stripAxisAssignments(upMapping);
+		stripAxisAssignments(downMapping);
+		stripAxisAssignments(leftMapping);
+		stripAxisAssignments(rightMapping);
+
+		appendBindingIfMissing(upMapping, SDL_GameControllerGetBindForButton(&gameController, SDL_CONTROLLER_BUTTON_DPAD_UP));
+		appendBindingIfMissing(downMapping, SDL_GameControllerGetBindForButton(&gameController, SDL_CONTROLLER_BUTTON_DPAD_DOWN));
+		appendBindingIfMissing(leftMapping, SDL_GameControllerGetBindForButton(&gameController, SDL_CONTROLLER_BUTTON_DPAD_LEFT));
+		appendBindingIfMissing(rightMapping, SDL_GameControllerGetBindForButton(&gameController, SDL_CONTROLLER_BUTTON_DPAD_RIGHT));
+
+		RMX_LOG_WARNING("Using D-pad-only directional mapping for generic UWP HID controller \"" << getGameControllerName(&gameController) << "\"");
+#else
+		(void)inputDeviceDefinition;
+		(void)gameController;
+#endif
+	}
+
 	void setupRealDeviceInputMapping(InputManager::RealDevice& device, const InputConfig::DeviceDefinition& inputDeviceDefinition)
 	{
 		device.mControlMappings.resize(InputConfig::DeviceDefinition::NUM_BUTTONS);
@@ -118,14 +213,26 @@ namespace
 	{
 		using Button = InputConfig::DeviceDefinition::Button;
 		std::vector<SDL_GameControllerButtonBind> bindings[InputConfig::DeviceDefinition::NUM_BUTTONS];
+		SDL_GameControllerButtonBind leftXAxisBinding = SDL_GameControllerGetBindForAxis(&gameController, SDL_CONTROLLER_AXIS_LEFTX);
+		SDL_GameControllerButtonBind leftYAxisBinding = SDL_GameControllerGetBindForAxis(&gameController, SDL_CONTROLLER_AXIS_LEFTY);
+		const bool isGenericUwpHidDirectionalFallback = shouldApplyUwpGenericHidAxisWorkaround(leftXAxisBinding, leftYAxisBinding, getGameControllerName(&gameController), SDL_JoystickName(SDL_GameControllerGetJoystick(&gameController)));
+		if (isGenericUwpHidDirectionalFallback)
+		{
+			std::swap(leftXAxisBinding.value.axis, leftYAxisBinding.value.axis);
+			RMX_LOG_WARNING("Using live D-pad-only directional mapping for generic UWP HID controller \"" << getGameControllerName(&gameController) << "\"");
+		}
 
-		bindings[(size_t)Button::UP]   .emplace_back(SDL_GameControllerGetBindForAxis  (&gameController, SDL_CONTROLLER_AXIS_LEFTY));
+		if (!isGenericUwpHidDirectionalFallback)
+			bindings[(size_t)Button::UP].emplace_back(leftYAxisBinding);
 		bindings[(size_t)Button::UP]   .emplace_back(SDL_GameControllerGetBindForButton(&gameController, SDL_CONTROLLER_BUTTON_DPAD_UP));
-		bindings[(size_t)Button::DOWN] .emplace_back(SDL_GameControllerGetBindForAxis  (&gameController, SDL_CONTROLLER_AXIS_LEFTY));
+		if (!isGenericUwpHidDirectionalFallback)
+			bindings[(size_t)Button::DOWN].emplace_back(leftYAxisBinding);
 		bindings[(size_t)Button::DOWN] .emplace_back(SDL_GameControllerGetBindForButton(&gameController, SDL_CONTROLLER_BUTTON_DPAD_DOWN));
-		bindings[(size_t)Button::LEFT] .emplace_back(SDL_GameControllerGetBindForAxis  (&gameController, SDL_CONTROLLER_AXIS_LEFTX));
+		if (!isGenericUwpHidDirectionalFallback)
+			bindings[(size_t)Button::LEFT].emplace_back(leftXAxisBinding);
 		bindings[(size_t)Button::LEFT] .emplace_back(SDL_GameControllerGetBindForButton(&gameController, SDL_CONTROLLER_BUTTON_DPAD_LEFT));
-		bindings[(size_t)Button::RIGHT].emplace_back(SDL_GameControllerGetBindForAxis  (&gameController, SDL_CONTROLLER_AXIS_LEFTX));
+		if (!isGenericUwpHidDirectionalFallback)
+			bindings[(size_t)Button::RIGHT].emplace_back(leftXAxisBinding);
 		bindings[(size_t)Button::RIGHT].emplace_back(SDL_GameControllerGetBindForButton(&gameController, SDL_CONTROLLER_BUTTON_DPAD_RIGHT));
 
 		bindings[(size_t)Button::A]    .emplace_back(SDL_GameControllerGetBindForButton(&gameController, SDL_CONTROLLER_BUTTON_A));
@@ -155,6 +262,8 @@ namespace
 
 	void processGamepadInputMapping(InputConfig::DeviceDefinition& inputDeviceDefinition, SDL_GameController& gameController)
 	{
+		repairUwpGenericHidDirectionalMapping(inputDeviceDefinition, gameController);
+
 		// Special handling for L/R buttons (which got added later than the rest): Manually add the bindings, if none were set before
 		if (inputDeviceDefinition.mMappings[(size_t)InputConfig::DeviceDefinition::Button::L].mAssignments.empty() &&
 			inputDeviceDefinition.mMappings[(size_t)InputConfig::DeviceDefinition::Button::R].mAssignments.empty())
@@ -301,9 +410,19 @@ InputManager::InputManager()
 
 void InputManager::startup()
 {
-	// Initialize gamepad
-	SDL_InitSubSystem(SDL_INIT_JOYSTICK);
-	rescanRealDevices();
+	// Initialize controller handling as early as possible so gamepads are ready for first-frame navigation.
+	RMX_CHECK(SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) == 0, "SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) failed with error: '" << SDL_GetError() << "'", );
+	SDL_JoystickEventState(SDL_ENABLE);
+	SDL_GameControllerEventState(SDL_ENABLE);
+	SDL_PumpEvents();
+
+	const RescanResult result = rescanRealDevices(true);
+#if defined(PLATFORM_UWP)
+	if (result.mGamepadsFound > 0 && mLastInputType == InputType::NONE)
+	{
+		mLastInputType = InputType::GAMEPAD;
+	}
+#endif
 }
 
 void InputManager::enableTouchInput(bool enable)
@@ -313,6 +432,8 @@ void InputManager::enableTouchInput(bool enable)
 
 void InputManager::updateInput(float timeElapsed)
 {
+	SDL_GameControllerUpdate();
+
 #if 0
 	if (!mGamepads.empty())
 	{
@@ -538,7 +659,7 @@ void InputManager::getPressedGamepadInputs(std::vector<InputConfig::Assignment>&
 		}
 	}}
 
-InputManager::RescanResult InputManager::rescanRealDevices()
+InputManager::RescanResult InputManager::rescanRealDevices(bool forceRescan)
 {
 	RescanResult result;
 	result.mPreviousGamepadsFound = (uint32)mGamepads.size();
@@ -546,7 +667,7 @@ InputManager::RescanResult InputManager::rescanRealDevices()
 
 	// Anything changed at all?
 	const int joysticks = SDL_NumJoysticks();
-	if (joysticks == mLastCheckJoysticks && !mKeyboards.empty())
+	if (!forceRescan && joysticks == mLastCheckJoysticks && !mKeyboards.empty())
 		return result;
 
 	mLastCheckJoysticks = joysticks;
@@ -595,6 +716,7 @@ InputManager::RescanResult InputManager::rescanRealDevices()
 		// Is this gamepad already in our list?
 		SDL_Joystick* joystick = SDL_JoystickOpen(i);
 		const int32 joystickInstanceId = SDL_JoystickInstanceID(joystick);
+		const std::string joystickName = getJoystickName(joystick);
 		{
 			RealDevice* existingGamepad = findGamepadBySDLJoystickInstanceId(joystickInstanceId);
 			if (nullptr != existingGamepad)
@@ -607,7 +729,6 @@ InputManager::RescanResult InputManager::rescanRealDevices()
 
 		// It's a newly connected (or maybe reconnected) device
 		SDL_GameController* controller = SDL_GameControllerOpen(i);
-		const std::string joystickName = getJoystickName(joystick);
 		const std::string controllerName = getGameControllerName(controller);
 
 		// Skip it if it's blacklisted
@@ -748,11 +869,6 @@ void InputManager::updatePlayerGamepadAssignments()
 	// Try to map real devices to players
 	RMX_ASSERT(mKeyboards.size() == NUM_PLAYERS, "Wrong number of keyboards");
 	std::vector<RealDevice*> devicesByPlayer[NUM_PLAYERS];
-	for (size_t i = 0; i < mKeyboards.size(); ++i)
-	{
-		devicesByPlayer[i].push_back(&mKeyboards[i]);
-		mKeyboards[i].mAssignedPlayer = (int)i;
-	}
 
 	for (RealDevice& gamepad : mGamepads)
 	{
@@ -772,6 +888,12 @@ void InputManager::updatePlayerGamepadAssignments()
 		{
 			devicesByPlayer[gamepad.mAssignedPlayer].push_back(&gamepad);
 		}
+	}
+
+	for (size_t i = 0; i < mKeyboards.size(); ++i)
+	{
+		devicesByPlayer[i].push_back(&mKeyboards[i]);
+		mKeyboards[i].mAssignedPlayer = (int)i;
 	}
 
 	// Re-assign controls for the controller schemes

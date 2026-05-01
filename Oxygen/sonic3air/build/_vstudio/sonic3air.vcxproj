@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -17,7 +17,7 @@
       <Configuration>Release</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
-  </ItemGroup>
+  <ProjectConfiguration Include="DebugUWP|x64"><Configuration>DebugUWP</Configuration><Platform>x64</Platform></ProjectConfiguration><ProjectConfiguration Include="ReleaseUWP|x64"><Configuration>ReleaseUWP</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\source\sonic3air\audio\AudioOut.cpp" />
     <ClCompile Include="..\..\source\sonic3air\audio\CustomAudioMixer.cpp" />
@@ -42,6 +42,10 @@
     <ClCompile Include="..\..\source\sonic3air\helper\PackageBuilder.cpp" />
     <ClCompile Include="..\..\source\sonic3air\main.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="UwpApp.cpp" Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64' Or '$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+      <CompileAsWinRT>true</CompileAsWinRT>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\..\source\sonic3air\menu\context\ApplicationContextMenu.cpp" />
     <ClCompile Include="..\..\source\sonic3air\menu\entries\GeneralMenuEntries.cpp" />
@@ -129,48 +133,87 @@
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\config.json" />
+    <None Include="..\..\config.json" />
+    <AppxManifest Include="Package.appxmanifest" Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64' Or '$(Configuration)|$(Platform)'=='ReleaseUWP|x64'" />
     <None Include="..\..\source\sonic3air\version.inc" />
     <None Include="..\..\source\sonic3air\_nativized\NativizedCode.inc" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="sonic3air.rc" />
+    <ResourceCompile Include="..\..\..\..\framework\external\sdl\SDL2\src\main\winrt\SDL2-WinRTResources.rc" Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64' Or '$(Configuration)|$(Platform)'=='ReleaseUWP|x64'" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="..\___internal\icon\app-no-border.ico" />
+    <Image Include="..\..\___internal\icon\app-no-border.ico" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64' Or '$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <Image Include="Assets\Square44x44Logo.png" />
+    <Image Include="Assets\Square150x150Logo.png" />
+    <Image Include="Assets\Wide310x150Logo.png" />
+    <Image Include="Assets\SplashScreen.png" />
+    <Image Include="Assets\StoreLogo.png" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64' Or '$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <None Include="..\..\data\**\*">
+      <Link>data\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="..\..\scripts\**\*">
+      <Link>scripts\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="..\..\..\oxygenengine\data\**\*">
+      <Link>oxygenengine\data\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="..\..\config.json">
+      <Link>config.json</Link>
+      <DeploymentContent>true</DeploymentContent>
+    </None>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{3D05398E-EEAC-42DC-82BF-BCD901A3F4BF}</ProjectGuid>
     <RootNamespace>genplusgx</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
     <ProjectName>sonic3air</ProjectName>
+    <DefaultLanguage>en-US</DefaultLanguage>
   </PropertyGroup>
-  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="('$(Configuration)|$(Platform)'=='DebugUWP|x64') Or ('$(Configuration)|$(Platform)'=='ReleaseUWP|x64')"><AppContainerApplication>true</AppContainerApplication><ApplicationType>Windows Store</ApplicationType><ApplicationTypeRevision>10.0</ApplicationTypeRevision><WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion><WindowsTargetPlatformMinVersion>10.0.19041.0</WindowsTargetPlatformMinVersion><AppxPackageSigningEnabled>false</AppxPackageSigningEnabled><GenerateAppxPackageOnBuild>true</GenerateAppxPackageOnBuild><AppxBundle>Never</AppxBundle></PropertyGroup><Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -182,12 +225,18 @@
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="../../../oxygenengine/build/_vstudio/oxygen.props" />
+  </ImportGroup><ImportGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="../../../oxygenengine/build/_vstudio/oxygen.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="../../../oxygenengine/build/_vstudio/oxygen.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="../../../oxygenengine/build/_vstudio/oxygen.props" />
+  </ImportGroup><ImportGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="../../../oxygenengine/build/_vstudio/oxygen.props" />
   </ImportGroup>
@@ -201,6 +250,10 @@
     <TargetName>Sonic3AIR</TargetName>
     <IntDir>tmp\sonic3air_$(Configuration)_$(BuildCode)\</IntDir>
     <OutDir>$(ProjectDir)..\..\bin\$(Configuration)_$(BuildCode)\</OutDir>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <TargetName>Sonic3AIR</TargetName>
+    <IntDir>tmp\sonic3air_$(Configuration)_$(BuildCode)\</IntDir>
+    <OutDir>$(ProjectDir)..\..\bin\$(Configuration)_$(BuildCode)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <TargetName>Sonic3AIR</TargetName>
@@ -208,6 +261,10 @@
     <OutDir>$(ProjectDir)..\..\bin\$(Configuration)_$(BuildCode)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <TargetName>Sonic3AIR</TargetName>
+    <IntDir>tmp\sonic3air_$(Configuration)_$(BuildCode)\</IntDir>
+    <OutDir>$(ProjectDir)..\..\bin\$(Configuration)_$(BuildCode)\</OutDir>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
     <TargetName>Sonic3AIR</TargetName>
     <IntDir>tmp\sonic3air_$(Configuration)_$(BuildCode)\</IntDir>
     <OutDir>$(ProjectDir)..\..\bin\$(Configuration)_$(BuildCode)\</OutDir>
@@ -227,7 +284,7 @@
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>../../../lemonscript/lib/$(BuildCode);../../../oxygenengine/build/_vstudio/lib/$(Configuration)_$(BuildCode);$(SolutionDir)lib/$(Configuration)_$(BuildCode);$(SolutionDir)../../source/external/discord_game_sdk/lib/x86;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>lemonscript.lib;oxygen_netcore.lib;oxygen.lib;imgui.lib;discord_game_sdk.lib;discord_game_sdk.dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;d3dcompiler.lib;lemonscript.lib;oxygen_netcore.lib;oxygen.lib;imgui.lib;discord_game_sdk.lib;discord_game_sdk.dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Windows</SubSystem>
       <IgnoreSpecificDefaultLibraries>
       </IgnoreSpecificDefaultLibraries>
@@ -256,7 +313,7 @@ exit /b 0</Command>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>../../../lemonscript/lib/$(BuildCode);../../../oxygenengine/build/_vstudio/lib/$(Configuration)_$(BuildCode);$(SolutionDir)lib/$(Configuration)_$(BuildCode);$(SolutionDir)../../source/external/discord_game_sdk/lib/x86_64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>lemonscript.lib;oxygen_netcore.lib;oxygen.lib;imgui.lib;discord_game_sdk.lib;discord_game_sdk.dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;d3dcompiler.lib;lemonscript.lib;oxygen_netcore.lib;oxygen.lib;imgui.lib;discord_game_sdk.lib;discord_game_sdk.dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Windows</SubSystem>
       <IgnoreSpecificDefaultLibraries>
       </IgnoreSpecificDefaultLibraries>
@@ -268,6 +325,34 @@ exit /b 0</Command>
     <PostBuildEvent>
       <Command>robocopy "$(ProjectDir)..\..\source\external\discord_game_sdk\lib\x86_64" "$(ProjectDir)..\..\bin\$(Configuration)_$(BuildCode)" discord_game_sdk.dll /mir &gt; nul
 exit /b 0</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup><ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>../../source;../../source/external;../../../lemonscript/source;../../../oxygenengine/source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>PLATFORM_UWP;USE_UTF8_PATHS;DEBUG;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>sonic3air/pch.h</PrecompiledHeaderFile>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>../../../lemonscript/lib/$(BuildCode);../../../oxygenengine/build/_vstudio/lib/$(Configuration)_$(BuildCode);$(SolutionDir)lib/$(Configuration)_$(BuildCode);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>sdl2.lib;lemonscript.lib;oxygen_netcore.lib;oxygen.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalOptions>/nodefaultlib:vccorlibd /nodefaultlib:msvcrtd vccorlibd.lib msvcrtd.lib %(AdditionalOptions)</AdditionalOptions>
+      <SubSystem>Windows</SubSystem>
+      <IgnoreSpecificDefaultLibraries>
+      </IgnoreSpecificDefaultLibraries>
+    </Link>
+    <PreBuildEvent>
+      <Command>
+      </Command>
+    </PreBuildEvent>
+    <PostBuildEvent>
+      <Command></Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -285,7 +370,7 @@ exit /b 0</Command>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>../../../lemonscript/lib/$(BuildCode);../../../oxygenengine/build/_vstudio/lib/$(Configuration)_$(BuildCode);$(SolutionDir)lib/$(Configuration)_$(BuildCode);$(SolutionDir)../../source/external/discord_game_sdk/lib/x86;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>lemonscript.lib;oxygen_netcore.lib;oxygen.lib;imgui.lib;discord_game_sdk.lib;discord_game_sdk.dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;d3dcompiler.lib;lemonscript.lib;oxygen_netcore.lib;oxygen.lib;imgui.lib;discord_game_sdk.lib;discord_game_sdk.dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Windows</SubSystem>
       <IgnoreSpecificDefaultLibraries>
       </IgnoreSpecificDefaultLibraries>
@@ -314,7 +399,7 @@ exit /b 0</Command>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>../../../lemonscript/lib/$(BuildCode);../../../oxygenengine/build/_vstudio/lib/$(Configuration)_$(BuildCode);$(SolutionDir)lib/$(Configuration)_$(BuildCode);$(SolutionDir)../../source/external/discord_game_sdk/lib/x86_64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>lemonscript.lib;oxygen_netcore.lib;oxygen.lib;imgui.lib;discord_game_sdk.lib;discord_game_sdk.dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;d3dcompiler.lib;lemonscript.lib;oxygen_netcore.lib;oxygen.lib;imgui.lib;discord_game_sdk.lib;discord_game_sdk.dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Windows</SubSystem>
       <IgnoreSpecificDefaultLibraries>
       </IgnoreSpecificDefaultLibraries>
@@ -327,6 +412,46 @@ exit /b 0</Command>
       <Command>robocopy "$(ProjectDir)..\..\source\external\discord_game_sdk\lib\x86_64" "$(ProjectDir)..\..\bin\$(Configuration)_$(BuildCode)" discord_game_sdk.dll /mir &gt; nul
 exit /b 0</Command>
     </PostBuildEvent>
+  </ItemDefinitionGroup><ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>../../source;../../source/external;../../../lemonscript/source;../../../oxygenengine/source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>PLATFORM_UWP;USE_UTF8_PATHS;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>sonic3air/pch.h</PrecompiledHeaderFile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>../../../lemonscript/lib/$(BuildCode);../../../oxygenengine/build/_vstudio/lib/$(Configuration)_$(BuildCode);$(SolutionDir)lib/$(Configuration)_$(BuildCode);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>sdl2.lib;lemonscript.lib;oxygen_netcore.lib;oxygen.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalOptions>/nodefaultlib:vccorlib /nodefaultlib:msvcrt vccorlib.lib msvcrt.lib %(AdditionalOptions)</AdditionalOptions>
+      <SubSystem>Windows</SubSystem>
+      <IgnoreSpecificDefaultLibraries>
+      </IgnoreSpecificDefaultLibraries>
+    </Link>
+    <PreBuildEvent>
+      <Command>
+      </Command>
+    </PreBuildEvent>
+    <PostBuildEvent>
+      <Command></Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

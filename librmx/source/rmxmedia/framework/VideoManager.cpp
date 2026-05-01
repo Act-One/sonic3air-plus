@@ -29,6 +29,22 @@
 
 namespace rmx
 {
+	namespace
+	{
+		void getWindowSizeForRendering(SDL_Window* window, int& outWidth, int& outHeight)
+		{
+			outWidth = 0;
+			outHeight = 0;
+			if (nullptr == window)
+				return;
+
+			SDL_GetWindowSizeInPixels(window, &outWidth, &outHeight);
+			if (outWidth <= 0 || outHeight <= 0)
+			{
+				SDL_GetWindowSize(window, &outWidth, &outHeight);
+			}
+		}
+	}
 
 	VideoManager::VideoManager()
 	{
@@ -37,7 +53,11 @@ namespace rmx
 	VideoManager::~VideoManager()
 	{
 		// TODO: Do this right here?
-		SDL_DestroyWindow(mMainWindow);
+		if (nullptr != mMainWindow)
+		{
+			SDL_DestroyWindow(mMainWindow);
+			mMainWindow = nullptr;
+		}
 	}
 
 	bool VideoManager::setVideoMode(const VideoConfig& videoconfig)
@@ -150,7 +170,7 @@ namespace rmx
 
 		mInitialized = true;
 
-	#ifdef PLATFORM_WINDOWS
+	#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 		// Set icon (Windows)
 		if (mVideoConfig.mIconResource != 0)
 		{
@@ -189,7 +209,18 @@ namespace rmx
 	{
 		mVideoConfig = videoconfig;
 		mMainWindow = window;
+		if (nullptr != mMainWindow)
+		{
+			getWindowSizeForRendering(mMainWindow, mVideoConfig.mWindowRect.width, mVideoConfig.mWindowRect.height);
+		}
 		mInitialized = true;
+	}
+
+	void VideoManager::clearInitialized()
+	{
+		mInitialized = false;
+		mReshaped = false;
+		mMainWindow = nullptr;
 	}
 
 	void VideoManager::reshape(int width, int height)
@@ -291,7 +322,7 @@ namespace rmx
 
 	uint64 VideoManager::getNativeWindowHandle() const
 	{
-	#ifdef PLATFORM_WINDOWS
+	#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 		SDL_SysWMinfo info;
 		SDL_VERSION(&info.version);
 		if (!SDL_GetWindowWMInfo(mMainWindow, &info))

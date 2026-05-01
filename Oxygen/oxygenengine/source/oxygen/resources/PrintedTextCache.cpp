@@ -9,6 +9,24 @@
 #include "oxygen/pch.h"
 #include "oxygen/resources/PrintedTextCache.h"
 
+namespace
+{
+	size_t hashCombine(size_t seed, size_t value)
+	{
+		return seed ^ (value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2));
+	}
+}
+
+
+size_t PrintedTextCache::KeyHasher::operator()(const Key& key) const
+{
+	size_t seed = 0;
+	seed = hashCombine(seed, (size_t)key.mFontKeyHash);
+	seed = hashCombine(seed, (size_t)key.mTextHash);
+	seed = hashCombine(seed, (size_t)(uint8)key.mSpacing);
+	return seed;
+}
+
 
 PrintedTextCache::PrintedTextCache()
 {
@@ -25,7 +43,7 @@ void PrintedTextCache::clear()
 
 PrintedTextCache::CacheItem* PrintedTextCache::getCacheItem(const Key& key)
 {
-	const auto it = mCacheItems.find(key.combined());
+	const auto it = mCacheItems.find(key);
 	if (it == mCacheItems.end())
 		return nullptr;
 
@@ -36,7 +54,7 @@ PrintedTextCache::CacheItem* PrintedTextCache::getCacheItem(const Key& key)
 
 PrintedTextCache::CacheItem& PrintedTextCache::addCacheItem(const Key& key, Font& font, const std::string& textString)
 {
-	CacheItem& cacheItem = mCacheItems[key.combined()];
+	CacheItem& cacheItem = mCacheItems[key];
 	cacheItem.mKey = key;
 	cacheItem.mRecentlyUsed = true;
 
@@ -53,7 +71,7 @@ void PrintedTextCache::regularCleanup()
 		return;
 
 	// Remove all cached items that were not used since last cleanup
-	std::vector<uint64> keysToRemove;
+	std::vector<Key> keysToRemove;
 	for (auto& pair : mCacheItems)
 	{
 		if (pair.second.mRecentlyUsed)
@@ -65,7 +83,7 @@ void PrintedTextCache::regularCleanup()
 			keysToRemove.push_back(pair.first);
 		}
 	}
-	for (uint64 key : keysToRemove)
+	for (const Key& key : keysToRemove)
 	{
 		mCacheItems.erase(key);
 	}

@@ -16,6 +16,8 @@ class PatternManager;
 class PlaneManager
 {
 public:
+	static constexpr int MAX_PLANE_PATTERNS = 0x4000;	// Supports all VDP playfield size combinations up to 128 x 128 patterns
+
 	enum PlaneType
 	{
 		PLANE_B		= 0,	// Plane B, background
@@ -23,6 +25,11 @@ public:
 		PLANE_W		= 2,	// Plane W, window (optionally split out of plane A)
 		PLANE_DEBUG	= 3		// Additional plane containing all patterns for debug output
 	};
+
+	static constexpr bool isRenderablePlaneIndex(int planeIndex)
+	{
+		return planeIndex >= PLANE_B && planeIndex <= PLANE_W;
+	}
 
 	struct CustomPlane
 	{
@@ -50,9 +57,9 @@ public:
 	inline uint16 getNameTableBaseB() const  { return mNameTableBaseB; }
 	inline uint16 getNameTableBaseA() const  { return mNameTableBaseA; }
 	inline uint16 getNameTableBaseW() const  { return mNameTableBaseW; }
-	inline void setNameTableBaseB(uint16 vramAddress)  { mNameTableBaseB = vramAddress; }
-	inline void setNameTableBaseA(uint16 vramAddress)  { mNameTableBaseA = vramAddress; }
-	inline void setNameTableBaseW(uint16 vramAddress)  { mNameTableBaseW = vramAddress; }
+	void setNameTableBaseB(uint16 vramAddress);
+	void setNameTableBaseA(uint16 vramAddress);
+	void setNameTableBaseW(uint16 vramAddress);
 
 	Vec2i getPlayfieldSizeInPatterns() const;
 	Vec2i getPlayfieldSizeInPixels() const;
@@ -98,7 +105,7 @@ private:
 	uint16 mNameTableBaseW = 0x8000;
 
 	Vec2i mPlayfieldSize;		// In patterns (8x8 pixels)
-	uint16 mPlanePatternsBuffer[4][0x1000] = { 0 };		// Enough space to support 128 x 32 patterns (though usually only 0x800 is needed, for 64 x 32 patterns)
+	uint16 mPlanePatternsBuffer[4][MAX_PLANE_PATTERNS] = { 0 };
 
 	bool mIsPlaneWRightOfSplitX = false;	// If true, plane W is right of plane A, otherwise it's left of plane A
 	bool mIsPlaneWBelowSplitY = false;		// If true, plane W is below plane A, otherwise it's above plane A

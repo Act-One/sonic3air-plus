@@ -765,14 +765,11 @@ static HRESULT D3D11_CreateSwapChain(SDL_Renderer *renderer, int w, int h)
     if (usingXAML) {
         swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
     } else {
-        if (WIN_IsWindows8OrGreater()) {
-            swapChainDesc.Scaling = DXGI_SCALING_NONE;
-        } else {
-            swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
-        }
+        swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
     }
     swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL; /* All Windows Store apps must use this SwapEffect. */
 #endif
+    swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
     swapChainDesc.Flags = 0;
 
     if (coreWindow) {

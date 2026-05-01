@@ -50,6 +50,7 @@ public:
 	const Vec2i& getSize() const	{ return mSize; }
 	int getWidth() const			{ return mSize.x; }
 	int getHeight() const			{ return mSize.y; }
+	bool isRenderTarget() const		{ return mSetupAsRenderTarget; }
 
 	void clearBitmap();
 

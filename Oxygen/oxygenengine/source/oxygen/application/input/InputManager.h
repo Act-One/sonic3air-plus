@@ -141,7 +141,7 @@ public:
 	void getPressedGamepadInputs(std::vector<InputConfig::Assignment>& outInputs, const RealDevice& device);
 	inline const std::vector<Touch>& getActiveTouches() const  { return mActiveTouches; }
 
-	RescanResult rescanRealDevices();
+	RescanResult rescanRealDevices(bool forceRescan = false);
 	void updatePlayerGamepadAssignments();
 
 	const std::vector<RealDevice>& getKeyboards() const	{ return mKeyboards; }

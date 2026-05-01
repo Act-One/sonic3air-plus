@@ -15,6 +15,21 @@
 #include "oxygen/simulation/EmulatorInterface.h"
 
 
+namespace
+{
+	uint16 sanitizeSpriteAttributeTableBase(uint16 vramAddress)
+	{
+		const uint16 sanitized = vramAddress & 0xfffe;
+		if (sanitized != vramAddress)
+		{
+			RMX_LOG_INFO("SpriteManager: aligned odd sprite attribute table base from 0x"
+				<< rmx::hexString(vramAddress, 4) << " to 0x" << rmx::hexString(sanitized, 4));
+		}
+		return sanitized;
+	}
+}
+
+
 SpriteManager::SpriteManager(PatternManager& patternManager, SpacesManager& spacesManager) :
 	mPatternManager(patternManager),
 	mSpacesManager(spacesManager)
@@ -305,6 +320,11 @@ void SpriteManager::setLogicalSpriteSpace(Space space)
 	mLogicalSpriteSpace = space;
 }
 
+void SpriteManager::setSpriteAttributeTableBase(uint16 vramAddress)
+{
+	mSpriteAttributeTableBase = sanitizeSpriteAttributeTableBase(vramAddress);
+}
+
 void SpriteManager::clearSpriteTag()
 {
 	mSpriteTag = 0;
@@ -539,23 +559,27 @@ void SpriteManager::collectLegacySprites()
 	int numSpritesAdded = 0;
 	for (int link = 0;;)
 	{
-		const uint16* data = (uint16*)&EmulatorInterface::instance().getVRam()[mSpriteAttributeTableBase + link * 2];
+		const uint16 entryBaseAddress = (uint16)(mSpriteAttributeTableBase + link * 2);
+		const uint16 data0 = EmulatorInterface::instance().readVRam16(entryBaseAddress);
+		const uint16 data1 = EmulatorInterface::instance().readVRam16((uint16)(entryBaseAddress + 2));
+		const uint16 data2 = EmulatorInterface::instance().readVRam16((uint16)(entryBaseAddress + 4));
+		const uint16 data3 = EmulatorInterface::instance().readVRam16((uint16)(entryBaseAddress + 6));
 
 		renderitems::VdpSpriteInfo& sprite = mPoolOfRenderItems.mVdpSprites.createObject();
-		sprite.mPriorityFlag = (data[2] & 0x8000) != 0;
+		sprite.mPriorityFlag = (data2 & 0x8000) != 0;
 		sprite.mRenderQueue = (sprite.mPriorityFlag ? 0x4fff : 0x2fff) - numSpritesAdded;
 		sprite.mUseGlobalComponentTint = false;
 
 		// Note that for accurate emulation, this would be 0x1ff instead of 0x3ff
 		//  -> But it limits effective maximum sprite x-position to 383 = 0x17f, which is a bit too low for widescreen with e.g. 400px
 		//  -> So we're taking an extra bit; looks like it is not used otherwise anyway
-		sprite.mPosition.x = (data[3] & 0x3ff) - 0x80;
-		sprite.mPosition.y = (data[0] & 0x1ff) - 0x80;
+		sprite.mPosition.x = (data3 & 0x3ff) - 0x80;
+		sprite.mPosition.y = (data0 & 0x1ff) - 0x80;
 
-		sprite.mSize.x = 1 + ((data[1] >> 10) & 3);
-		sprite.mSize.y = 1 + ((data[1] >> 8) & 3);
+		sprite.mSize.x = 1 + ((data1 >> 10) & 3);
+		sprite.mSize.y = 1 + ((data1 >> 8) & 3);
 
-		sprite.mFirstPattern = data[2];
+		sprite.mFirstPattern = data2;
 
 		items.push_back(&sprite);
 		++numSpritesAdded;
@@ -565,12 +589,12 @@ void SpriteManager::collectLegacySprites()
 			const uint16 patterns = (uint16)(sprite.mSize.x * sprite.mSize.y);
 			for (uint16 k = 0; k < patterns; ++k)
 			{
-				mPatternManager.setLastUsedAtex(data[2] + k, (data[2] >> 9) & 0x70);
+				mPatternManager.setLastUsedAtex(data2 + k, (data2 >> 9) & 0x70);
 			}
 		}
 
 		// Go to next sprite
-		link = (data[1] & 0x7f) << 2;
+		link = (data1 & 0x7f) << 2;
 		if ((link == 0) || (link >= 320))
 			break;
 		if (numSpritesAdded >= 0x100)	// Sanity check

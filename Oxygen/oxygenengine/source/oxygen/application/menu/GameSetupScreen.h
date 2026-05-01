@@ -23,5 +23,14 @@ public:
 	virtual void render() override;
 
 private:
+	void refreshText();
 
+private:
+	Font mTitleFont;
+	Font mBodyFont;
+	std::string mCachedTitle;
+	std::string mCachedText;
+	std::vector<std::string> mTextLines;
+	int mCachedWrapWidth = 0;
+	float mAnimationTimer = 0.0f;
 };

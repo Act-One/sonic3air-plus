@@ -31,8 +31,8 @@ public:
 	inline uint8 getHorizontalScrollMask() const			{ return mHorizontalScrollMask; }
 	inline void setHorizontalScrollMask(uint8 scrollMask)	{ mHorizontalScrollMask = scrollMask; }
 
-	inline uint16 getHorizontalScrollTableBase() const				{ return mHorizontalScrollTableBase; }
-	inline void setHorizontalScrollTableBase(uint16 vramAddress)	{ mHorizontalScrollTableBase = vramAddress; }
+	inline uint16 getHorizontalScrollTableBase() const			{ return mHorizontalScrollTableBase; }
+	void setHorizontalScrollTableBase(uint16 vramAddress);
 
 	bool getHorizontalScrollNoRepeat(int setIndex) const;
 	void setHorizontalScrollNoRepeat(int setIndex, bool enable);

@@ -32,6 +32,8 @@ public:
 
 	inline Color getBackdropColor() const  { return mMainPalette[0].getColor(mBackdropColorIndex); }
 	inline void setBackdropColorIndex(uint16 paletteIndex)  { mBackdropColorIndex = paletteIndex; }
+	inline bool useShadowHighlightMode() const  { return mUseShadowHighlightMode; }
+	inline void setShadowHighlightMode(bool enable)  { mUseShadowHighlightMode = enable; }
 
 	void setPaletteSplitPositionY(int py);
 
@@ -51,6 +53,7 @@ public:
 private:
 	Palette mMainPalette[2];		// [0] = Standard palette, [1] = Underwater palette (in S3AIR)
 	uint16 mBackdropColorIndex = 0;
+	bool mUseShadowHighlightMode = false;
 
 	bool mUsesGlobalComponentTint = false;
 	Vec4f mGlobalComponentTintColor = Vec4f(1.0f, 1.0f, 1.0f, 1.0f);	// Not using the Color class to be able to have negative channel values as well (especially for added color)

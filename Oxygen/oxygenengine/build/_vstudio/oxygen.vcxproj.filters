@@ -52,6 +52,9 @@
     <Filter Include="drawing\opengl">
       <UniqueIdentifier>{2e766e20-79b7-4d5e-b0f8-f7a28f3f6d1c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="drawing\d3d11">
+      <UniqueIdentifier>{69d0a4ca-c4c0-4d9d-b605-d87d0f773417}</UniqueIdentifier>
+    </Filter>
     <Filter Include="drawing\software">
       <UniqueIdentifier>{4f74a5ca-d4eb-4c32-9534-db0a341b1e99}</UniqueIdentifier>
     </Filter>
@@ -75,6 +78,9 @@
     </Filter>
     <Filter Include="rendering\opengl">
       <UniqueIdentifier>{de361638-d9ff-4a77-8c81-bcd42f32c888}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="rendering\d3d11">
+      <UniqueIdentifier>{fe070406-af83-452c-9131-4869119b08bb}</UniqueIdentifier>
     </Filter>
     <Filter Include="rendering\opengl\shaders">
       <UniqueIdentifier>{5deef7ad-6389-4ab8-98f5-02398dd27146}</UniqueIdentifier>
@@ -262,6 +268,9 @@
     <ClCompile Include="..\..\source\oxygen\drawing\DrawCollection.cpp">
       <Filter>drawing</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\source\oxygen\drawing\d3d11\D3D11Drawer.cpp">
+      <Filter>drawing\d3d11</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\source\oxygen\drawing\opengl\OpenGLDrawer.cpp">
       <Filter>drawing\opengl</Filter>
     </ClCompile>
@@ -276,6 +285,9 @@
     </ClCompile>
     <ClCompile Include="..\..\source\oxygen\drawing\software\SoftwareDrawerTexture.cpp">
       <Filter>drawing\software</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\source\oxygen\drawing\d3d11\D3D11DrawerTexture.cpp">
+      <Filter>drawing\d3d11</Filter>
     </ClCompile>
     <ClCompile Include="..\..\source\oxygen\drawing\Drawer.cpp">
       <Filter>drawing</Filter>
@@ -294,6 +306,12 @@
     </ClCompile>
     <ClCompile Include="..\..\source\oxygen\drawing\opengl\OpenGLDrawerResources.cpp">
       <Filter>drawing\opengl</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\source\oxygen\drawing\d3d11\D3D11DrawerResources.cpp">
+      <Filter>drawing\d3d11</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\source\oxygen\drawing\d3d11\D3D11SpriteTextureManager.cpp">
+      <Filter>drawing\d3d11</Filter>
     </ClCompile>
     <ClCompile Include="..\..\source\oxygen\helper\Profiling.cpp">
       <Filter>helper</Filter>
@@ -382,8 +400,17 @@
     <ClCompile Include="..\..\source\oxygen\rendering\opengl\OpenGLRenderer.cpp">
       <Filter>rendering\opengl</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\source\oxygen\rendering\d3d11\D3D11Renderer.cpp">
+      <Filter>rendering\d3d11</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\source\oxygen\rendering\opengl\OpenGLRenderResources.cpp">
       <Filter>rendering\opengl</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\source\oxygen\rendering\d3d11\D3D11RenderResources.cpp">
+      <Filter>rendering\d3d11</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\source\oxygen\rendering\d3d11\D3D11Shader.cpp">
+      <Filter>rendering\d3d11</Filter>
     </ClCompile>
     <ClCompile Include="..\..\source\oxygen\rendering\opengl\shaders\DebugDrawPlaneShader.cpp">
       <Filter>rendering\opengl\shaders</Filter>
@@ -775,6 +802,9 @@
     <ClInclude Include="..\..\source\oxygen\drawing\DrawCollection.h">
       <Filter>drawing</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\source\oxygen\drawing\d3d11\D3D11Drawer.h">
+      <Filter>drawing\d3d11</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\source\oxygen\drawing\opengl\OpenGLDrawer.h">
       <Filter>drawing\opengl</Filter>
     </ClInclude>
@@ -786,6 +816,9 @@
     </ClInclude>
     <ClInclude Include="..\..\source\oxygen\drawing\opengl\OpenGLDrawerTexture.h">
       <Filter>drawing\opengl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\source\oxygen\drawing\d3d11\D3D11DrawerTexture.h">
+      <Filter>drawing\d3d11</Filter>
     </ClInclude>
     <ClInclude Include="..\..\source\oxygen\drawing\DrawerInterface.h">
       <Filter>drawing</Filter>
@@ -810,6 +843,12 @@
     </ClInclude>
     <ClInclude Include="..\..\source\oxygen\drawing\opengl\OpenGLDrawerResources.h">
       <Filter>drawing\opengl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\source\oxygen\drawing\d3d11\D3D11DrawerResources.h">
+      <Filter>drawing\d3d11</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\source\oxygen\drawing\d3d11\D3D11SpriteTextureManager.h">
+      <Filter>drawing\d3d11</Filter>
     </ClInclude>
     <ClInclude Include="..\..\source\oxygen\helper\Profiling.h">
       <Filter>helper</Filter>
@@ -910,8 +949,17 @@
     <ClInclude Include="..\..\source\oxygen\rendering\opengl\OpenGLRenderer.h">
       <Filter>rendering\opengl</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\source\oxygen\rendering\d3d11\D3D11Renderer.h">
+      <Filter>rendering\d3d11</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\source\oxygen\rendering\opengl\OpenGLRenderResources.h">
       <Filter>rendering\opengl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\source\oxygen\rendering\d3d11\D3D11RenderResources.h">
+      <Filter>rendering\d3d11</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\source\oxygen\rendering\d3d11\D3D11Shader.h">
+      <Filter>rendering\d3d11</Filter>
     </ClInclude>
     <ClInclude Include="..\..\source\oxygen\rendering\opengl\shaders\DebugDrawPlaneShader.h">
       <Filter>rendering\opengl\shaders</Filter>

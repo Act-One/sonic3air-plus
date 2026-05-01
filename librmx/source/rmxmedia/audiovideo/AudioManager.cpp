@@ -38,8 +38,9 @@ namespace rmx
 		mInstances.clear();
 		mRootMixer.clearAudioInstances();
 
-		// Initialize SDL2 audio subsystem
-		SDL_InitSubSystem(SDL_INIT_AUDIO);
+		RMX_CHECK(SDL_InitSubSystem(SDL_INIT_AUDIO) == 0, "SDL_InitSubSystem(SDL_INIT_AUDIO) failed with error: '" << SDL_GetError() << "'", );
+		const char* audioDriver = SDL_GetCurrentAudioDriver();
+		RMX_LOG_INFO("AudioManager: SDL audio driver = \"" << ((nullptr != audioDriver) ? audioDriver : "unavailable") << "\"");
 
 		// Check input, we don't support everything
 		if ((sample_freq % 11025) != 0)

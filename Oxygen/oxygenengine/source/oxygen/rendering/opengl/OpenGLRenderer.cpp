@@ -109,6 +109,7 @@ OpenGLRenderer::~OpenGLRenderer()
 void OpenGLRenderer::initialize()
 {
 	mGameResolution = Configuration::instance().mGameScreen;
+	mGameScreenTexture.setupAsRenderTarget(mGameResolution);
 
 	mRenderResources.initialize();
 

@@ -56,13 +56,13 @@ function void fn05b318()
 	if (global.game_mode == 0x30)	// In Blue Spheres mode results, only move plane A
 	{
 		// Move plane A a bit to the right
-		for (u8 i = 0; i < getScreenHeight(); ++i)
+		for (u16 i = 0; i < getScreenHeight(); ++i)
 			u32[0xffffe000 + i*4] = getScreenExtend() * 0x10000
 	}
 	else
 	{
 		// Move planes a bit to the right
-		for (u8 i = 0; i < getScreenHeight(); ++i)
+		for (u16 i = 0; i < getScreenHeight(); ++i)
 			u32[0xffffe000 + i*4] = getScreenExtend() * 0x10001
 	}
 #endif

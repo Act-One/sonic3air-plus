@@ -79,8 +79,8 @@ public:
 	inline const std::vector<RenderItem*>& getRenderItems(RenderItem::LifetimeContext context) const  { return mLifetimeContexts[(int)context].mItems; }
 	inline const std::vector<RenderItem*>& getAddedItems() const  { return mAddedItems.mItems; }
 
-	inline uint16 getSpriteAttributeTableBase() const			{ return mSpriteAttributeTableBase; }
-	inline void setSpriteAttributeTableBase(uint16 vramAddress)	{ mSpriteAttributeTableBase = vramAddress; }
+	inline uint16 getSpriteAttributeTableBase() const		{ return mSpriteAttributeTableBase; }
+	void setSpriteAttributeTableBase(uint16 vramAddress);
 
 	inline bool getLegacyVdpSpriteMode() const					{ return mLegacyVdpSpriteMode; }
 	inline void setLegacyVdpSpriteMode(bool enable)				{ mLegacyVdpSpriteMode = enable; }

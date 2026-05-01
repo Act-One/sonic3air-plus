@@ -13,6 +13,12 @@
 #include "oxygen/drawing/opengl/OpenGLDrawer.h"
 #include "oxygen/helper/Logging.h"
 #include "oxygen/rendering/Geometry.h"
+#if defined(PLATFORM_WINDOWS)
+#include "oxygen/rendering/d3d11/D3D11Renderer.h"
+#if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
+#include "oxygen/rendering/vulkan/VulkanRenderer.h"
+#endif
+#endif
 #include "oxygen/rendering/RenderResources.h"
 #include "oxygen/rendering/opengl/OpenGLRenderer.h"
 #include "oxygen/rendering/software/SoftwareRenderer.h"
@@ -34,9 +40,53 @@ VideoOut::~VideoOut()
 	delete mRenderParts;
 	delete &mRenderResources;
 	delete mSoftwareRenderer;
+#if defined(PLATFORM_WINDOWS)
+	delete mD3D11Renderer;
+#if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
+	delete mVulkanRenderer;
+#endif
+#endif
 #ifdef RMX_WITH_OPENGL_SUPPORT
 	delete mOpenGLRenderer;
 #endif
+}
+
+namespace
+{
+	Vec2i sanitizeGameResolution(const Vec2i& screenSize)
+	{
+		if (screenSize.x >= 128 && screenSize.x <= 1024 && screenSize.y >= 128 && screenSize.y <= 1024)
+			return screenSize;
+
+		static bool sLoggedFallback = false;
+		if (!sLoggedFallback)
+		{
+			sLoggedFallback = true;
+			RMX_LOG_INFO("VideoOut: falling back to configured game resolution because the live size became invalid: " << screenSize.x << " x " << screenSize.y);
+		}
+		return Configuration::instance().mGameScreen;
+	}
+}
+
+uint32 VideoOut::getScreenWidth() const
+{
+	return (uint32)sanitizeGameResolution(mGameResolution).x;
+}
+
+uint32 VideoOut::getScreenHeight() const
+{
+	return (uint32)sanitizeGameResolution(mGameResolution).y;
+}
+
+Vec2i VideoOut::getScreenSize() const
+{
+	return sanitizeGameResolution(mGameResolution);
+}
+
+Recti VideoOut::getScreenRect() const
+{
+	const Vec2i screenSize = getScreenSize();
+	return Recti(0, 0, screenSize.x, screenSize.y);
 }
 
 void VideoOut::startup()
@@ -44,7 +94,10 @@ void VideoOut::startup()
 	mGameResolution = Configuration::instance().mGameScreen;
 
 	RMX_LOG_INFO("VideoOut: Setup of game screen");
+	RMX_LOG_INFO("VideoOut: Initial game resolution = " << mGameResolution.x << " x " << mGameResolution.y);
+	RMX_LOG_INFO("VideoOut: preparing game screen render target texture");
 	mGameScreenTexture.setupAsRenderTarget(mGameResolution);
+	RMX_LOG_INFO("VideoOut: game screen render target texture ready");
 
 	if (nullptr == mRenderParts)
 	{
@@ -79,21 +132,28 @@ void VideoOut::handleActiveModsChanged()
 
 void VideoOut::createRenderer(bool reset)
 {
-	setActiveRenderer(Configuration::instance().mRenderMethod == Configuration::RenderMethod::OPENGL_FULL, reset);
+	setActiveRenderer(Configuration::instance().mRenderMethod, reset);
 }
 
 void VideoOut::destroyRenderer()
 {
 	SAFE_DELETE(mSoftwareRenderer);
+#if defined(PLATFORM_WINDOWS)
+	SAFE_DELETE(mD3D11Renderer);
+#if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
+	SAFE_DELETE(mVulkanRenderer);
+#endif
+#endif
 #ifdef RMX_WITH_OPENGL_SUPPORT
 	SAFE_DELETE(mOpenGLRenderer);
 #endif
+	mActiveRenderer = nullptr;
 }
 
-void VideoOut::setActiveRenderer(bool useOpenGLRenderer, bool reset)
+void VideoOut::setActiveRenderer(Configuration::RenderMethod renderMethod, bool reset)
 {
 #ifdef RMX_WITH_OPENGL_SUPPORT
-	if (useOpenGLRenderer)
+	if (renderMethod == Configuration::RenderMethod::OPENGL_FULL)
 	{
 		if (nullptr == mOpenGLRenderer)
 		{
@@ -105,6 +165,35 @@ void VideoOut::setActiveRenderer(bool useOpenGLRenderer, bool reset)
 		}
 		mActiveRenderer = mOpenGLRenderer;
 	}
+	else
+#endif
+#if defined(PLATFORM_WINDOWS)
+	if (renderMethod == Configuration::RenderMethod::D3D11_FULL)
+	{
+		if (nullptr == mD3D11Renderer)
+		{
+			RMX_LOG_INFO("VideoOut: Creating Direct3D 11 renderer");
+			mD3D11Renderer = new D3D11Renderer(*mRenderParts, mGameScreenTexture);
+
+			RMX_LOG_INFO("VideoOut: Renderer initialization");
+			mD3D11Renderer->initialize();
+		}
+		mActiveRenderer = mD3D11Renderer;
+	}
+#if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
+	else if (renderMethod == Configuration::RenderMethod::VULKAN_SOFT || renderMethod == Configuration::RenderMethod::VULKAN_FULL)
+	{
+		if (nullptr == mVulkanRenderer)
+		{
+			RMX_LOG_INFO("VideoOut: Creating Vulkan " << ((renderMethod == Configuration::RenderMethod::VULKAN_FULL) ? "hardware" : "software") << " renderer");
+			mVulkanRenderer = new VulkanRenderer(*mRenderParts, mGameScreenTexture);
+
+			RMX_LOG_INFO("VideoOut: Renderer initialization");
+			mVulkanRenderer->initialize();
+		}
+		mActiveRenderer = mVulkanRenderer;
+	}
+#endif
 	else
 #endif
 	{
@@ -121,13 +210,21 @@ void VideoOut::setActiveRenderer(bool useOpenGLRenderer, bool reset)
 
 	if (reset)
 	{
+		mRenderParts->reset();
 		mActiveRenderer->reset();
 		mActiveRenderer->setGameResolution(mGameResolution);
+		mFrameState = FrameState::FRAME_READY;
+		mRequireGameScreenUpdate = true;
+		mFrameInterpolation.mUseInterpolationLastUpdate = false;
+		mFrameInterpolation.mUseInterpolationThisUpdate = false;
+		mDebugDrawRenderingRequested = false;
+		mPreviouslyHadNewRenderItems = false;
 	}
 }
 
 void VideoOut::setScreenSize(uint32 width, uint32 height)
 {
+	RMX_LOG_INFO("VideoOut: setScreenSize " << mGameResolution.x << " x " << mGameResolution.y << " -> " << width << " x " << height);
 	mGameResolution.x = width;
 	mGameResolution.y = height;
 
@@ -161,7 +258,23 @@ void VideoOut::preFrameUpdate()
 		// Processing of last frame (to avoid e.g. sprites rendered multiple times)
 		RefreshParameters refreshParameters;
 		refreshParameters.mSkipThisFrame = true;
+		bool hadRefreshException = false;
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
+		__try
+		{
+			mRenderParts->refresh(refreshParameters);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			hadRefreshException = true;
+		}
+#else
 		mRenderParts->refresh(refreshParameters);
+#endif
+		if (hadRefreshException)
+		{
+			recoverFromRenderStateException("preFrameUpdate/skip-refresh");
+		}
 	}
 
 	mFrameState = FrameState::INSIDE_FRAME;
@@ -195,7 +308,7 @@ void VideoOut::setInterFramePosition(float position)
 
 bool VideoOut::updateGameScreen()
 {
-	mFrameInterpolation.mCurrentlyInterpolating = (Configuration::instance().mFrameSync == Configuration::FrameSyncType::FRAME_INTERPOLATION && mFrameInterpolation.mUseInterpolationLastUpdate && mFrameInterpolation.mUseInterpolationThisUpdate);
+	mFrameInterpolation.mCurrentlyInterpolating = (Configuration::useFrameInterpolation(Configuration::instance().mFrameSync) && mFrameInterpolation.mUseInterpolationLastUpdate && mFrameInterpolation.mUseInterpolationThisUpdate);
 
 	// Only render something if a frame simulation was completed in the meantime
 	const bool hasNewSimulationFrame = (mFrameState == FrameState::FRAME_READY);
@@ -213,10 +326,44 @@ bool VideoOut::updateGameScreen()
 	refreshParameters.mHasNewSimulationFrame = hasNewSimulationFrame;
 	refreshParameters.mUsingFrameInterpolation = mFrameInterpolation.mCurrentlyInterpolating;
 	refreshParameters.mInterFramePosition = mFrameInterpolation.mInterFramePosition;
+	bool hadRefreshException = false;
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
+	__try
+	{
+		mRenderParts->refresh(refreshParameters);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		hadRefreshException = true;
+	}
+#else
 	mRenderParts->refresh(refreshParameters);
+#endif
+	if (hadRefreshException)
+	{
+		recoverFromRenderStateException("updateGameScreen/refresh");
+		return false;
+	}
 
 	// Render a new image
+	bool hadRenderException = false;
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
+	__try
+	{
+		renderGameScreen();
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		hadRenderException = true;
+	}
+#else
 	renderGameScreen();
+#endif
+	if (hadRenderException)
+	{
+		recoverFromRenderStateException("updateGameScreen/render");
+		return false;
+	}
 
 	// Game screen got updated
 	return true;
@@ -270,7 +417,7 @@ void VideoOut::collectGeometries(std::vector<Geometry*>& geometries)
 	// Add plane geometries
 	{
 		const PlaneManager& pm = mRenderParts->getPlaneManager();
-		const Recti fullscreenRect(0, 0, mGameResolution.x, mGameResolution.y);
+		const Recti fullscreenRect = getScreenRect();
 
 		static std::vector<PlaneManager::PlaneRect> planeRects;
 		pm.getPlaneRects(planeRects, fullscreenRect);
@@ -306,7 +453,22 @@ void VideoOut::collectGeometries(std::vector<Geometry*>& geometries)
 		{
 			for (const auto& customPlane : pm.getCustomPlanes())
 			{
-				geometries.push_back(&mGeometryFactory.createPlaneGeometry(customPlane.mRect, customPlane.mSourcePlane & 0x03, (customPlane.mSourcePlane & 0x10) != 0, customPlane.mScrollOffsets, customPlane.mRenderQueue));
+				const int planeIndex = customPlane.mSourcePlane & 0x03;
+				if (!PlaneManager::isRenderablePlaneIndex(planeIndex))
+				{
+					static int sLoggedInvalidCustomPlaneGeometryCount = 0;
+					if (sLoggedInvalidCustomPlaneGeometryCount < 8)
+					{
+						++sLoggedInvalidCustomPlaneGeometryCount;
+						RMX_LOG_INFO("VideoOut: skipping custom plane geometry with invalid plane index " << planeIndex
+							<< " from source plane " << (int)customPlane.mSourcePlane
+							<< ", rect=(" << customPlane.mRect.x << "," << customPlane.mRect.y << "," << customPlane.mRect.width << "," << customPlane.mRect.height
+							<< "), scrollOffsets=" << (int)customPlane.mScrollOffsets << ", renderQueue=0x" << rmx::hexString(customPlane.mRenderQueue, 4));
+					}
+					continue;
+				}
+
+				geometries.push_back(&mGeometryFactory.createPlaneGeometry(customPlane.mRect, planeIndex, (customPlane.mSourcePlane & 0x10) != 0, customPlane.mScrollOffsets, customPlane.mRenderQueue));
 			}
 		}
 	}
@@ -494,8 +656,50 @@ void VideoOut::renderGameScreen()
 		collectGeometries(mGeometries);
 	}
 
+	static int sGeometryLogCount = 0;
+	if (sGeometryLogCount < 6)
+	{
+		++sGeometryLogCount;
+		RMX_LOG_INFO("VideoOut: renderGameScreen activeDisplay=" << (mRenderParts->getActiveDisplay() ? 1 : 0) << ", geometries=" << mGeometries.size());
+	}
+
 	// Render them
 	mActiveRenderer->renderGameScreen(mGeometries);
+}
+
+void VideoOut::recoverFromRenderStateException(const char* stage)
+{
+	static int sLoggedRecoveries = 0;
+	if (sLoggedRecoveries < 16)
+	{
+		++sLoggedRecoveries;
+		RMX_LOG_INFO("VideoOut: recovered from renderer-state access violation during '" << stage << "', resetting render parts and active renderer");
+		RMX_LOG_INFO("VideoOut: renderer=" << (int)Configuration::instance().mRenderMethod
+			<< ", gameResolution=" << mGameResolution.x << "x" << mGameResolution.y
+			<< ", frameState=" << (int)mFrameState);
+	}
+
+	clearGeometries();
+
+	if (nullptr != mRenderParts)
+	{
+		mRenderParts->reset();
+	}
+
+	if (nullptr != mActiveRenderer)
+	{
+		mActiveRenderer->reset();
+		mActiveRenderer->setGameResolution(mGameResolution);
+	}
+
+	mFrameState = FrameState::OUTSIDE_FRAME;
+	mLastFrameTicks = SDL_GetTicks();
+	mFrameInterpolation.mCurrentlyInterpolating = false;
+	mFrameInterpolation.mUseInterpolationLastUpdate = false;
+	mFrameInterpolation.mUseInterpolationThisUpdate = false;
+	mDebugDrawRenderingRequested = false;
+	mPreviouslyHadNewRenderItems = false;
+	mRequireGameScreenUpdate = true;
 }
 
 void VideoOut::preRefreshDebugging()

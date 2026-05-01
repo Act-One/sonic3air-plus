@@ -183,6 +183,7 @@ void BackdropView::render()
 			const Vec2f uv1 = (Vec2f(rect.getPos() + rect.getSize() - center) + animationOffset) / textureSize / scaling;
 			drawer.drawRect(rect, mBackdropTexture, uv0, uv1, Color(mColorMultiplier, mColorMultiplier, mColorMultiplier));
 		}
+		drawer.setSamplingMode(SamplingMode::POINT);
 		drawer.setWrapMode(TextureWrapMode::CLAMP);
 	}
 }

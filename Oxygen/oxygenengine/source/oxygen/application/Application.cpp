@@ -43,6 +43,23 @@
 
 static const float MOUSE_HIDE_TIME = 1.0f;	// Seconds until mouse cursor gets hidden after last movement
 
+namespace
+{
+	void getWindowSizeForRendering(SDL_Window* window, int& outWidth, int& outHeight)
+	{
+		outWidth = 0;
+		outHeight = 0;
+		if (nullptr == window)
+			return;
+
+		SDL_GetWindowSizeInPixels(window, &outWidth, &outHeight);
+		if (outWidth <= 0 || outHeight <= 0)
+		{
+			SDL_GetWindowSize(window, &outWidth, &outHeight);
+		}
+	}
+}
+
 
 Application::Application() :
 	mGameLoader(new GameLoader()),
@@ -189,7 +206,7 @@ void Application::sdlEvent(const SDL_Event& ev)
 	mImGuiIntegration.processSdlEvent(ev);
 
 	// Inform input manager as well
-	if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP)		// TODO: Also add joystick events?
+	if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP)
 	{
 		InputManager::instance().injectSDLInputEvent(ev);
 	}
@@ -220,6 +237,7 @@ void Application::sdlEvent(const SDL_Event& ev)
 		}
 
 		case SDL_JOYDEVICEADDED:
+		case SDL_CONTROLLERDEVICEADDED:
 		{
 			if (SDL_GetTicks() > 5000)
 			{
@@ -230,10 +248,12 @@ void Application::sdlEvent(const SDL_Event& ev)
 		}
 
 		case SDL_JOYDEVICEREMOVED:
+		case SDL_CONTROLLERDEVICEREMOVED:
+		case SDL_CONTROLLERDEVICEREMAPPED:
 		{
 			if (SDL_GetTicks() > 5000)
 			{
-				LogDisplay::instance().setLogDisplay("Game controller was disconnected");
+				LogDisplay::instance().setLogDisplay((ev.type == SDL_CONTROLLERDEVICEREMAPPED) ? "Game controller mapping changed" : "Game controller was disconnected");
 				InputManager::instance().rescanRealDevices();
 			}
 			break;
@@ -300,11 +320,24 @@ void Application::keyboard(const rmx::KeyboardEvent& ev)
 						if (EngineMain::getDelegate().useDeveloperFeatures())
 						{
 							updateWindowDisplayIndex();
-							const Configuration::RenderMethod newRenderMethod = (Configuration::instance().mRenderMethod == Configuration::RenderMethod::SOFTWARE) ? Configuration::RenderMethod::OPENGL_SOFT :
-																				(Configuration::instance().mRenderMethod == Configuration::RenderMethod::OPENGL_SOFT) ? Configuration::RenderMethod::OPENGL_FULL : Configuration::RenderMethod::SOFTWARE;
+							std::vector<Configuration::RenderMethod> supportedMethods;
+							for (const Configuration::RenderMethod renderMethod : { Configuration::RenderMethod::SOFTWARE, Configuration::RenderMethod::D3D11_SOFT, Configuration::RenderMethod::D3D11_FULL, Configuration::RenderMethod::VULKAN_SOFT, Configuration::RenderMethod::OPENGL_SOFT, Configuration::RenderMethod::OPENGL_FULL })
+							{
+								if (Configuration::isSupportedRenderMethod(renderMethod))
+									supportedMethods.push_back(renderMethod);
+							}
+
+							Configuration::RenderMethod newRenderMethod = Configuration::instance().mRenderMethod;
+							for (size_t index = 0; index < supportedMethods.size(); ++index)
+							{
+								if (supportedMethods[index] == Configuration::instance().mRenderMethod)
+								{
+									newRenderMethod = supportedMethods[(index + 1) % supportedMethods.size()];
+									break;
+								}
+							}
 							EngineMain::instance().switchToRenderMethod(newRenderMethod);
-							LogDisplay::instance().setLogDisplay((Configuration::instance().mRenderMethod == Configuration::RenderMethod::SOFTWARE) ? "Switched to pure software renderer" :
-																 (Configuration::instance().mRenderMethod == Configuration::RenderMethod::OPENGL_SOFT) ? "Switched to opengl-soft renderer" : "Switched to opengl-full renderer");
+							LogDisplay::instance().setLogDisplay(std::string("Switched to ") + Configuration::getRenderMethodConfigString(Configuration::instance().mRenderMethod) + " renderer");
 						}
 						break;
 					}
@@ -422,11 +455,11 @@ void Application::keyboard(const rmx::KeyboardEvent& ev)
 					case 'r':
 					{
 						// Only for debugging visual differences between hardware and software renderers
-						if (Configuration::instance().mRenderMethod != Configuration::RenderMethod::SOFTWARE)
+						if (Configuration::isOpenGLRenderMethod(Configuration::instance().mRenderMethod))
 						{
 							const Configuration::RenderMethod newRenderMethod = (Configuration::instance().mRenderMethod == Configuration::RenderMethod::OPENGL_SOFT) ? Configuration::RenderMethod::OPENGL_FULL : Configuration::RenderMethod::OPENGL_SOFT;
 							EngineMain::instance().switchToRenderMethod(newRenderMethod);
-							LogDisplay::instance().setLogDisplay((Configuration::instance().mRenderMethod == Configuration::RenderMethod::OPENGL_SOFT) ? "Switched to opengl-soft renderer" : "Switched to opengl-full renderer");
+							LogDisplay::instance().setLogDisplay(std::string("Switched to ") + Configuration::getRenderMethodConfigString(Configuration::instance().mRenderMethod) + " renderer");
 						}
 						break;
 					}
@@ -488,6 +521,46 @@ void Application::update(float timeElapsed)
 		RMX_LOG_INFO("Start of first application update call");
 	}
 
+	EngineMain::instance().applyPendingRenderMethodSwitch();
+
+#if defined(PLATFORM_UWP)
+	static bool sEnsuredFullscreen = false;
+	static float sStartupGamepadRescanTimeout = 0.0f;
+	static int sStartupGamepadRescanAttempts = 0;
+	if (!sEnsuredFullscreen && mWindowMode != WindowMode::WINDOWED)
+	{
+		sEnsuredFullscreen = true;
+
+		SDL_Window* window = FTX::Video->getMainWindow();
+		if (nullptr != window)
+		{
+			SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+
+			int width = 0;
+			int height = 0;
+			getWindowSizeForRendering(window, width, height);
+			FTX::Video->reshape(width, height);
+		}
+	}
+
+	if (sStartupGamepadRescanAttempts < 20 && InputManager::instance().getGamepads().empty())
+	{
+		sStartupGamepadRescanTimeout -= timeElapsed;
+		if (sStartupGamepadRescanTimeout <= 0.0f)
+		{
+			sStartupGamepadRescanTimeout = 0.25f;
+			++sStartupGamepadRescanAttempts;
+
+			SDL_PumpEvents();
+			const InputManager::RescanResult result = InputManager::instance().rescanRealDevices(true);
+			if (result.mGamepadsFound > 0)
+			{
+				RMX_LOG_INFO("Startup controller rescan succeeded with " << result.mGamepadsFound << " detected gamepad(s)");
+			}
+		}
+	}
+#endif
+
 	// ImGui frame start must be done here (instead of at the start of "render"), to ensure that the mouse capturing flag is set correctly
 	//  -> This is particularly relevant for touch input, where we would miss the first touch into an ImGui window and falsely pass it to the touch overlay
 	mImGuiIntegration.startFrame();
@@ -506,13 +579,10 @@ void Application::update(float timeElapsed)
 	// Update loading
 	if (mGameLoader->isLoading())
 	{
-		// Work in progress here
-	#if defined(DEBUG)
 		if (nullptr == mGameSetupScreen)
 		{
 			mGameSetupScreen = &mGameView->createChild<GameSetupScreen>();
 		}
-	#endif
 
 		updateLoading();
 	}
@@ -683,10 +753,12 @@ void Application::render()
 	{
 		Profiling::pushRegion(ProfilingRegion::FRAMESYNC);
 
+		const Configuration& config = Configuration::instance();
 		const double currentTime = mApplicationTimer.getSecondsSinceStart() * 1000.0;
 		const double tickLengthMilliseconds = 1000.0 / (double)mSimulation->getSimulationFrequency();
-		const bool usingFramecap = (drawer.getType() != Drawer::Type::OPENGL || Configuration::instance().mFrameSync != Configuration::FrameSyncType::VSYNC_ON) && (Configuration::instance().mFrameSync != Configuration::FrameSyncType::FRAME_INTERPOLATION);
-		if (usingFramecap)
+		const bool useVSync = Configuration::useVSync(config.mFrameSync);
+		const bool useFrameCap = Configuration::useFrameCap(config.mFrameSync) || (useVSync && !Configuration::renderMethodSupportsNativeVSync(config.mRenderMethod));
+		if (useFrameCap)
 		{
 			double delay = mNextRefreshTime - currentTime;
 			if (delay < 0.0 || delay > tickLengthMilliseconds)
@@ -700,7 +772,7 @@ void Application::render()
 				PlatformFunctions::preciseDelay(delay);
 			}
 		}
-		else
+		else if (useVSync)
 		{
 			// Rely on V-Sync, but still use a minimum delay in case it's off
 			double delay = tickLengthMilliseconds - Profiling::getRootRegion().mTimer.getAccumulatedSeconds() * 1000.0;
@@ -821,7 +893,7 @@ void Application::setWindowMode(WindowMode windowMode, bool force)
 	}
 
 	int width, height;
-	SDL_GetWindowSize(window, &width, &height);
+	getWindowSizeForRendering(window, width, height);
 	FTX::Video->reshape(width, height);
 
 	SDL_ShowCursor(windowMode == WindowMode::WINDOWED);

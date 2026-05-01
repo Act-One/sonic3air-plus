@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -17,7 +17,7 @@
       <Configuration>Release</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
-  </ItemGroup>
+  <ProjectConfiguration Include="DebugUWP|x64"><Configuration>DebugUWP</Configuration><Platform>x64</Platform></ProjectConfiguration><ProjectConfiguration Include="ReleaseUWP|x64"><Configuration>ReleaseUWP</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\source\oxygen_netcore\base\HandleProvider.h" />
     <ClInclude Include="..\..\source\oxygen_netcore\network\ConnectionManager.h" />
@@ -60,33 +60,45 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{488CD7A3-2B09-43AC-82B2-8D72DEBFBB78}</ProjectGuid>
     <RootNamespace>oxygen</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
     <ProjectName>oxygen_netcore</ProjectName>
+    <DefaultLanguage>en-US</DefaultLanguage>
   </PropertyGroup>
-  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="('$(Configuration)|$(Platform)'=='DebugUWP|x64') Or ('$(Configuration)|$(Platform)'=='ReleaseUWP|x64')"><AppContainerApplication>true</AppContainerApplication><ApplicationType>Windows Store</ApplicationType><ApplicationTypeRevision>10.0</ApplicationTypeRevision><WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion><WindowsTargetPlatformMinVersion>10.0.19041.0</WindowsTargetPlatformMinVersion></PropertyGroup><Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
@@ -100,12 +112,18 @@
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="oxygen.props" />
+  </ImportGroup><ImportGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="oxygen.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="oxygen.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="oxygen.props" />
+  </ImportGroup><ImportGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="oxygen.props" />
   </ImportGroup>
@@ -119,6 +137,10 @@
     <TargetName>oxygen_netcore</TargetName>
     <OutDir>$(ProjectDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
     <IntDir>tmp\oxygen_netcore_$(Configuration)_$(BuildCode)\</IntDir>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <TargetName>oxygen_netcore</TargetName>
+    <OutDir>$(ProjectDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
+    <IntDir>tmp\oxygen_netcore_$(Configuration)_$(BuildCode)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <OutDir>$(ProjectDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
@@ -126,6 +148,10 @@
     <TargetName>oxygen_netcore</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <TargetName>oxygen_netcore</TargetName>
+    <OutDir>$(ProjectDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
+    <IntDir>tmp\oxygen_netcore_$(Configuration)_$(BuildCode)\</IntDir>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
     <TargetName>oxygen_netcore</TargetName>
     <OutDir>$(ProjectDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
     <IntDir>tmp\oxygen_netcore_$(Configuration)_$(BuildCode)\</IntDir>
@@ -156,6 +182,25 @@
       <SDLCheck>true</SDLCheck>
       <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>DEBUG;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>oxygen_netcore/pch.h</PrecompiledHeaderFile>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>../../../lemonscript_svn/lib/$(BuildCode);../../source/helper/zlib/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>lemonscript.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem>Windows</SubSystem>
+      <IgnoreSpecificDefaultLibraries>LIBCMT.lib</IgnoreSpecificDefaultLibraries>
+    </Link>
+  </ItemDefinitionGroup><ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>PLATFORM_UWP;USE_UTF8_PATHS;DEBUG;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>oxygen_netcore/pch.h</PrecompiledHeaderFile>
@@ -209,6 +254,37 @@
       <SubSystem>Windows</SubSystem>
       <IgnoreSpecificDefaultLibraries>LIBCMT.lib</IgnoreSpecificDefaultLibraries>
     </Link>
+  </ItemDefinitionGroup><ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>PLATFORM_UWP;USE_UTF8_PATHS;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>oxygen_netcore/pch.h</PrecompiledHeaderFile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>../../../lemonscript_svn/lib/$(BuildCode);../../source/helper/zlib/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>lemonscript.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem>Windows</SubSystem>
+      <IgnoreSpecificDefaultLibraries>LIBCMT.lib</IgnoreSpecificDefaultLibraries>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -71,7 +71,7 @@ bool ResourcesCache::loadRom()
 		}
 	}
 
-#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_LINUX)
+#if (defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)) || defined(PLATFORM_LINUX)
 	// If still not loaded, search for Steam installation of the game
 	if (!loaded && !gameProfile.mRomInfos.empty())
 	{

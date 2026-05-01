@@ -217,7 +217,7 @@ void GameView::keyboard(const rmx::KeyboardEvent& ev)
 						frameSync = Configuration::FrameSyncType(((int)frameSync + 1) % (int)Configuration::FrameSyncType::_NUM);
 						EngineMain::instance().setVSyncMode(frameSync);
 
-						static const std::string FRAME_SYNC_NAME[(int)Configuration::FrameSyncType::_NUM] = { "V-Sync Off", "VSync On", "V-Sync + FPS Cap", "Frame Interpolation" };
+						static const std::string FRAME_SYNC_NAME[(int)Configuration::FrameSyncType::_NUM] = { "V-Sync Off + FPS Cap", "V-Sync On", "V-Sync On + FPS Cap", "Frame Interpolation", "Uncapped" };
 						setLogDisplay("Frame Sync: " + FRAME_SYNC_NAME[(int)frameSync]);
 						break;
 					}
@@ -740,6 +740,18 @@ void GameView::render()
 
 	// Draw the combined image
 	const Recti& gameViewportRect = mGameViewport.getRectOnScreen();
+	static Recti sLoggedScreenRect;
+	static Recti sLoggedGameScreenRect;
+	static Recti sLoggedViewportRect;
+	if (sLoggedScreenRect != FTX::screenRect() || sLoggedGameScreenRect != gameScreenRect || sLoggedViewportRect != gameViewportRect)
+	{
+		sLoggedScreenRect = FTX::screenRect();
+		sLoggedGameScreenRect = gameScreenRect;
+		sLoggedViewportRect = gameViewportRect;
+		RMX_LOG_INFO("GameView viewport layout: screenRect=" << sLoggedScreenRect.x << "," << sLoggedScreenRect.y << " " << sLoggedScreenRect.width << "x" << sLoggedScreenRect.height
+			<< " gameScreenRect=" << sLoggedGameScreenRect.x << "," << sLoggedGameScreenRect.y << " " << sLoggedGameScreenRect.width << "x" << sLoggedGameScreenRect.height
+			<< " gameViewportRect=" << sLoggedViewportRect.x << "," << sLoggedViewportRect.y << " " << sLoggedViewportRect.width << "x" << sLoggedViewportRect.height);
+	}
 	drawer.setWindowRenderTarget(FTX::screenRect());
 	drawer.setBlendMode(BlendMode::OPAQUE);
 	drawer.drawUpscaledRect(gameViewportRect, mFinalGameTexture);

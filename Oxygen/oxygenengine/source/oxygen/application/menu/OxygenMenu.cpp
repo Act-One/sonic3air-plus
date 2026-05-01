@@ -108,9 +108,6 @@ void OxygenMenu::render()
 	{
 		mMenuScale = getMenuScale();
 		Vec2i resolution = (FTX::screenSize() + Vec2i(mMenuScale - 1)) / mMenuScale;	// Round up, to ensure the screen is fully covered
-
-		// TEST: Only cover 160 pixels on the left, for a side menu
-		resolution.x = 160;
 		const Recti menuScreenRect(Vec2i(), resolution);
 
 		mOxygenMenuTexture.setupAsRenderTarget(resolution);

@@ -101,6 +101,7 @@ public:
 
 	uint32 getPlatformFlags() const;
 	void switchToRenderMethod(Configuration::RenderMethod newRenderMethod);
+	void applyPendingRenderMethodSwitch();
 	void setVSyncMode(Configuration::FrameSyncType frameSyncMode);
 	Vec2i getDisplaySize(int displayIndex) const;
 
@@ -130,6 +131,8 @@ private:
 
 	AudioOutBase* mAudioOut = nullptr;
 	SDL_Window*	  mSDLWindow = nullptr;
+	SDL_GLContext mSDLGLContext = nullptr;
+	Configuration::RenderMethod mPendingRenderMethodSwitch = Configuration::RenderMethod::UNDEFINED;
 	Drawer		  mDrawer;
 	std::vector<PackedFileProvider*> mPackedFileProviders;
 };

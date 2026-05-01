@@ -26,6 +26,7 @@ namespace rmx
 		// System
 		bool initialize(const VideoConfig& videoconfig);
 		void setInitialized(const VideoConfig& videoconfig, SDL_Window* window);
+		void clearInitialized();
 
 		void reshape(int width, int height);
 

@@ -17,6 +17,21 @@
 static const constexpr uint16 SCROLL_OFFSET_VALUE_BITMASK = 0x0fff;
 
 
+namespace
+{
+	uint16 sanitizeHorizontalScrollTableBase(uint16 vramAddress)
+	{
+		const uint16 sanitized = vramAddress & 0xfffe;
+		if (sanitized != vramAddress)
+		{
+			RMX_LOG_INFO("ScrollOffsetsManager: aligned odd horizontal scroll table base from 0x"
+				<< rmx::hexString(vramAddress, 4) << " to 0x" << rmx::hexString(sanitized, 4));
+		}
+		return sanitized;
+	}
+}
+
+
 ScrollOffsetsManager::ScrollOffsetsManager(PlaneManager& planeManager) :
 	mPlaneManager(planeManager)
 {
@@ -27,6 +42,7 @@ void ScrollOffsetsManager::reset()
 {
 	mVerticalScrolling = false;
 	mHorizontalScrollMask = 0xff;
+	mHorizontalScrollTableBase = 0xf000;
 	mVerticalScrollOffsetBias = 0;
 
 	for (int index = 0; index < 4; ++index)
@@ -47,13 +63,13 @@ void ScrollOffsetsManager::refresh(const RefreshParameters& refreshParameters)
 			bool* overwriteFlags = mSets[index].mExplicitOverwriteH;
 			if (index < 2)
 			{
-				const uint16* src = (uint16*)&EmulatorInterface::instance().getVRam()[mHorizontalScrollTableBase + (1 - index) * 2];
 				for (int k = 0; k < 0x100; ++k)
 				{
 					if (!overwriteFlags[k])
 					{
 						const int srcIndex = k & mHorizontalScrollMask;
-						buffer[k] = (-src[srcIndex*2]) & SCROLL_OFFSET_VALUE_BITMASK;
+						const uint16 address = (uint16)(mHorizontalScrollTableBase + (1 - index) * 2 + srcIndex * 4);
+						buffer[k] = (-EmulatorInterface::instance().readVRam16(address)) & SCROLL_OFFSET_VALUE_BITMASK;
 					}
 				}
 			}
@@ -157,6 +173,11 @@ void ScrollOffsetsManager::refresh(const RefreshParameters& refreshParameters)
 			}
 		}
 	}
+}
+
+void ScrollOffsetsManager::setHorizontalScrollTableBase(uint16 vramAddress)
+{
+	mHorizontalScrollTableBase = sanitizeHorizontalScrollTableBase(vramAddress);
 }
 
 void ScrollOffsetsManager::preFrameUpdate()
@@ -277,6 +298,10 @@ void ScrollOffsetsManager::serializeSaveState(VectorBinarySerializer& serializer
 	if (formatVersion >= 2)
 	{
 		serializer.serialize(mHorizontalScrollTableBase);
+		if (serializer.isReading())
+		{
+			setHorizontalScrollTableBase(mHorizontalScrollTableBase);
+		}
 	}
 
 	if (formatVersion >= 4)

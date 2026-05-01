@@ -742,9 +742,13 @@ void OptionsMenu::update(float timeElapsed)
 
 	// Enable / disable options
 	//  -> Done here as the conditions can change at any time (incl. hotkeys)
-	const bool isSoftware = (Configuration::instance().mRenderMethod == Configuration::RenderMethod::SOFTWARE);
-	mOptionEntries[option::SCANLINES].mGameMenuEntry->setInteractable(!isSoftware && Configuration::instance().mFiltering < 3);
-	mOptionEntries[option::FILTERING].mGameMenuEntry->setInteractable(!isSoftware);
+	const Configuration::RenderMethod renderMethod = Configuration::instance().mRenderMethod;
+	const bool supportsAdvancedScreenEffects =
+		Configuration::isOpenGLRenderMethod(renderMethod) ||
+		Configuration::isDirect3D11RenderMethod(renderMethod) ||
+		Configuration::isVulkanRenderMethod(renderMethod);
+	mOptionEntries[option::SCANLINES].mGameMenuEntry->setInteractable(supportsAdvancedScreenEffects && Configuration::instance().mFiltering < 3);
+	mOptionEntries[option::FILTERING].mGameMenuEntry->setInteractable(supportsAdvancedScreenEffects);
 
 	// Scrolling
 	mScrolling.update(timeElapsed);

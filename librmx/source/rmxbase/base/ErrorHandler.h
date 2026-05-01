@@ -38,7 +38,7 @@
 	} \
 }
 
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	#define RMX_REACT_THROW throw std::runtime_error(_stream_.str())
 #else
 	#define RMX_REACT_THROW

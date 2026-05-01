@@ -11,6 +11,8 @@
 // Version
 #define RMXMEDIA_VERSION 0x00040100
 
+// Platform definitions are needed before feature switches below.
+#include "PlatformDefinitions.h"
 
 // This is for some reason needed under Linux
 #if defined(__GNUC__) && __GNUC__ >= 4
@@ -19,7 +21,9 @@
 
 // OpenGL support master switch
 //  -> Can be disabled for platforms where OpenGL does not work
-#define RMX_WITH_OPENGL_SUPPORT
+#if !defined(PLATFORM_UWP)
+	#define RMX_WITH_OPENGL_SUPPORT
+#endif
 
 
 // General includes

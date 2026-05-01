@@ -46,34 +46,24 @@ namespace rmx
 		bool createDir(const WString& path, bool recursive)
 		{
 		#ifdef USE_STD_FILESYSTEM
+			std::error_code errorCode;
+			const std_filesystem::path fsPath(*path);
+
 			// Create directory or hierarchy of directories (if recursive == true)
 			if (recursive)
 			{
-				WString subpath;
-				subpath.expand(path.length() + 1);
-				int pos = 0;
-				while (pos < path.length())
-				{
-					pos = path.findChars(L"/\\", pos + 1, +1);
-					subpath.makeSubString(path, 0, pos);
-					if (!std_filesystem::exists(*subpath))
-					{
-						if (!createDir(subpath, false))
-							return false;
-					}
-				}
-				return true;
+				const bool created = std_filesystem::create_directories(fsPath, errorCode);
+				if (!errorCode)
+					return created || std_filesystem::is_directory(fsPath, errorCode);
+				return false;
 			}
 			else
 			{
 				// Create a single directory
-			#ifdef PLATFORM_WINDOWS
-				return (_wmkdir(*path) == 0);
-			#elif defined(USE_UTF8_PATHS)
-				return (mkdir(*path.toUTF8(), 0777) == 0);		// Probably the only time I ever used octal notation...
-			#else
-				#error "Unsupported platform"
-			#endif
+				const bool created = std_filesystem::create_directory(fsPath, errorCode);
+				if (!errorCode)
+					return created || std_filesystem::is_directory(fsPath, errorCode);
+				return false;
 			}
 		#else
 			// TODO
@@ -251,8 +241,9 @@ namespace rmx
 	bool FileIO::exists(std::wstring_view path)
 	{
 	#ifdef USE_STD_FILESYSTEM
+		mLastErrorCode.clear();
 		const std_filesystem::path fspath(path.data());
-		return std_filesystem::exists(fspath);
+		return std_filesystem::exists(fspath, mLastErrorCode);
 	#else
 		RMX_ASSERT(false, "Not implemented: FileIO::exists");
 		return false;
@@ -262,8 +253,9 @@ namespace rmx
 	bool FileIO::isFile(std::wstring_view path)
 	{
 	#ifdef USE_STD_FILESYSTEM
+		mLastErrorCode.clear();
 		const std_filesystem::path fspath(path.data());
-		return std_filesystem::is_regular_file(fspath);
+		return std_filesystem::is_regular_file(fspath, mLastErrorCode);
 	#else
 		RMX_ASSERT(false, "Not implemented: FileIO::isFile");
 		return false;
@@ -273,8 +265,9 @@ namespace rmx
 	bool FileIO::isDirectory(std::wstring_view path)
 	{
 	#ifdef USE_STD_FILESYSTEM
+		mLastErrorCode.clear();
 		const std_filesystem::path fspath(path.data());
-		return std_filesystem::is_directory(fspath);
+		return std_filesystem::is_directory(fspath, mLastErrorCode);
 	#else
 		RMX_ASSERT(false, "Not implemented: FileIO::isDirectory");
 		return false;

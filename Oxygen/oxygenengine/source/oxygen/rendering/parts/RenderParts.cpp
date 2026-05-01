@@ -25,6 +25,7 @@ RenderParts::RenderParts() :
 void RenderParts::reset()
 {
 	mActiveDisplay = true;
+	mPaletteManager.setShadowHighlightMode(false);
 
 	mPlaneManager.reset();
 	mSpriteManager.clear();

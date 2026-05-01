@@ -1,6 +1,6 @@
 @echo on
 
-call ../get_msbuild_path.bat
+call ..\get_msbuild_path.bat
 
 
 :: Build libcurl

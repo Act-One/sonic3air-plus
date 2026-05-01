@@ -13,7 +13,7 @@
 //  - Windows
 //  - Linux, if USE_DISCORD is set (usually by CMake, for x86 architecture, but not for ARM)
 //  - Mac. Sorry about having 3 checks. Command line build has issues finding the discord dylib since it can't be embedded. And temporarily ignore discord for ARM64 until they add support.
-#if (defined(PLATFORM_WINDOWS) && !defined(__GNUC__)) || (defined(PLATFORM_LINUX) && defined(USE_DISCORD)) || (defined(PLATFORM_MAC) && !defined(NO_DISCORD))
+#if (defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP) && !defined(__GNUC__)) || (defined(PLATFORM_LINUX) && defined(USE_DISCORD)) || (defined(PLATFORM_MAC) && !defined(NO_DISCORD))
 	#define SUPPORT_DISCORD
 #endif
 

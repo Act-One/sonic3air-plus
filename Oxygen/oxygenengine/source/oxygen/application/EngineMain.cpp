@@ -22,6 +22,12 @@
 #include "oxygen/menu/devmode/DevModeMainWindow.h"
 #include "oxygen/drawing/opengl/OpenGLDrawer.h"
 #include "oxygen/drawing/software/SoftwareDrawer.h"
+#if defined(PLATFORM_WINDOWS)
+#include "oxygen/drawing/d3d11/D3D11Drawer.h"
+#if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
+#include "oxygen/drawing/vulkan/VulkanDrawer.h"
+#endif
+#endif
 #include "oxygen/file/PackedFileProvider.h"
 #include "oxygen/helper/FileHelper.h"
 #include "oxygen/helper/JsonHelper.h"
@@ -39,10 +45,29 @@
 	#include "oxygen/platform/android/AndroidJavaInterface.h"
 #endif
 
+#include <filesystem>
 
-#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_LINUX)
+
+#if (defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)) || defined(PLATFORM_LINUX)
 	#define LOAD_APP_ICON_PNG
 #endif
+
+namespace
+{
+	void getWindowSizeForRendering(SDL_Window* window, int& outWidth, int& outHeight)
+	{
+		outWidth = 0;
+		outHeight = 0;
+		if (nullptr == window)
+			return;
+
+		SDL_GetWindowSizeInPixels(window, &outWidth, &outHeight);
+		if (outWidth <= 0 || outHeight <= 0)
+		{
+			SDL_GetWindowSize(window, &outWidth, &outHeight);
+		}
+	}
+}
 
 
 struct EngineMain::Internal
@@ -72,7 +97,7 @@ void EngineMain::earlySetup()
 	// Setup crash handling
 	CrashHandler::initializeCrashHandler();
 
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	// This fixes some audio issues with SDL 2.0.9 that some people faced
 	// (possibly introduced earlier, only 2.0.4 is known to have worked)
 	SDL_setenv("SDL_AUDIODRIVER", "directsound", true);
@@ -168,30 +193,48 @@ uint32 EngineMain::getPlatformFlags() const
 	}
 }
 
+namespace
+{
+}
+
 void EngineMain::switchToRenderMethod(Configuration::RenderMethod newRenderMethod)
 {
 	Configuration& config = Configuration::instance();
-	const bool wasUsingOpenGL = (config.mRenderMethod == Configuration::RenderMethod::OPENGL_FULL || config.mRenderMethod == Configuration::RenderMethod::OPENGL_SOFT);
+	if (config.mRenderMethod == newRenderMethod && mPendingRenderMethodSwitch == Configuration::RenderMethod::UNDEFINED)
+		return;
+
+	mPendingRenderMethodSwitch = newRenderMethod;
+}
+
+void EngineMain::applyPendingRenderMethodSwitch()
+{
+	if (mPendingRenderMethodSwitch == Configuration::RenderMethod::UNDEFINED)
+		return;
+
+	Configuration& config = Configuration::instance();
+	const Configuration::RenderMethod newRenderMethod = mPendingRenderMethodSwitch;
+	mPendingRenderMethodSwitch = Configuration::RenderMethod::UNDEFINED;
+
+	if (config.mRenderMethod == newRenderMethod)
+		return;
+
 	config.mRenderMethod = newRenderMethod;
 
-	bool nowUsingOpenGL = (config.mRenderMethod == Configuration::RenderMethod::OPENGL_FULL || config.mRenderMethod == Configuration::RenderMethod::OPENGL_SOFT);
-	if (nowUsingOpenGL != wasUsingOpenGL)
-	{
-		// Need to recreate the window
-		destroyWindow();
-		createWindow();
+	// Recreate the window and drawer for every manual renderer switch. Even "same family" switches
+	// can swap out substantial backend state, like moving between the software surface path and the
+	// software drawer's SDL D3D11 presenter.
+	destroyWindow();
+	createWindow();
 
-		// Check OpenGL in the config again, it could have changed - namely if OpenGL initialization failed
-		nowUsingOpenGL = (config.mRenderMethod == Configuration::RenderMethod::OPENGL_FULL || config.mRenderMethod == Configuration::RenderMethod::OPENGL_SOFT);
+	// Check the config again, it could have changed if backend initialization fell back.
+	const bool nowUsingOpenGL = Configuration::isOpenGLRenderMethod(config.mRenderMethod);
 
-		if (ImGuiIntegration::hasInstance())
-			ImGuiIntegration::instance().onWindowRecreated(nowUsingOpenGL);
-	}
+	if (ImGuiIntegration::hasInstance())
+		ImGuiIntegration::instance().onWindowRecreated(nowUsingOpenGL);
 
-	if (nowUsingOpenGL)
-	{
-		config.mAutoDetectRenderMethod = false;
-	}
+	// A manual renderer switch should always pin the chosen backend instead of letting auto-detect
+	// potentially change it again on the next startup.
+	config.mAutoDetectRenderMethod = false;
 
 	// Switch the renderer
 	VideoOut::instance().createRenderer(true);
@@ -200,9 +243,9 @@ void EngineMain::switchToRenderMethod(Configuration::RenderMethod newRenderMetho
 void EngineMain::setVSyncMode(Configuration::FrameSyncType frameSyncMode)
 {
 	Configuration& config = Configuration::instance();
-	if ((config.mRenderMethod == Configuration::RenderMethod::OPENGL_FULL) || (config.mRenderMethod == Configuration::RenderMethod::OPENGL_SOFT))
+	if (Configuration::isOpenGLRenderMethod(config.mRenderMethod))
 	{
-		if (frameSyncMode >= Configuration::FrameSyncType::VSYNC_ON)
+		if (Configuration::useVSync(frameSyncMode))
 		{
 			SDL_GL_SetSwapInterval(1);
 		}
@@ -289,6 +332,10 @@ bool EngineMain::startupEngine()
 		return false;
 	}
 
+	// Input
+	RMX_LOG_INFO("Input initialization...");
+	InputManager::instance().startup();
+
 	// Video
 	RMX_LOG_INFO("Video initialization...");
 	if (!createWindow())
@@ -297,12 +344,12 @@ bool EngineMain::startupEngine()
 		return false;
 	}
 
+	// On UWP, some controller backends only become visible once the app window exists and SDL has pumped window events.
+	SDL_PumpEvents();
+	InputManager::instance().rescanRealDevices(true);
+
 	RMX_LOG_INFO("Startup of VideoOut");
 	mInternal.mVideoOut.startup();
-
-	// Input manager startup after config is loaded
-	RMX_LOG_INFO("Input initialization...");
-	InputManager::instance().startup();
 
 	// Audio
 	RMX_LOG_INFO("Audio initialization...");
@@ -378,6 +425,8 @@ void EngineMain::initDirectories()
 	#elif defined(PLATFORM_VITA)
 		// Vita
 		config.mAppDataPath = L"ux0:data/sonic3air/savedata/";
+	#elif defined(PLATFORM_UWP)
+		config.mAppDataPath = PlatformFunctions::getAppDataPath() + L'/';
 	#elif !defined(PLATFORM_IOS)
 		// Choose app data path
 		{
@@ -398,6 +447,7 @@ void EngineMain::initDirectories()
 		}
 	#endif
 
+	#if !defined(PLATFORM_UWP)
 		// In any case: Check for redirect there
 		for (int iteration = 0; iteration < 3; ++iteration)
 		{
@@ -416,6 +466,7 @@ void EngineMain::initDirectories()
 
 			config.mAppDataPath = redirectedPath;
 		}
+	#endif
 	}
 
 	// Fill some paths with fallback values, even though we haven't loaded a game profile yet
@@ -493,21 +544,20 @@ bool EngineMain::initConfigAndSettings()
 	}
 	else if (config.mRenderMethod == Configuration::RenderMethod::UNDEFINED)
 	{
-		config.mRenderMethod = Configuration::RenderMethod::OPENGL_FULL;
+		config.mRenderMethod = Configuration::getHighestSupportedRenderMethod();
 	}
 
 	// Respect the platform's settings for supported render methods
-	if (config.mRenderMethod > Configuration::getHighestSupportedRenderMethod())
+	if (!Configuration::isSupportedRenderMethod(config.mRenderMethod))
 		config.mRenderMethod = Configuration::getHighestSupportedRenderMethod();
 
-#if defined(PLATFORM_ANDROID) || defined(PLATFORM_IOS) || defined(PLATFORM_VITA)
+#if defined(PLATFORM_ANDROID) || defined(PLATFORM_IOS) || defined(PLATFORM_VITA) || defined(PLATFORM_UWP)
 	// Use fullscreen, with no borders please
 	//  -> Note that this doesn't work for the web version, if running in mobile browsers - we rely on a window with fixed size (see config.json) there
 	config.mWindowMode = Configuration::WindowMode::FULLSCREEN_EXCLUSIVE;
 #endif
 
-	RMX_LOG_INFO(((config.mRenderMethod == Configuration::RenderMethod::SOFTWARE) ? "Using pure software renderer" :
-				  (config.mRenderMethod == Configuration::RenderMethod::OPENGL_SOFT) ? "Using opengl-soft renderer" : "Using opengl-full renderer"));
+	RMX_LOG_INFO("Using " << Configuration::getRenderMethodConfigString(config.mRenderMethod) << " renderer");
 	return true;
 }
 
@@ -555,8 +605,17 @@ bool EngineMain::initFileSystem()
 	{
 		// Add Oxygen Engine data path if it exists in the expected place
 		//  -> This is relevant when starting an external project app (like S3AIR) during development
-		const std::wstring engineBasePath = L"../oxygenengine/";
-		if (FTX::FileSystem->exists(engineBasePath))
+		std::wstring engineBasePath;
+		for (const std::wstring& candidate : { std::wstring(L"../oxygenengine/"), std::wstring(L"oxygenengine/") })
+		{
+			if (FTX::FileSystem->exists(candidate))
+			{
+				engineBasePath = candidate;
+				break;
+			}
+		}
+
+		if (!engineBasePath.empty())
 		{
 			rmx::RealFileProvider* provider = new rmx::RealFileProvider();
 			FTX::FileSystem->addManagedFileProvider(*provider);
@@ -573,6 +632,19 @@ bool EngineMain::initFileSystem()
 		rmx::RealFileProvider* provider = new rmx::RealFileProvider();
 		FTX::FileSystem->addManagedFileProvider(*provider);
 		FTX::FileSystem->addMountPoint(*provider, L"data/", config.mGameDataPath + L'/', 0x10);
+	}
+
+	// Make source scripts visible when running from a source checkout, even if the current working
+	// directory is not the project root. This keeps desktop developer builds from falling back to a
+	// stale compiled scripts.bin just because the scripts/ tree is not mounted yet.
+	{
+		const std::wstring mainScriptPath = config.mScriptsDir + config.mMainScriptName;
+		if (!FTX::FileSystem->exists(mainScriptPath) && std::filesystem::exists(std::filesystem::path(mainScriptPath)))
+		{
+			rmx::RealFileProvider* provider = new rmx::RealFileProvider();
+			FTX::FileSystem->addManagedFileProvider(*provider);
+			FTX::FileSystem->addMountPoint(*provider, L"scripts/", config.mScriptsDir, 0x10);
+		}
 	}
 
 	// Create mod data folder (the default mod directory)
@@ -670,15 +742,30 @@ bool EngineMain::createWindow()
 	Configuration& config = Configuration::instance();
 	const EngineDelegateInterface::AppMetaData& appMetaData = mDelegate.getAppMetaData();
 
-	const bool useOpenGL = (config.mRenderMethod == Configuration::RenderMethod::OPENGL_FULL) || (config.mRenderMethod == Configuration::RenderMethod::OPENGL_SOFT);
+	const bool useOpenGL = Configuration::isOpenGLRenderMethod(config.mRenderMethod);
+#if defined(PLATFORM_WINDOWS)
+	const bool useDirect3D11 = (config.mRenderMethod == Configuration::RenderMethod::D3D11_FULL);
+#if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
+	const bool useVulkan = Configuration::isVulkanRenderMethod(config.mRenderMethod);
+#else
+	const bool useVulkan = false;
+#endif
+#else
+	const bool useDirect3D11 = false;
+	const bool useVulkan = false;
+#endif
 
 	// Setup video config
 	rmx::VideoConfig videoConfig(config.mWindowMode != Configuration::WindowMode::WINDOWED, config.mWindowSize.x, config.mWindowSize.y, appMetaData.mTitle.c_str());
 	videoConfig.mRenderer = useOpenGL ? rmx::VideoConfig::Renderer::OPENGL : rmx::VideoConfig::Renderer::SOFTWARE;
+#if defined(PLATFORM_UWP)
+	videoConfig.mResizeable = false;
+#else
 	videoConfig.mResizeable = true;
+#endif
 	videoConfig.mAutoClearScreen = useOpenGL;
 	videoConfig.mAutoSwapBuffers = false;
-	videoConfig.mVSync = (config.mFrameSync >= Configuration::FrameSyncType::VSYNC_ON);
+	videoConfig.mVSync = Configuration::useVSync(config.mFrameSync);
 	videoConfig.mIconResource = appMetaData.mWindowsIconResource;
 
 	SDL_SetHint(SDL_HINT_RENDER_VSYNC, videoConfig.mVSync ? "1" : "0");
@@ -736,6 +823,10 @@ bool EngineMain::createWindow()
 		const int displayIndex = config.mDisplayIndex;
 
 		uint32 flags = useOpenGL ? SDL_WINDOW_OPENGL : 0;
+#if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
+		if (useVulkan)
+			flags |= SDL_WINDOW_VULKAN;
+#endif
 		switch (config.mWindowMode)
 		{
 			case Configuration::WindowMode::WINDOWED:
@@ -780,15 +871,25 @@ bool EngineMain::createWindow()
 		}
 
 		RMX_LOG_INFO("Retrieving actual window size...");
-		SDL_GetWindowSize(mSDLWindow, &videoConfig.mWindowRect.width, &videoConfig.mWindowRect.height);
+		getWindowSizeForRendering(mSDLWindow, videoConfig.mWindowRect.width, videoConfig.mWindowRect.height);
 		SDL_ShowCursor(!videoConfig.mHideCursor);
+
+	#if defined(PLATFORM_UWP)
+		if (config.mWindowMode != Configuration::WindowMode::WINDOWED)
+		{
+			// WinRT does not reliably enter fullscreen just from the create-window flags.
+			SDL_SetWindowFullscreen(mSDLWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
+			getWindowSizeForRendering(mSDLWindow, videoConfig.mWindowRect.width, videoConfig.mWindowRect.height);
+		}
+	#endif
 
 		if (useOpenGL)
 		{
 			RMX_LOG_INFO("Creating OpenGL context...");
-			SDL_GLContext context = SDL_GL_CreateContext(mSDLWindow);
-			if (nullptr != context)
+			mSDLGLContext = SDL_GL_CreateContext(mSDLWindow);
+			if (nullptr != mSDLGLContext)
 			{
+				SDL_GL_MakeCurrent(mSDLWindow, mSDLGLContext);
 				RMX_LOG_INFO("Vsync setup...");
 				setVSyncMode(config.mFrameSync);
 			}
@@ -803,7 +904,7 @@ bool EngineMain::createWindow()
 
 	// Create drawer depending on render method
 #ifdef RMX_WITH_OPENGL_SUPPORT
-	if (config.mRenderMethod >= Configuration::RenderMethod::OPENGL_SOFT)
+	if (useOpenGL)
 	{
 		if (!mDrawer.createDrawer<OpenGLDrawer>())
 		{
@@ -816,13 +917,39 @@ bool EngineMain::createWindow()
 	else
 #endif
 	{
-		mDrawer.createDrawer<SoftwareDrawer>();
+		if (useDirect3D11)
+		{
+			if (!mDrawer.createDrawer<D3D11Drawer>())
+			{
+				RMX_LOG_INFO("Direct3D 11 drawer setup failed, using software rendering");
+				config.mRenderMethod = Configuration::RenderMethod::SOFTWARE;
+				mDrawer.createDrawer<SoftwareDrawer>();
+			}
+		}
+#if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
+		else if (useVulkan)
+		{
+			if (!mDrawer.createDrawer<VulkanDrawer>())
+			{
+				RMX_LOG_INFO("Vulkan drawer setup failed, using software rendering");
+				config.mRenderMethod = Configuration::RenderMethod::SOFTWARE;
+				mDrawer.createDrawer<SoftwareDrawer>();
+			}
+		}
+#endif
+		else
+		{
+			mDrawer.createDrawer<SoftwareDrawer>();
+		}
 	}
+
+	// Reflect any backend fallback before exposing the window through FTX::Video.
+	videoConfig.mRenderer = Configuration::isOpenGLRenderMethod(config.mRenderMethod) ? rmx::VideoConfig::Renderer::OPENGL : rmx::VideoConfig::Renderer::SOFTWARE;
 
 	// Tell FTX video manager that everything is okay
 	FTX::Video->setInitialized(videoConfig, mSDLWindow);
 
-#if defined(PLATFORM_WINDOWS)
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	// Set window icon (using a Windows-specific method)
 	if (videoConfig.mIconResource != 0)
 	{
@@ -864,6 +991,20 @@ void EngineMain::destroyWindow()
 {
 	mInternal.mVideoOut.destroyRenderer();
 	mDrawer.destroyDrawer();
-	SDL_DestroyWindow(mSDLWindow);
+
+	if (nullptr != mSDLGLContext)
+	{
+		SDL_GL_MakeCurrent(nullptr, nullptr);
+		SDL_GL_DeleteContext(mSDLGLContext);
+		mSDLGLContext = nullptr;
+	}
+
+	SDL_Window* window = mSDLWindow;
 	mSDLWindow = nullptr;
+	FTX::Video->clearInitialized();
+
+	if (nullptr != window)
+	{
+		SDL_DestroyWindow(window);
+	}
 }

@@ -67,7 +67,7 @@ void OpenGLRenderResources::initialize()
 		const PlaneManager& planeManager = mRenderParts.getPlaneManager();
 		for (int index = 0; index < 4; ++index)
 		{
-			mPlanePatternsTexture[index].create(BufferTexture::PixelFormat::UINT_16, 0x1000, 1, planeManager.getPlanePatternsBuffer((uint8)index));
+			mPlanePatternsTexture[index].create(BufferTexture::PixelFormat::UINT_16, PlaneManager::MAX_PLANE_PATTERNS, 1, planeManager.getPlanePatternsBuffer((uint8)index));
 		}
 
 		for (int index = 0; index < 4; ++index)
@@ -176,6 +176,7 @@ void OpenGLRenderResources::refresh()
 	// Update plane pattern textures
 	{
 		const int numPatterns = planeManager.getPlayfieldSizeInPatterns().x * planeManager.getPlayfieldSizeInPatterns().y;
+		RMX_CHECK(numPatterns <= PlaneManager::MAX_PLANE_PATTERNS, "Playfield uses " << numPatterns << " patterns, but OpenGL resources only support " << PlaneManager::MAX_PLANE_PATTERNS, return);
 		for (int index = 0; index < 4; ++index)
 		{
 			if (!planeManager.isPlaneUsed(index))

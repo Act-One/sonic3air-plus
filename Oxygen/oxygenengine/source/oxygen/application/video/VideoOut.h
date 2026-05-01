@@ -8,10 +8,17 @@
 
 #pragma once
 
+#include "oxygen/application/Configuration.h"
 #include "oxygen/drawing/DrawerTexture.h"
 #include "oxygen/rendering/Geometry.h"
 
 class Renderer;
+#if defined(PLATFORM_WINDOWS)
+class D3D11Renderer;
+#if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
+class VulkanRenderer;
+#endif
+#endif
 class OpenGLRenderer;
 class SoftwareRenderer;
 class RenderParts;
@@ -32,12 +39,12 @@ public:
 
 	void createRenderer(bool reset);
 	void destroyRenderer();
-	void setActiveRenderer(bool useOpenGLRenderer, bool reset);
+	void setActiveRenderer(Configuration::RenderMethod renderMethod, bool reset);
 
-	inline uint32 getScreenWidth() const	{ return mGameResolution.x; }
-	inline uint32 getScreenHeight() const	{ return mGameResolution.y; }
-	inline Vec2i getScreenSize() const		{ return Vec2i(mGameResolution.x, mGameResolution.y); }
-	inline Recti getScreenRect() const		{ return Recti(0, 0, mGameResolution.x, mGameResolution.y); }
+	uint32 getScreenWidth() const;
+	uint32 getScreenHeight() const;
+	Vec2i getScreenSize() const;
+	Recti getScreenRect() const;
 
 	void setScreenSize(uint32 width, uint32 height);
 	inline void setScreenSize(Vec2i size)	{ setScreenSize(size.x, size.y); }
@@ -75,6 +82,7 @@ private:
 	void collectGeometries(std::vector<Geometry*>& geometries);
 
 	void renderGameScreen();
+	void recoverFromRenderStateException(const char* stage);
 
 private:
 	enum class FrameState
@@ -95,6 +103,12 @@ private:
 private:
 	Renderer* mActiveRenderer = nullptr;
 	SoftwareRenderer* mSoftwareRenderer = nullptr;
+#if defined(PLATFORM_WINDOWS)
+	D3D11Renderer* mD3D11Renderer = nullptr;
+#if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
+	VulkanRenderer* mVulkanRenderer = nullptr;
+#endif
+#endif
 #ifdef RMX_WITH_OPENGL_SUPPORT
 	OpenGLRenderer* mOpenGLRenderer = nullptr;
 #endif

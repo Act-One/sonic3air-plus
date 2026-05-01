@@ -180,7 +180,7 @@ function void TitleScreen()
 	Renderer.resetSprites()
 
 	// Move planes a bit to the right
-	for (u8 i = 0; i < getScreenHeight(); ++i)
+	for (u16 i = 0; i < getScreenHeight(); ++i)
 		u32[0xffffe000 + i*4] = getScreenExtend() * 0x10001
 #endif
 

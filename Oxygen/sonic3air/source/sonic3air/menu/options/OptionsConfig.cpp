@@ -137,23 +137,34 @@ void OptionsConfig::buildDisplay()
 	CATEGORY("General")
 	{
 		configBuilder.addSetting("Renderer:", option::RENDERER);
-		const Configuration::RenderMethod highest = Configuration::getHighestSupportedRenderMethod();
-
-	#if !defined(PLATFORM_VITA)
 		configBuilder.addOption("Fail-Safe / Software", (uint32)Configuration::RenderMethod::SOFTWARE);
-		if (highest >= Configuration::RenderMethod::OPENGL_SOFT)
+
+	#if defined(PLATFORM_WINDOWS)
+		if (Configuration::isSupportedRenderMethod(Configuration::RenderMethod::D3D11_SOFT))
+			configBuilder.addOption("Direct 3D 11 Software", (uint32)Configuration::RenderMethod::D3D11_SOFT);
+		if (Configuration::isSupportedRenderMethod(Configuration::RenderMethod::D3D11_FULL))
+			configBuilder.addOption("Direct 3D 11 Hardware", (uint32)Configuration::RenderMethod::D3D11_FULL);
+		if (Configuration::isSupportedRenderMethod(Configuration::RenderMethod::VULKAN_SOFT))
+			configBuilder.addOption("Vulkan Software", (uint32)Configuration::RenderMethod::VULKAN_SOFT);
+		configBuilder.addOption("Vulkan Hardware", (uint32)Configuration::RenderMethod::VULKAN_FULL);
+	#endif
+
+	#if !defined(PLATFORM_UWP) && !defined(PLATFORM_VITA)
+		if (Configuration::isSupportedRenderMethod(Configuration::RenderMethod::OPENGL_SOFT))
 			configBuilder.addOption("OpenGL Software", (uint32)Configuration::RenderMethod::OPENGL_SOFT);
-		if (highest >= Configuration::RenderMethod::OPENGL_FULL)
+		if (Configuration::isSupportedRenderMethod(Configuration::RenderMethod::OPENGL_FULL))
 			configBuilder.addOption("OpenGL Hardware", (uint32)Configuration::RenderMethod::OPENGL_FULL);
-	#else
+	#elif defined(PLATFORM_VITA)
 		// OpenGL Hardware does not work correctly on PSVita
 		configBuilder.addOption("OpenGL Software", (uint32)Configuration::RenderMethod::OPENGL_SOFT);
 	#endif
 
 		configBuilder.addSetting("Frame Sync:", option::FRAME_SYNC)
-			.addOption("V-Sync Off", 0)
+			.addOption("V-Sync Off + FPS Cap", 0)
 			.addOption("V-Sync On", 1)
-			.addOption("V-Sync + FPS Cap", 2);
+			.addOption("V-Sync On + FPS Cap", 2)
+			.addOption("Frame Interpolation", 3)
+			.addOption("Uncapped", 4);
 
 		configBuilder.addSetting("Upscaling:", option::UPSCALING)
 			.addOption("Integer Scale", 1)

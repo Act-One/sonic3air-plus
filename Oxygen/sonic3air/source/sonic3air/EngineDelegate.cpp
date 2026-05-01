@@ -95,11 +95,24 @@ bool EngineDelegate::isDedicatedApplication()
 bool EngineDelegate::setupCustomGameProfile()
 {
 	GameProfile& gameProfile = GameProfile::instance();
+	Configuration& config = Configuration::instance();
 
-	if (FTX::FileSystem->exists(L"./oxygenproject.json"))
+	std::wstring oxygenProjectFilename;
+	for (const std::wstring& candidate : { std::wstring(L"./oxygenproject.json"), std::wstring(L"oxygenproject.json"), std::wstring(L"../oxygenproject.json"), std::wstring(L"../../oxygenproject.json"), std::wstring(L"Oxygen/sonic3air/oxygenproject.json") })
+	{
+		if (FTX::FileSystem->exists(candidate))
+		{
+			oxygenProjectFilename = candidate;
+			break;
+		}
+	}
+
+	if (!oxygenProjectFilename.empty())
 	{
 		// Load from the oxygenproject.json file
-		gameProfile.loadOxygenProjectFromFile(L"./oxygenproject.json");
+		const size_t slashPosition = oxygenProjectFilename.find_last_of(L"/\\");
+		config.mProjectPath = (slashPosition == std::wstring::npos) ? std::wstring() : oxygenProjectFilename.substr(0, slashPosition + 1);
+		gameProfile.loadOxygenProjectFromFile(oxygenProjectFilename);
 	}
 	else
 	{

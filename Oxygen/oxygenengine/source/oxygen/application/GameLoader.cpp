@@ -20,10 +20,86 @@
 #include "oxygen/resources/FontCollection.h"
 #include "oxygen/resources/ResourcesCache.h"
 #include "oxygen/simulation/PersistentData.h"
+#include <filesystem>
 #if defined(PLATFORM_ANDROID)
 	#include "oxygen/platform/android/AndroidJavaInterface.h"
 #endif
 
+
+namespace
+{
+#if defined(PLATFORM_UWP)
+	const wchar_t* UWP_DEPLOYMENT_STAGING_DIR = L"D:/DevelopmentFiles/Scarlet3AIR/";
+
+	bool tryImportRomFromUwpDeploymentStaging()
+	{
+		Configuration& config = Configuration::instance();
+		const GameProfile& gameProfile = GameProfile::instance();
+		if (gameProfile.mRomInfos.empty() || config.mGameAppDataPath.empty())
+			return false;
+
+		bool importedAnyRom = false;
+
+		try
+		{
+			std::filesystem::create_directories(std::filesystem::path(config.mGameAppDataPath));
+		}
+		catch (const std::exception& e)
+		{
+			RMX_LOG_WARNING("Failed to prepare LocalFolder for ROM import: " << e.what());
+			return false;
+		}
+
+		for (const GameProfile::RomInfo& romInfo : gameProfile.mRomInfos)
+		{
+			const std::filesystem::path localRomPath(config.mGameAppDataPath + romInfo.mSteamRomName);
+			if (std::filesystem::exists(localRomPath))
+				continue;
+
+			const std::filesystem::path stagedRomPath(std::wstring(UWP_DEPLOYMENT_STAGING_DIR) + romInfo.mSteamRomName);
+			if (!std::filesystem::exists(stagedRomPath))
+				continue;
+
+			try
+			{
+				std::filesystem::copy_file(stagedRomPath, localRomPath, std::filesystem::copy_options::overwrite_existing);
+				RMX_LOG_INFO("Imported staged ROM into LocalFolder: " << stagedRomPath.u8string());
+				importedAnyRom = true;
+			}
+			catch (const std::exception& e)
+			{
+				RMX_LOG_WARNING("Failed to import staged ROM from DevelopmentFiles: " << e.what());
+			}
+		}
+
+		return importedAnyRom;
+	}
+#endif
+}
+
+
+void GameLoader::setSetupScreenMessage(const std::string& title, const std::string& text)
+{
+	mSetupScreenTitle = title;
+	mSetupScreenText = text;
+}
+
+std::string GameLoader::buildMissingRomText(const GameProfile& gameProfile) const
+{
+	if (gameProfile.mRomInfos.empty())
+	{
+		return "Copy a game ROM to:\nLocalFolder/";
+	}
+
+	const std::string romFilename = WString(gameProfile.mRomInfos[0].mSteamRomName).toStdString();
+	return "Copy an original " + gameProfile.mRomInfos[0].mSteamGameName +
+		   " ROM to:\nLocalFolder/" + romFilename +
+#if defined(PLATFORM_UWP)
+		   "\n\nRemote deploy can also stage it at:\nDevelopmentFiles/Scarlet3AIR/" + romFilename;
+#else
+		   "";
+#endif
+}
 
 GameLoader::UpdateResult GameLoader::updateLoading()
 {
@@ -31,7 +107,11 @@ GameLoader::UpdateResult GameLoader::updateLoading()
 	{
 		case State::UNLOADED:
 		{
+			setSetupScreenMessage("Loading Game", "Checking for ROM and startup data...");
 			RMX_LOG_INFO("Loading ROM...");
+#if defined(PLATFORM_UWP)
+			tryImportRomFromUwpDeploymentStaging();
+#endif
 			if (!ResourcesCache::instance().loadRom())
 			{
 			#if defined(PLATFORM_ANDROID)
@@ -52,7 +132,7 @@ GameLoader::UpdateResult GameLoader::updateLoading()
 				const GameProfile& gameProfile = GameProfile::instance();
 				if (!gameProfile.mRomInfos.empty())
 				{
-				#if defined(PLATFORM_WINDOWS)
+				#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 					const std::string text = "This game requires an original " + gameProfile.mRomInfos[0].mSteamGameName + " ROM to work.\nIf you have one, click OK and select it in the following dialog.\n\nSee the Manual for details.";
 					const PlatformFunctions::DialogResult result = PlatformFunctions::showDialogBox(rmx::ErrorSeverity::INFO, PlatformFunctions::DialogButtons::OK_CANCEL, gameProfile.mFullName, text);
 					if (result == PlatformFunctions::DialogResult::CANCEL)
@@ -75,6 +155,14 @@ GameLoader::UpdateResult GameLoader::updateLoading()
 						return UpdateResult::CONTINUE_IMMEDIATE;
 					}
 
+				#elif defined(PLATFORM_UWP)
+					const std::string message = buildMissingRomText(gameProfile);
+					setSetupScreenMessage("ROM Required", message);
+					RMX_LOG_WARNING("ROM could not be loaded yet on UWP. Waiting for ROM in LocalFolder.");
+					mNextRomRetryTicks = SDL_GetTicks() + 1000;
+					mState = State::WAITING_FOR_ROM;
+					return UpdateResult::CONTINUE;
+
 				#elif defined(PLATFORM_ANDROID)
 					javaInterface.openRomFileSelectionDialog(gameProfile.mRomInfos[0].mSteamGameName);
 					mState = State::WAITING_FOR_ROM;
@@ -88,10 +176,19 @@ GameLoader::UpdateResult GameLoader::updateLoading()
 				}
 				else
 				{
+				#if defined(PLATFORM_UWP)
+					setSetupScreenMessage("ROM Required", buildMissingRomText(gameProfile));
+					RMX_LOG_WARNING("ROM could not be loaded yet on UWP. Waiting for ROM in LocalFolder.");
+					mNextRomRetryTicks = SDL_GetTicks() + 1000;
+					mState = State::WAITING_FOR_ROM;
+					return UpdateResult::CONTINUE;
+				#else
 					RMX_ERROR("ROM could not be loaded!\nAn original game ROM must be added manually. See the Manual for details.\n\nThe application will now close.", );
+				#endif
 				}
 			}
 			RMX_LOG_INFO("ROM found at: " << WString(Configuration::instance().mLastRomPath).toStdString());
+			setSetupScreenMessage("Loading Game", "Preparing mods, scripts, and resources...");
 
 			mState = State::ROM_LOADED;
 			return UpdateResult::CONTINUE_IMMEDIATE;
@@ -124,6 +221,20 @@ GameLoader::UpdateResult GameLoader::updateLoading()
 
 				default:
 					break;
+			}
+		#elif defined(PLATFORM_UWP)
+			const uint32 currentTicks = SDL_GetTicks();
+			if (SDL_TICKS_PASSED(currentTicks, mNextRomRetryTicks))
+			{
+				mNextRomRetryTicks = currentTicks + 1000;
+				tryImportRomFromUwpDeploymentStaging();
+				if (ResourcesCache::instance().loadRom())
+				{
+					RMX_LOG_INFO("ROM found at: " << WString(Configuration::instance().mLastRomPath).toStdString());
+					setSetupScreenMessage("Loading Game", "Preparing mods, scripts, and resources...");
+					mState = State::ROM_LOADED;
+					return UpdateResult::CONTINUE_IMMEDIATE;
+				}
 			}
 		#endif
 			return UpdateResult::CONTINUE;

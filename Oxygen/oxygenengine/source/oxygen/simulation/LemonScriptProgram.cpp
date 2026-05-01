@@ -31,7 +31,6 @@ struct ModuleAppendedInfo : public lemon::Module::AppendedInfo
 	const Mod* mMod = nullptr;
 };
 
-
 struct LemonScriptProgram::Internal
 {
 	lemon::Module mLemonCoreModule;
@@ -295,7 +294,6 @@ LemonScriptProgram::LoadingResult LemonScriptProgram::loadAllScriptModules(const
 	{
 		mInternal.mScriptModule.clear();
 		const uint32 coreModuleDependencyHash = mInternal.mLemonCoreModule.buildDependencyHash() + mInternal.mOxygenCoreModule.buildDependencyHash();
-
 		// Load scripts
 		bool scriptsLoaded = false;
 
@@ -412,6 +410,8 @@ bool LemonScriptProgram::loadBaseScriptFromSource(lemon::GlobalsLookup& globalsL
 	if (!FTX::FileSystem->exists(filename))
 		return false;
 
+	RMX_LOG_INFO("Loading scripts from source: " << WString(filename).toStdString());
+
 	// Compile module
 	outLoadingResult = loadScriptModule(mInternal.mScriptModule, globalsLookup, filename);
 
@@ -440,15 +440,20 @@ bool LemonScriptProgram::loadBaseScriptFromBinary(lemon::GlobalsLookup& globalsL
 	// Deserialize from compiled scripts
 	std::vector<uint8> buffer;
 	bool loaded = FTX::FileSystem->readFile(filename, buffer);
+	std::wstring loadedFilename(filename);
 
 	Configuration& config = Configuration::instance();
 	if (!loaded && !config.mCompiledScriptSavePath.empty())
 	{
 		loaded = FTX::FileSystem->readFile(config.mCompiledScriptSavePath, buffer);
+		if (loaded)
+			loadedFilename = config.mCompiledScriptSavePath;
 	}
 
 	if (!loaded)
 		return false;
+
+	RMX_LOG_INFO("Loading scripts from binary: " << WString(loadedFilename).toStdString());
 
 	VectorBinarySerializer serializer(true, buffer);
 	loaded = mInternal.mScriptModule.serialize(serializer, globalsLookup, coreModuleDependencyHash, loadOptions.mAppVersion);

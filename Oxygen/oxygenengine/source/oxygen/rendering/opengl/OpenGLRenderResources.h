@@ -10,6 +10,7 @@
 
 #ifdef RMX_WITH_OPENGL_SUPPORT
 
+#include "oxygen/rendering/parts/PlaneManager.h"
 #include "oxygen/rendering/utils/BufferTexture.h"
 #include "oxygen/drawing/opengl/OpenGLDrawerResources.h"
 
@@ -53,7 +54,7 @@ private:
 
 	// Planes
 	BufferTexture mPlanePatternsTexture[4];
-	uint16 mPlanePatternsData[4][0x1000] = { 0 };	// Cache of last uploaded data, to be able to make comparisons
+	uint16 mPlanePatternsData[4][PlaneManager::MAX_PLANE_PATTERNS] = { 0 };
 
 	// Scrolling
 	BufferTexture mHScrollOffsetsTexture[4];	// First two are for the planes, the others are used for certain effects that require an additional set of scroll offsets

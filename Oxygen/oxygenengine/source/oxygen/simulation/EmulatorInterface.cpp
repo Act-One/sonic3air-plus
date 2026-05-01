@@ -322,11 +322,24 @@ uint8* EmulatorInterface::getVRam()
 
 uint16 EmulatorInterface::readVRam16(uint16 vramAddress)
 {
+	if (vramAddress == 0xffff)
+	{
+		return (uint16)mInternal.mVRam[0xffff] | ((uint16)mInternal.mVRam[0] << 8);
+	}
 	return *(uint16*)(mInternal.mVRam + vramAddress);
 }
 
 void EmulatorInterface::writeVRam16(uint16 vramAddress, uint16 value)
 {
+	if (vramAddress == 0xffff)
+	{
+		mInternal.mVRam[0xffff] = (uint8)(value & 0xff);
+		mInternal.mVRam[0] = (uint8)(value >> 8);
+		mInternal.mVRamChangeBits.setBit(0x7ff);
+		mInternal.mVRamChangeBits.setBit(0);
+		return;
+	}
+
 	uint16* dst = (uint16*)(mInternal.mVRam + vramAddress);
 	*dst = value;
 
@@ -338,6 +351,15 @@ void EmulatorInterface::fillVRam(uint16 vramAddress, uint16 fillValue, uint16 by
 {
 	if (bytes == 0)
 		return;
+
+	if ((uint32)vramAddress + (uint32)bytes > 0x10000u)
+	{
+		for (uint16 i = 0; i < bytes; i += 2)
+		{
+			writeVRam16((uint16)(vramAddress + i), fillValue);
+		}
+		return;
+	}
 
 	uint16* dst = (uint16*)(mInternal.mVRam + vramAddress);
 	for (uint16 i = 0; i < bytes; i += 2)
@@ -357,8 +379,18 @@ void EmulatorInterface::copyFromMemoryToVRam(uint16 vramAddress, uint32 sourceAd
 	if (bytes == 0)
 		return;
 
-	uint16* dst = (uint16*)(mInternal.mVRam + vramAddress);
 	const uint16* src = (uint16*)(mInternal.accessMemory<MEMORY_MODE_READ>(sourceAddress, bytes));
+	if ((uint32)vramAddress + (uint32)bytes > 0x10000u)
+	{
+		const uint16* end = src + (bytes / 2);
+		for (uint16 offset = 0; src != end; ++src, offset += 2)
+		{
+			writeVRam16((uint16)(vramAddress + offset), swapBytes16(*src));
+		}
+		return;
+	}
+
+	uint16* dst = (uint16*)(mInternal.mVRam + vramAddress);
 	const uint16* end = src + (bytes / 2);
 	for (; src != end; ++src, ++dst)
 	{

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -17,7 +17,7 @@
       <Configuration>Release</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
-  </ItemGroup>
+  <ProjectConfiguration Include="DebugUWP|x64"><Configuration>DebugUWP</Configuration><Platform>x64</Platform></ProjectConfiguration><ProjectConfiguration Include="ReleaseUWP|x64"><Configuration>ReleaseUWP</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\source\oxygen\application\Application.cpp" />
     <ClCompile Include="..\..\source\oxygen\application\audio\AudioCollection.cpp" />
@@ -58,6 +58,11 @@
     <ClCompile Include="..\..\source\oxygen\drawing\DrawCommand.cpp" />
     <ClCompile Include="..\..\source\oxygen\drawing\Drawer.cpp" />
     <ClCompile Include="..\..\source\oxygen\drawing\DrawerTexture.cpp" />
+    <ClCompile Include="..\..\source\oxygen\drawing\d3d11\D3D11Drawer.cpp" />
+    <ClCompile Include="..\..\source\oxygen\drawing\d3d11\D3D11DrawerResources.cpp" />
+    <ClCompile Include="..\..\source\oxygen\drawing\d3d11\D3D11DrawerTexture.cpp" />
+    <ClCompile Include="..\..\source\oxygen\drawing\d3d11\D3D11SpriteTextureManager.cpp" />
+    <ClCompile Include="..\..\source\oxygen\drawing\d3d11\D3D11Upscaler.cpp" />
     <ClCompile Include="..\..\source\oxygen\drawing\opengl\OpenGLDrawer.cpp" />
     <ClCompile Include="..\..\source\oxygen\drawing\opengl\OpenGLDrawerResources.cpp" />
     <ClCompile Include="..\..\source\oxygen\drawing\opengl\OpenGLDrawerTexture.cpp" />
@@ -68,6 +73,10 @@
     <ClCompile Include="..\..\source\oxygen\drawing\software\SoftwareDrawer.cpp" />
     <ClCompile Include="..\..\source\oxygen\drawing\software\SoftwareDrawerTexture.cpp" />
     <ClCompile Include="..\..\source\oxygen\drawing\software\SoftwareRasterizer.cpp" />
+    <ClCompile Include="..\..\source\oxygen\drawing\vulkan\VulkanDrawer.cpp" />
+    <ClCompile Include="..\..\source\oxygen\drawing\vulkan\VulkanDrawerResources.cpp" />
+    <ClCompile Include="..\..\source\oxygen\drawing\vulkan\VulkanDrawerTexture.cpp" />
+    <ClCompile Include="..\..\source\oxygen\drawing\vulkan\VulkanUpscaler.cpp" />
     <ClCompile Include="..\..\source\oxygen\file\FilePackage.cpp" />
     <ClCompile Include="..\..\source\oxygen\file\FileStructureTree.cpp" />
     <ClCompile Include="..\..\source\oxygen\file\PackedFileProvider.cpp" />
@@ -131,6 +140,9 @@
     <ClCompile Include="..\..\source\oxygen\platform\CrashHandler.cpp" />
     <ClCompile Include="..\..\source\oxygen\platform\PlatformFunctions.cpp" />
     <ClCompile Include="..\..\source\oxygen\rendering\Geometry.cpp" />
+    <ClCompile Include="..\..\source\oxygen\rendering\d3d11\D3D11Renderer.cpp" />
+    <ClCompile Include="..\..\source\oxygen\rendering\d3d11\D3D11RenderResources.cpp" />
+    <ClCompile Include="..\..\source\oxygen\rendering\d3d11\D3D11Shader.cpp" />
     <ClCompile Include="..\..\source\oxygen\rendering\opengl\OpenGLRenderer.cpp" />
     <ClCompile Include="..\..\source\oxygen\rendering\opengl\OpenGLRenderResources.cpp" />
     <ClCompile Include="..\..\source\oxygen\rendering\opengl\shaders\DebugDrawPlaneShader.cpp" />
@@ -158,6 +170,18 @@
     <ClCompile Include="..\..\source\oxygen\rendering\Renderer.cpp" />
     <ClCompile Include="..\..\source\oxygen\rendering\RenderResources.cpp" />
     <ClCompile Include="..\..\source\oxygen\rendering\software\SoftwareRenderer.cpp" />
+    <ClCompile Include="..\..\source\oxygen\rendering\vulkan\Descriptors.cpp" />
+    <ClCompile Include="..\..\source\oxygen\rendering\vulkan\Frame.cpp" />
+    <ClCompile Include="..\..\source\oxygen\rendering\vulkan\Pipeline.cpp" />
+    <ClCompile Include="..\..\source\oxygen\rendering\vulkan\Renderer.cpp">
+      <ObjectFileName>$(IntDir)VulkanRendererCore.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\source\oxygen\rendering\vulkan\SwapchainPresentBackend.cpp" />
+    <ClCompile Include="..\..\source\oxygen\rendering\vulkan\Texture.cpp" />
+    <ClCompile Include="..\..\source\oxygen\rendering\vulkan\VmaAllocatorImpl.cpp" />
+    <ClCompile Include="..\..\source\oxygen\rendering\vulkan\VulkanDevice.cpp" />
+    <ClCompile Include="..\..\source\oxygen\rendering\vulkan\VulkanRenderer.cpp" />
+    <ClCompile Include="..\..\source\oxygen\rendering\vulkan\VulkanRenderResources.cpp" />
     <ClCompile Include="..\..\source\oxygen\rendering\sprite\ComponentSprite.cpp" />
     <ClCompile Include="..\..\source\oxygen\rendering\sprite\PaletteSprite.cpp" />
     <ClCompile Include="..\..\source\oxygen\rendering\sprite\SpriteDump.cpp" />
@@ -233,6 +257,11 @@
     <ClInclude Include="..\..\source\oxygen\drawing\Drawer.h" />
     <ClInclude Include="..\..\source\oxygen\drawing\DrawerTexture.h" />
     <ClInclude Include="..\..\source\oxygen\drawing\DrawerInterface.h" />
+    <ClInclude Include="..\..\source\oxygen\drawing\d3d11\D3D11Drawer.h" />
+    <ClInclude Include="..\..\source\oxygen\drawing\d3d11\D3D11DrawerResources.h" />
+    <ClInclude Include="..\..\source\oxygen\drawing\d3d11\D3D11DrawerTexture.h" />
+    <ClInclude Include="..\..\source\oxygen\drawing\d3d11\D3D11SpriteTextureManager.h" />
+    <ClInclude Include="..\..\source\oxygen\drawing\d3d11\D3D11Upscaler.h" />
     <ClInclude Include="..\..\source\oxygen\drawing\opengl\OpenGLDrawer.h" />
     <ClInclude Include="..\..\source\oxygen\drawing\opengl\OpenGLDrawerResources.h" />
     <ClInclude Include="..\..\source\oxygen\drawing\opengl\OpenGLDrawerTexture.h" />
@@ -244,6 +273,10 @@
     <ClInclude Include="..\..\source\oxygen\drawing\software\SoftwareRasterizer.h" />
     <ClInclude Include="..\..\source\oxygen\drawing\software\SoftwareDrawer.h" />
     <ClInclude Include="..\..\source\oxygen\drawing\software\SoftwareDrawerTexture.h" />
+    <ClInclude Include="..\..\source\oxygen\drawing\vulkan\VulkanDrawer.h" />
+    <ClInclude Include="..\..\source\oxygen\drawing\vulkan\VulkanDrawerResources.h" />
+    <ClInclude Include="..\..\source\oxygen\drawing\vulkan\VulkanDrawerTexture.h" />
+    <ClInclude Include="..\..\source\oxygen\drawing\vulkan\VulkanUpscaler.h" />
     <ClInclude Include="..\..\source\oxygen\file\FilePackage.h" />
     <ClInclude Include="..\..\source\oxygen\file\FileStructureTree.h" />
     <ClInclude Include="..\..\source\oxygen\file\PackedFileProvider.h" />
@@ -310,6 +343,9 @@
     <ClInclude Include="..\..\source\oxygen\platform\PlatformFlags.h" />
     <ClInclude Include="..\..\source\oxygen\platform\PlatformFunctions.h" />
     <ClInclude Include="..\..\source\oxygen\rendering\Geometry.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\d3d11\D3D11Renderer.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\d3d11\D3D11RenderResources.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\d3d11\D3D11Shader.h" />
     <ClInclude Include="..\..\source\oxygen\rendering\opengl\OpenGLRenderer.h" />
     <ClInclude Include="..\..\source\oxygen\rendering\opengl\OpenGLRenderResources.h" />
     <ClInclude Include="..\..\source\oxygen\rendering\opengl\shaders\DebugDrawPlaneShader.h" />
@@ -341,6 +377,19 @@
     <ClInclude Include="..\..\source\oxygen\rendering\RenderResources.h" />
     <ClInclude Include="..\..\source\oxygen\rendering\software\SoftwareBlur.h" />
     <ClInclude Include="..\..\source\oxygen\rendering\software\SoftwareRenderer.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\Descriptors.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\Frame.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\IAllocator.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\IPresentBackend.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\Pipeline.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\Renderer.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\SwapchainPresentBackend.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\Texture.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\VmaAllocatorImpl.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\VulkanCommon.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\VulkanDevice.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\VulkanRenderer.h" />
+    <ClInclude Include="..\..\source\oxygen\rendering\vulkan\VulkanRenderResources.h" />
     <ClInclude Include="..\..\source\oxygen\rendering\sprite\ComponentSprite.h" />
     <ClInclude Include="..\..\source\oxygen\rendering\sprite\PaletteSprite.h" />
     <ClInclude Include="..\..\source\oxygen\rendering\sprite\SpriteBase.h" />
@@ -402,33 +451,45 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{1E137789-9E2E-45DD-AEF2-96BD3A6F4E02}</ProjectGuid>
     <RootNamespace>oxygen</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
     <ProjectName>oxygen</ProjectName>
+    <DefaultLanguage>en-US</DefaultLanguage>
   </PropertyGroup>
-  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="('$(Configuration)|$(Platform)'=='DebugUWP|x64') Or ('$(Configuration)|$(Platform)'=='ReleaseUWP|x64')"><AppContainerApplication>true</AppContainerApplication><ApplicationType>Windows Store</ApplicationType><ApplicationTypeRevision>10.0</ApplicationTypeRevision><WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion><WindowsTargetPlatformMinVersion>10.0.19041.0</WindowsTargetPlatformMinVersion></PropertyGroup><Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
@@ -442,12 +503,18 @@
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="oxygen.props" />
+  </ImportGroup><ImportGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="oxygen.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="oxygen.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="oxygen.props" />
+  </ImportGroup><ImportGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="oxygen.props" />
   </ImportGroup>
@@ -461,6 +528,10 @@
     <TargetName>oxygen</TargetName>
     <OutDir>$(ProjectDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
     <IntDir>tmp\oxygen_$(Configuration)_$(BuildCode)\</IntDir>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <TargetName>oxygen</TargetName>
+    <OutDir>$(ProjectDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
+    <IntDir>tmp\oxygen_$(Configuration)_$(BuildCode)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <OutDir>$(ProjectDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
@@ -471,13 +542,17 @@
     <TargetName>oxygen</TargetName>
     <OutDir>$(ProjectDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
     <IntDir>tmp\oxygen_$(Configuration)_$(BuildCode)\</IntDir>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <TargetName>oxygen</TargetName>
+    <OutDir>$(ProjectDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
+    <IntDir>tmp\oxygen_$(Configuration)_$(BuildCode)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>DEBUG;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;../../../../framework/external/sdl/SDL2/src/video/khronos;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>OXYGEN_ENABLE_VULKAN_RENDERER;DEBUG;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>oxygen/pch.h</PrecompiledHeaderFile>
@@ -496,8 +571,8 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>DEBUG;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;../../../../framework/external/sdl/SDL2/src/video/khronos;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>OXYGEN_ENABLE_VULKAN_RENDERER;DEBUG;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>oxygen/pch.h</PrecompiledHeaderFile>
@@ -511,14 +586,33 @@
       <SubSystem>Windows</SubSystem>
       <IgnoreSpecificDefaultLibraries>LIBCMT.lib</IgnoreSpecificDefaultLibraries>
     </Link>
+  </ItemDefinitionGroup><ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;../../../../framework/external/sdl/SDL2/src/video/khronos;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>PLATFORM_UWP;USE_UTF8_PATHS;OXYGEN_ENABLE_D3D11_HARDWARE_RENDERER;DEBUG;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>oxygen/pch.h</PrecompiledHeaderFile>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>../../../lemonscript_svn/lib/$(BuildCode);../../source/helper/zlib/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;d3dcompiler.lib;lemonscript.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem>Windows</SubSystem>
+      <IgnoreSpecificDefaultLibraries>LIBCMT.lib</IgnoreSpecificDefaultLibraries>
+    </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;../../../../framework/external/sdl/SDL2/src/video/khronos;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>OXYGEN_ENABLE_VULKAN_RENDERER;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>oxygen/pch.h</PrecompiledHeaderFile>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -537,8 +631,8 @@
       <WarningLevel>Level3</WarningLevel>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;../../../../framework/external/sdl/SDL2/src/video/khronos;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>OXYGEN_ENABLE_VULKAN_RENDERER;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>oxygen/pch.h</PrecompiledHeaderFile>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -551,6 +645,37 @@
       <SubSystem>Windows</SubSystem>
       <IgnoreSpecificDefaultLibraries>LIBCMT.lib</IgnoreSpecificDefaultLibraries>
     </Link>
+  </ItemDefinitionGroup><ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>../../source;../../../lemonscript/source;../../../../framework/external/sdl/SDL2/src/video/khronos;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>PLATFORM_UWP;USE_UTF8_PATHS;OXYGEN_ENABLE_D3D11_HARDWARE_RENDERER;MAXPATHLEN=256;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>oxygen/pch.h</PrecompiledHeaderFile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>../../../lemonscript_svn/lib/$(BuildCode);../../source/helper/zlib/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;d3dcompiler.lib;lemonscript.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem>Windows</SubSystem>
+      <IgnoreSpecificDefaultLibraries>LIBCMT.lib</IgnoreSpecificDefaultLibraries>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

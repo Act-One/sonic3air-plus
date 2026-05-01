@@ -31,6 +31,8 @@ public:
 	void setupRenderWindow(SDL_Window* window) override;
 	void performRendering(const DrawCollection& drawCollection) override;
 	void presentScreen() override;
+	void setExternalOutputBitmap(Bitmap* bitmap);
+	void clearExternalOutputBitmap();
 
 	const BitmapViewMutable<uint32>& getRenderTarget() const;
 	bool needSwapRedBlueChannels() const;

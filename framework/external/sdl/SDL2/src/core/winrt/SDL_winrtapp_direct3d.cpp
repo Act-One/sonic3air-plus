@@ -33,6 +33,8 @@ using namespace Windows::System;
 using namespace Windows::UI::Core;
 using namespace Windows::UI::Input;
 
+#include <sstream>
+
 #if SDL_WINAPI_FAMILY_PHONE
 using namespace Windows::Phone::UI::Input;
 #endif
@@ -57,6 +59,7 @@ extern "C" {
 #include "../../video/winrt/SDL_winrtvideo_cpp.h"
 #include "SDL_winrtapp_common.h"
 #include "SDL_winrtapp_direct3d.h"
+#include "../../../../../../../Oxygen/sonic3air/build/_vstudio/UwpBootTrace.h"
 
 #if SDL_VIDEO_RENDER_D3D11
 /* Calling IDXGIDevice3::Trim on the active Direct3D 11.x device is necessary
@@ -166,6 +169,7 @@ SDL_WinRTApp::SDL_WinRTApp() : m_windowClosed(false),
 
 void SDL_WinRTApp::Initialize(CoreApplicationView ^ applicationView)
 {
+    s3air::uwp::appendBootTrace(L"SDL_WinRTApp", L"Initialize");
     applicationView->Activated +=
         ref new TypedEventHandler<CoreApplicationView ^, IActivatedEventArgs ^>(this, &SDL_WinRTApp::OnAppActivated);
 
@@ -243,6 +247,11 @@ void SDL_WinRTApp::OnOrientationChanged(Object ^ sender)
 
 void SDL_WinRTApp::SetWindow(CoreWindow ^ window)
 {
+    {
+        std::wstringstream stream;
+        stream << L"SetWindow bounds=" << window->Bounds.X << L"," << window->Bounds.Y << L"," << window->Bounds.Width << L"," << window->Bounds.Height;
+        s3air::uwp::appendBootTrace(L"SDL_WinRTApp", stream.str());
+    }
 #if LOG_WINDOW_EVENTS == 1
     SDL_Log("%s, current orientation=%d, native orientation=%d, auto rot. pref=%d, window bounds={%f, %f, %f,%f}\n",
             __FUNCTION__,
@@ -328,14 +337,17 @@ void SDL_WinRTApp::SetWindow(CoreWindow ^ window)
     SettingsPane::GetForCurrentView()->CommandsRequested +=
         ref new TypedEventHandler<SettingsPane ^, SettingsPaneCommandsRequestedEventArgs ^>(this, &SDL_WinRTApp::OnSettingsPaneCommandsRequested);
 #endif
+
 }
 
 void SDL_WinRTApp::Load(Platform::String ^ entryPoint)
 {
+    s3air::uwp::appendBootTrace(L"SDL_WinRTApp", L"Load");
 }
 
 void SDL_WinRTApp::Run()
 {
+    s3air::uwp::appendBootTrace(L"SDL_WinRTApp", L"Run begin");
     SDL_SetMainReady();
     if (WINRT_SDLAppEntryPoint) {
         // TODO, WinRT: pass the C-style main() a reasonably realistic
@@ -343,14 +355,18 @@ void SDL_WinRTApp::Run()
         int argc = 1;
         char **argv = (char **)SDL_malloc(2 * sizeof(*argv));
         if (!argv) {
+            s3air::uwp::appendBootTrace(L"SDL_WinRTApp", L"Run argv allocation failed");
             return;
         }
         argv[0] = SDL_strdup("WinRTApp");
         argv[1] = NULL;
+        s3air::uwp::appendBootTrace(L"SDL_WinRTApp", L"Calling WINRT_SDLAppEntryPoint");
         WINRT_SDLAppEntryPoint(argc, argv);
+        s3air::uwp::appendBootTrace(L"SDL_WinRTApp", L"WINRT_SDLAppEntryPoint returned");
         SDL_free(argv[0]);
         SDL_free(argv);
     }
+    s3air::uwp::appendBootTrace(L"SDL_WinRTApp", L"Run end");
 }
 
 static bool IsSDLWindowEventPending(SDL_WindowEventID windowEventID)
@@ -464,6 +480,11 @@ void SDL_WinRTApp::OnSettingsPaneCommandsRequested(
 
 void SDL_WinRTApp::OnWindowSizeChanged(CoreWindow ^ sender, WindowSizeChangedEventArgs ^ args)
 {
+    {
+        std::wstringstream stream;
+        stream << L"OnWindowSizeChanged size=" << args->Size.Width << L"x" << args->Size.Height;
+        s3air::uwp::appendBootTrace(L"SDL_WinRTApp", stream.str());
+    }
 #if LOG_WINDOW_EVENTS == 1
     SDL_Log("%s, size={%f,%f}, bounds={%f,%f,%f,%f}, current orientation=%d, native orientation=%d, auto rot. pref=%d, WINRT_GlobalSDLWindow?=%s\n",
             __FUNCTION__,
@@ -480,6 +501,7 @@ void SDL_WinRTApp::OnWindowSizeChanged(CoreWindow ^ sender, WindowSizeChangedEve
 
 void SDL_WinRTApp::OnVisibilityChanged(CoreWindow ^ sender, VisibilityChangedEventArgs ^ args)
 {
+    s3air::uwp::appendBootTrace(L"SDL_WinRTApp", args->Visible ? L"OnVisibilityChanged visible" : L"OnVisibilityChanged hidden");
 #if LOG_WINDOW_EVENTS == 1
     SDL_Log("%s, visible?=%s, bounds={%f,%f,%f,%f}, WINRT_GlobalSDLWindow?=%s\n",
             __FUNCTION__,
@@ -519,6 +541,11 @@ void SDL_WinRTApp::OnVisibilityChanged(CoreWindow ^ sender, VisibilityChangedEve
 
 void SDL_WinRTApp::OnWindowActivated(CoreWindow ^ sender, WindowActivatedEventArgs ^ args)
 {
+    {
+        std::wstringstream stream;
+        stream << L"OnWindowActivated state=" << (int)args->WindowActivationState;
+        s3air::uwp::appendBootTrace(L"SDL_WinRTApp", stream.str());
+    }
 #if LOG_WINDOW_EVENTS == 1
     SDL_Log("%s, WINRT_GlobalSDLWindow?=%s\n\n",
             __FUNCTION__,
@@ -581,6 +608,7 @@ void SDL_WinRTApp::OnWindowActivated(CoreWindow ^ sender, WindowActivatedEventAr
 
 void SDL_WinRTApp::OnWindowClosed(CoreWindow ^ sender, CoreWindowEventArgs ^ args)
 {
+    s3air::uwp::appendBootTrace(L"SDL_WinRTApp", L"OnWindowClosed");
 #if LOG_WINDOW_EVENTS == 1
     SDL_Log("%s\n", __FUNCTION__);
 #endif
@@ -589,7 +617,9 @@ void SDL_WinRTApp::OnWindowClosed(CoreWindow ^ sender, CoreWindowEventArgs ^ arg
 
 void SDL_WinRTApp::OnAppActivated(CoreApplicationView ^ applicationView, IActivatedEventArgs ^ args)
 {
+    s3air::uwp::appendBootTrace(L"SDL_WinRTApp", L"OnAppActivated");
     CoreWindow::GetForCurrentThread()->Activate();
+    s3air::uwp::appendBootTrace(L"SDL_WinRTApp", L"CoreWindow activated");
 }
 
 void SDL_WinRTApp::OnSuspending(Platform::Object ^ sender, SuspendingEventArgs ^ args)
@@ -637,6 +667,7 @@ void SDL_WinRTApp::OnSuspending(Platform::Object ^ sender, SuspendingEventArgs ^
 
 void SDL_WinRTApp::OnResuming(Platform::Object ^ sender, Platform::Object ^ args)
 {
+    s3air::uwp::appendBootTrace(L"SDL_WinRTApp", L"OnResuming");
     // Restore any data or state that was unloaded on suspend. By default, data
     // and state are persisted when resuming from suspend. Note that these events
     // do not occur if the app was previously terminated.
@@ -646,6 +677,7 @@ void SDL_WinRTApp::OnResuming(Platform::Object ^ sender, Platform::Object ^ args
 
 void SDL_WinRTApp::OnExiting(Platform::Object ^ sender, Platform::Object ^ args)
 {
+    s3air::uwp::appendBootTrace(L"SDL_WinRTApp", L"OnExiting");
     SDL_SendAppEvent(SDL_APP_TERMINATING);
 }
 

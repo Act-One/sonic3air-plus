@@ -24,7 +24,13 @@ public:
 
 		inline Key() {}
 		inline Key(uint64 fontKeyHash, uint64 textHash, int8 spacing) : mFontKeyHash(fontKeyHash), mTextHash(textHash), mSpacing(spacing) {}
-		inline uint64 combined() const  { return mFontKeyHash ^ mTextHash ^ mSpacing; }
+		inline bool operator==(const Key& other) const  { return mFontKeyHash == other.mFontKeyHash && mTextHash == other.mTextHash && mSpacing == other.mSpacing; }
+		inline bool operator!=(const Key& other) const  { return !(*this == other); }
+	};
+
+	struct KeyHasher
+	{
+		size_t operator()(const Key& key) const;
 	};
 
 	struct CacheItem
@@ -46,6 +52,6 @@ public:
 	void regularCleanup();
 
 private:
-	std::unordered_map<uint64, CacheItem> mCacheItems;
+	std::unordered_map<Key, CacheItem, KeyHasher> mCacheItems;
 	uint32 mNextCheckTicks = 0;
 };

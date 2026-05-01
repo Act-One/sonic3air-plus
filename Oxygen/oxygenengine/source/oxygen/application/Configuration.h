@@ -23,7 +23,11 @@ public:
 		UNDEFINED	= 0x00,
 		SOFTWARE	= 0x10,
 		OPENGL_SOFT	= 0x20,
-		OPENGL_FULL	= 0x21
+		OPENGL_FULL	= 0x21,
+		D3D11_SOFT	= 0x30,
+		D3D11_FULL	= 0x31,
+		VULKAN_SOFT	= 0x40,
+		VULKAN_FULL	= 0x41
 	};
 
 	enum class WindowMode
@@ -40,6 +44,7 @@ public:
 		VSYNC_ON,
 		VSYNC_FRAMECAP,
 		FRAME_INTERPOLATION,
+		UNCAPPED,
 		_NUM
 	};
 
@@ -132,6 +137,15 @@ public:
 	inline static Configuration& instance()  { return *mSingleInstance; }
 
 	static RenderMethod getHighestSupportedRenderMethod();
+	static bool isSupportedRenderMethod(RenderMethod renderMethod);
+	static bool isOpenGLRenderMethod(RenderMethod renderMethod);
+	static bool isDirect3D11RenderMethod(RenderMethod renderMethod);
+	static bool isVulkanRenderMethod(RenderMethod renderMethod);
+	static bool renderMethodSupportsNativeVSync(RenderMethod renderMethod);
+	static bool useVSync(FrameSyncType frameSyncType);
+	static bool useFrameCap(FrameSyncType frameSyncType);
+	static bool useFrameInterpolation(FrameSyncType frameSyncType);
+	static const char* getRenderMethodConfigString(RenderMethod renderMethod);
 
 public:
 	Configuration();

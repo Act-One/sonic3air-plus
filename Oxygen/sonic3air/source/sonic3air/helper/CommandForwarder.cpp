@@ -9,7 +9,7 @@
 #include "sonic3air/pch.h"
 #include "sonic3air/helper/CommandForwarder.h"
 
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	#include <windows.h>
 	#undef ERROR
 #endif
@@ -20,7 +20,7 @@
 
 struct CommandForwarder::Internal
 {
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	static inline const char* COMMAND_FORWARDER_PIPE_NAME = "\\\\.\\Pipe\\Sonic3AIR_CommandForwarder";
 	static inline const size_t MAX_BUFFER_SIZE = 1024;
 

@@ -25,7 +25,9 @@ public:
 	inline BitmapViewMutable(Bitmap& bitmap) : mData(bitmap.getData()), mSize(bitmap.getSize()), mStride(bitmap.getWidth()) {}
 	inline BitmapViewMutable(Bitmap& bitmap, const Recti& innerRect) : mData(bitmap.getData()), mSize(bitmap.getSize()), mStride(bitmap.getWidth()) { makePartialRect(innerRect); }
 	inline BitmapViewMutable(T* data, Vec2i size) : mData(data), mSize(size), mStride(size.x) {}
+	inline BitmapViewMutable(T* data, Vec2i size, size_t stride) : mData(data), mSize(size), mStride(stride) {}
 	inline BitmapViewMutable(T* data, Vec2i size, const Recti& innerRect) : mData(data), mSize(size), mStride(size.x) { makePartialRect(innerRect); }
+	inline BitmapViewMutable(T* data, Vec2i size, size_t stride, const Recti& innerRect) : mData(data), mSize(size), mStride(stride) { makePartialRect(innerRect); }
 
 	inline void operator=(const BitmapViewMutable& other)  { mData = other.mData; mSize = other.mSize; mStride = other.mStride; }
 
@@ -68,7 +70,9 @@ public:
 	inline BitmapView(const Bitmap& bitmap) : mData(bitmap.getData()), mSize(bitmap.getSize()), mStride(bitmap.getWidth()) {}
 	inline BitmapView(const Bitmap& bitmap, const Recti& innerRect) : mData(bitmap.getData()), mSize(bitmap.getSize()), mStride(bitmap.getWidth()) { makePartialRect(innerRect); }
 	inline BitmapView(const T* data, Vec2i size) : mData(data), mSize(size), mStride(size.x) {}
+	inline BitmapView(const T* data, Vec2i size, size_t stride) : mData(data), mSize(size), mStride(stride) {}
 	inline BitmapView(const T* data, Vec2i size, const Recti& innerRect) : mData(data), mSize(size), mStride(size.x) { makePartialRect(innerRect); }
+	inline BitmapView(const T* data, Vec2i size, size_t stride, const Recti& innerRect) : mData(data), mSize(size), mStride(stride) { makePartialRect(innerRect); }
 
 	inline void operator=(const BitmapView& other)  { mData = other.mData; mSize = other.mSize; mStride = other.mStride; }
 

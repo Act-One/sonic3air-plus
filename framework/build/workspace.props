@@ -7,6 +7,8 @@
     <BuildCode Condition="'$(Configuration)'!='Debug' And '$(PlatformArchitecture)'!='64'">x86</BuildCode>
     <BuildCode Condition="'$(Configuration)'=='Debug' And '$(PlatformArchitecture)'=='64'">x64d</BuildCode>
     <BuildCode Condition="'$(Configuration)'!='Debug' And '$(PlatformArchitecture)'=='64'">x64</BuildCode>
+    <BuildCode Condition="'$(Configuration)'=='DebugUWP' And '$(Platform)'=='x64'">x64d_uwp</BuildCode>
+    <BuildCode Condition="'$(Configuration)'=='ReleaseUWP' And '$(Platform)'=='x64'">x64_uwp</BuildCode>
   </PropertyGroup>
   <ItemGroup>
     <BuildMacro Include="WorkspaceDir">

@@ -1646,7 +1646,7 @@ function void fn04dea2()
 #if !STANDALONE
 	scrolloffset.y.planeB = 0x10
 	A1 = 0xffffe002
-	for (u8 y = 0; y < getScreenHeight(); ++y)
+	for (u16 y = 0; y < getScreenHeight(); ++y)
 	{
 		u16[A1] -= 0x10
 		A1 += 4

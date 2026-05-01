@@ -962,7 +962,7 @@ function void fn05011e()
 		fn23b680()
 		A1 = 0xffffe002
 		D0.s16 = -s16(camera.background.x.u16)
-		for (u8 i = 0; i < getScreenHeight(); ++i)
+		for (u16 i = 0; i < getScreenHeight(); ++i)
 		{
 			u16[A1] = D0.u16
 			A1 += 4

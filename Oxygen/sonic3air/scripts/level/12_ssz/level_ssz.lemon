@@ -650,7 +650,7 @@ function void fn0578f0()
 	{
 		// Overwrite scroll offsets for plane A to move the Death Egg depending on screen width
 		D0.s16 = -s16(camera.foreground.x.u16) + max(0, s16(getScreenExtend() - 40) + 8)
-		for (u8 line = 0; line < getScreenHeight(); ++line)
+		for (u16 line = 0; line < getScreenHeight(); ++line)
 		{
 			u16[0xffffe000 + line * 4] = D0
 		}

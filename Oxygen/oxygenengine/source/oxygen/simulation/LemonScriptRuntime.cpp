@@ -355,6 +355,14 @@ void LemonScriptRuntime::getCurrentExecutionLocation(const lemon::ScriptFunction
 	outProgramCounter = location.mProgramCounter;
 }
 
+void LemonScriptRuntime::getRecentExecutionLocation(const lemon::ScriptFunction*& outFunction, size_t& outProgramCounter) const
+{
+	lemon::ControlFlow::Location location;
+	mInternal.mRuntime.getSelectedControlFlow().getRecentExecutionLocation(location);
+	outFunction = location.mFunction;
+	outProgramCounter = location.mProgramCounter;
+}
+
 std::string LemonScriptRuntime::getOwnCurrentScriptLocationString() const
 {
 	return buildScriptLocationString(mInternal.mRuntime.getSelectedControlFlow());

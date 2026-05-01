@@ -14,7 +14,10 @@
 
 // --- Platform type: Desktop, Mobile, Console ---
 
-#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_LINUX) || defined(PLATFORM_MAC)
+#if defined(PLATFORM_UWP)
+	#define PLATFORM_IS_CONSOLE
+
+#elif defined(PLATFORM_WINDOWS) || defined(PLATFORM_LINUX) || defined(PLATFORM_MAC)
 	#define PLATFORM_IS_DESKTOP
 
 #elif defined(PLATFORM_ANDROID) || defined(PLATFORM_IOS) || defined(PLATFORM_WEB)
@@ -28,7 +31,7 @@
 
 // --- Platform input devices ---
 
-#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_LINUX) || defined(PLATFORM_MAC)
+#if (defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)) || defined(PLATFORM_LINUX) || defined(PLATFORM_MAC)
 	#define PLATFORM_HAS_HARDWARE_KEYBOARD
 	#define PLATFORM_HAS_MOUSE
 

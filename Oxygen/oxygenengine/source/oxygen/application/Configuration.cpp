@@ -147,6 +147,15 @@ namespace
 			{
 				outRenderMethod = (renderMethodString.endsWith("soft") || renderMethodString.endsWith("software")) ? Configuration::RenderMethod::OPENGL_SOFT : Configuration::RenderMethod::OPENGL_FULL;
 			}
+			else if (renderMethodString.startsWith("d3d11") || renderMethodString.startsWith("direct3d11") || renderMethodString.startsWith("direct3d 11"))
+			{
+				outRenderMethod = (renderMethodString.endsWith("full") || renderMethodString.endsWith("hardware")) ? Configuration::RenderMethod::D3D11_FULL : Configuration::RenderMethod::D3D11_SOFT;
+			}
+			else if (renderMethodString.startsWith("vulkan"))
+			{
+				const bool requestHardware = (renderMethodString.endsWith("full") || renderMethodString.endsWith("hardware"));
+				outRenderMethod = (requestHardware && Configuration::isSupportedRenderMethod(Configuration::RenderMethod::VULKAN_FULL)) ? Configuration::RenderMethod::VULKAN_FULL : Configuration::RenderMethod::VULKAN_SOFT;
+			}
 			else if (renderMethodString == "software")
 			{
 				outRenderMethod = Configuration::RenderMethod::SOFTWARE;
@@ -159,6 +168,11 @@ namespace
 				{
 					outRenderMethod = useSoftwareRenderer ? Configuration::RenderMethod::OPENGL_SOFT : Configuration::RenderMethod::OPENGL_FULL;
 				}
+			}
+
+			if (!Configuration::isSupportedRenderMethod(outRenderMethod))
+			{
+				outRenderMethod = Configuration::getHighestSupportedRenderMethod();
 			}
 		}
 	}
@@ -226,12 +240,140 @@ namespace
 
 Configuration::RenderMethod Configuration::getHighestSupportedRenderMethod()
 {
-#if defined(PLATFORM_WEB) || (defined(PLATFORM_MAC) && defined(__arm64__)) || defined(PLATFORM_VITA)
+#if defined(PLATFORM_UWP)
+	return RenderMethod::D3D11_SOFT;
+#elif defined(PLATFORM_WEB) || (defined(PLATFORM_MAC) && defined(__arm64__)) || defined(PLATFORM_VITA)
 	return RenderMethod::OPENGL_SOFT;
 #else
 	// Default is OpenGL Hardware render method (as it's the highest one), but this can be lowered as needed, e.g. for individual platforms or depending on the execution environment
 	return RenderMethod::OPENGL_FULL;
 #endif
+}
+
+bool Configuration::isSupportedRenderMethod(RenderMethod renderMethod)
+{
+	switch (renderMethod)
+	{
+		case RenderMethod::SOFTWARE:
+			return true;
+
+		case RenderMethod::OPENGL_SOFT:
+#if defined(PLATFORM_UWP)
+			return false;
+#else
+			return true;
+#endif
+
+		case RenderMethod::OPENGL_FULL:
+#if defined(PLATFORM_WEB) || (defined(PLATFORM_MAC) && defined(__arm64__)) || defined(PLATFORM_VITA) || defined(PLATFORM_UWP)
+			return false;
+#else
+			return true;
+#endif
+
+		case RenderMethod::D3D11_SOFT:
+#if defined(PLATFORM_WINDOWS)
+			return true;
+#else
+			return false;
+#endif
+
+		case RenderMethod::D3D11_FULL:
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
+			return true;
+#else
+			return false;
+#endif
+
+		case RenderMethod::VULKAN_SOFT:
+#if !defined(PLATFORM_UWP) && !defined(PLATFORM_WEB) && !defined(PLATFORM_VITA)
+			return true;
+#else
+			return false;
+#endif
+
+		case RenderMethod::VULKAN_FULL:
+#if !defined(PLATFORM_UWP) && !defined(PLATFORM_WEB) && !defined(PLATFORM_VITA)
+			return true;
+#else
+			return false;
+#endif
+
+		default:
+			return false;
+	}
+}
+
+bool Configuration::isOpenGLRenderMethod(RenderMethod renderMethod)
+{
+	return (renderMethod == RenderMethod::OPENGL_SOFT || renderMethod == RenderMethod::OPENGL_FULL);
+}
+
+bool Configuration::isDirect3D11RenderMethod(RenderMethod renderMethod)
+{
+	return (renderMethod == RenderMethod::D3D11_SOFT || renderMethod == RenderMethod::D3D11_FULL);
+}
+
+bool Configuration::isVulkanRenderMethod(RenderMethod renderMethod)
+{
+	return (renderMethod == RenderMethod::VULKAN_SOFT || renderMethod == RenderMethod::VULKAN_FULL);
+}
+
+bool Configuration::renderMethodSupportsNativeVSync(RenderMethod renderMethod)
+{
+	return (renderMethod != RenderMethod::SOFTWARE);
+}
+
+bool Configuration::useVSync(FrameSyncType frameSyncType)
+{
+	switch (frameSyncType)
+	{
+		case FrameSyncType::VSYNC_ON:
+		case FrameSyncType::VSYNC_FRAMECAP:
+		case FrameSyncType::FRAME_INTERPOLATION:
+			return true;
+
+		case FrameSyncType::VSYNC_OFF:
+		case FrameSyncType::UNCAPPED:
+		default:
+			return false;
+	}
+}
+
+bool Configuration::useFrameCap(FrameSyncType frameSyncType)
+{
+	switch (frameSyncType)
+	{
+		case FrameSyncType::VSYNC_OFF:
+		case FrameSyncType::VSYNC_FRAMECAP:
+			return true;
+
+		case FrameSyncType::VSYNC_ON:
+		case FrameSyncType::FRAME_INTERPOLATION:
+		case FrameSyncType::UNCAPPED:
+		default:
+			return false;
+	}
+}
+
+bool Configuration::useFrameInterpolation(FrameSyncType frameSyncType)
+{
+	return (frameSyncType == FrameSyncType::FRAME_INTERPOLATION);
+}
+
+const char* Configuration::getRenderMethodConfigString(RenderMethod renderMethod)
+{
+	switch (renderMethod)
+	{
+		case RenderMethod::SOFTWARE:	return "software";
+		case RenderMethod::OPENGL_SOFT:	return "opengl-soft";
+		case RenderMethod::OPENGL_FULL:	return "opengl-full";
+		case RenderMethod::D3D11_SOFT:	return "d3d11-soft";
+		case RenderMethod::D3D11_FULL:	return "d3d11-full";
+		case RenderMethod::VULKAN_SOFT:	return "vulkan-soft";
+		case RenderMethod::VULKAN_FULL:	return "vulkan-full";
+		default:						return "undefined";
+	}
 }
 
 Configuration::Configuration()
@@ -519,9 +661,7 @@ void Configuration::serializeStandardSettings(JsonSerializer& serializer)
 	}
 	else
 	{
-		std::string renderMethod = mAutoDetectRenderMethod ? "auto" :
-									(mRenderMethod == RenderMethod::OPENGL_FULL) ? "opengl-full" :
-									(mRenderMethod == RenderMethod::OPENGL_SOFT) ? "opengl-soft" : "software";
+		std::string renderMethod = mAutoDetectRenderMethod ? "auto" : getRenderMethodConfigString(mRenderMethod);
 		serializer.serialize("RenderMethod", renderMethod);
 
 		serializer.serialize("FailSafeMode", mFailSafeMode);

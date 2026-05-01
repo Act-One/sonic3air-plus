@@ -11,7 +11,7 @@
 #include "oxygen/platform/PlatformFunctions.h"
 #include "oxygen/helper/Logging.h"
 
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	#include <windows.h>
 	#include <dbghelp.h>
 #endif
@@ -19,7 +19,7 @@
 
 namespace
 {
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 
 	// The following is based on https://www.c-plusplus.net/forum/topic/261827/setunhandledexceptionfilter-und-minidumpwritedump/3
 
@@ -108,14 +108,14 @@ namespace
 
 void CrashHandler::initializeCrashHandler()
 {
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	InitMiniDumpWriter();
 #endif
 }
 
 void CrashHandler::setApplicationInfo(const std::string& applicationInfo)
 {
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	s_ApplicationInfo = applicationInfo;
 #endif
 }

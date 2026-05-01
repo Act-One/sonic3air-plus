@@ -17,37 +17,49 @@
       <Configuration>Release</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
-  </ItemGroup>
+  <ProjectConfiguration Include="DebugUWP|x64"><Configuration>DebugUWP</Configuration><Platform>x64</Platform></ProjectConfiguration><ProjectConfiguration Include="ReleaseUWP|x64"><Configuration>ReleaseUWP</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
     <ProjectGuid>{CB43BC88-6CC9-4286-9E69-6AD1807505BE}</ProjectGuid>
     <RootNamespace>discordgamesdk</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <DefaultLanguage>en-US</DefaultLanguage>
   </PropertyGroup>
-  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="('$(Configuration)|$(Platform)'=='DebugUWP|x64') Or ('$(Configuration)|$(Platform)'=='ReleaseUWP|x64')"><AppContainerApplication>true</AppContainerApplication><ApplicationType>Windows Store</ApplicationType><ApplicationTypeRevision>10.0</ApplicationTypeRevision><WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion><WindowsTargetPlatformMinVersion>10.0.19041.0</WindowsTargetPlatformMinVersion></PropertyGroup><Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -67,8 +79,14 @@
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\..\..\oxygenengine\build\_vstudio\oxygen.props" />
+  </ImportGroup><ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\..\..\oxygenengine\build\_vstudio\oxygen.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\..\..\oxygenengine\build\_vstudio\oxygen.props" />
+  </ImportGroup><ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\..\..\oxygenengine\build\_vstudio\oxygen.props" />
   </ImportGroup>
@@ -82,6 +100,10 @@
     <LinkIncremental>true</LinkIncremental>
     <IntDir>tmp\discord_game_sdk_$(Configuration)_$(BuildCode)\</IntDir>
     <OutDir>$(SolutionDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <IntDir>tmp\discord_game_sdk_$(Configuration)_$(BuildCode)\</IntDir>
+    <OutDir>$(SolutionDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
@@ -89,6 +111,10 @@
     <OutDir>$(SolutionDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <IntDir>tmp\discord_game_sdk_$(Configuration)_$(BuildCode)\</IntDir>
+    <OutDir>$(SolutionDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
     <LinkIncremental>false</LinkIncremental>
     <IntDir>tmp\discord_game_sdk_$(Configuration)_$(BuildCode)\</IntDir>
     <OutDir>$(SolutionDir)lib\$(Configuration)_$(BuildCode)\</OutDir>
@@ -111,6 +137,18 @@
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup><ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>PLATFORM_UWP;USE_UTF8_PATHS;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
@@ -152,6 +190,36 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+  </ItemDefinitionGroup><ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>PLATFORM_UWP;USE_UTF8_PATHS;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\source\external\discord_game_sdk\cpp\achievement_manager.cpp" />

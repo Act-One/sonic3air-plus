@@ -68,6 +68,9 @@ bin/
 /Oxygen/sonic3air/saves/rec
 /Oxygen/sonic3air/enginedata.bin
 /Oxygen/sonic3air/gamedata.bin
+/Oxygen/sonic3air/crashdump.dmp
+/artifacts/
+/temp/
 
 # Xcode
 /Oxygen/sonic3air/build/_xcode/sonic3air.xcodeproj/project.xcworkspace/xcuserdata/*
@@ -87,6 +90,20 @@ mac_dist
 # Android
 /Oxygen/sonic3air/build/_android/local.properties
 
+# Visual Studio / local build output
+/Oxygen/lemonscript/build/_vstudio/tmp/
+/Oxygen/oxygenengine/build/_vstudio/lib/
+/Oxygen/oxygenengine/build/_vstudio/tmp/
+/Oxygen/sonic3air/build/_vstudio/lib/
+/Oxygen/sonic3air/build/_vstudio/tmp/
+
+# Local UWP/Xbox packaging
+/Oxygen/sonic3air/build/_vstudio/AppPackages/
+/Oxygen/sonic3air/build/_vstudio/RegisteredLayout/
+/Oxygen/sonic3air/build/_vstudio/Signing/
+# Local UWP/Xbox build output
+/librmx/lib/x64_uwp/
+
 # Discord Game SDL binaries
 !/Oxygen/sonic3air/source/external/discord_game_sdk/lib/*/*.dll
 !/Oxygen/sonic3air/source/external/discord_game_sdk/lib/*/*.lib
@@ -104,3 +121,11 @@ framework/external/ogg-vorbis/libvorbis/xcode/vorbis.xcodeproj/xcuserdata
 Oxygen/sonic3air/build/_xcode/build/XCBuildData
 Oxygen/sonic3air/build/_xcode/build/sonic3air.build
 framework/external/sdl/SDL2/Xcode/SDL/build/SDL.build
+
+
+*.resfiles
+*.intermediate
+*.exp
+*.pri
+*.cache
+*.spv

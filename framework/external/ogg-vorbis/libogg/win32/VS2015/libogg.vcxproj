@@ -298,6 +298,20 @@
   <ItemGroup>
     <None Include="..\ogg.def" />
   </ItemGroup>
+  <ItemDefinitionGroup Condition="'$(ApplicationType)'=='Windows Store' and '$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(ApplicationType)'=='Windows Store' and '$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

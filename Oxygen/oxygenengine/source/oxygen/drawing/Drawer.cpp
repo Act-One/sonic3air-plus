@@ -11,6 +11,8 @@
 #include "oxygen/drawing/DrawerInterface.h"
 #include "oxygen/drawing/DrawerTexture.h"
 #include "oxygen/resources/SpriteCollection.h"
+#include "oxygen/application/Configuration.h"
+#include "oxygen/helper/Logging.h"
 
 
 namespace
@@ -57,13 +59,13 @@ Drawer::Type Drawer::getType() const
 
 void Drawer::destroyDrawer()
 {
-	SAFE_DELETE(mActiveDrawer);
-
 	// Invalidate drawer textures
 	for (DrawerTexture* texture : mDrawerTextures)
 	{
 		texture->invalidate();
 	}
+
+	SAFE_DELETE(mActiveDrawer);
 }
 
 void Drawer::shutdown()

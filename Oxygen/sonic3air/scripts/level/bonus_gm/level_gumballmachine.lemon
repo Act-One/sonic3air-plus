@@ -362,7 +362,7 @@ function void fn239e52()
 	D0 = (D0 << 16)
 	D0.s16 = -s16(camera.background.x.u16)
 
-	for (u8 line = 0; line < getScreenHeight(); ++line)
+	for (u16 line = 0; line < getScreenHeight(); ++line)
 	{
 		u32[A1 + line * 4] = D0
 	}

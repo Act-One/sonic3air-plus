@@ -8,6 +8,7 @@
 
 #include "oxygen/pch.h"
 #include "oxygen/application/EngineMain.h"
+#include "oxygen/rendering/parts/RenderParts.h"
 #include "oxygen/rendering/parts/PlaneManager.h"
 #include "oxygen/rendering/parts/PatternManager.h"
 #include "oxygen/simulation/EmulatorInterface.h"
@@ -15,6 +16,65 @@
 
 namespace
 {
+	uint16 sanitizePlaneBaseVRAMAddress(uint16 vramAddress, const char* planeName)
+	{
+		const uint16 sanitized = vramAddress & 0xfffe;
+		if (sanitized != vramAddress)
+		{
+			RMX_LOG_INFO("PlaneManager: aligned odd name table base for plane " << planeName << " from 0x" << rmx::hexString(vramAddress, 4)
+				<< " to 0x" << rmx::hexString(sanitized, 4));
+		}
+		return sanitized;
+	}
+
+	Vec2i sanitizePlayfieldPatternSize(const Vec2i& size)
+	{
+		Vec2i sanitized(size);
+		sanitized.x = clamp(sanitized.x, 1, 128);
+		sanitized.y = clamp(sanitized.y, 1, 128);
+
+		if (sanitized != size)
+		{
+			RMX_LOG_INFO("PlaneManager: clamped invalid playfield size in patterns from "
+				<< size.x << "x" << size.y << " to " << sanitized.x << "x" << sanitized.y);
+		}
+		return sanitized;
+	}
+
+	const PlaneManager& resolveReadablePlaneManager(const PlaneManager* self, const char* caller)
+	{
+		const PlaneManager& authoritative = RenderParts::instance().getPlaneManager();
+		if (self == &authoritative)
+			return authoritative;
+
+		static int sLoggedMismatchedSelfCount = 0;
+		if (sLoggedMismatchedSelfCount < 16)
+		{
+			++sLoggedMismatchedSelfCount;
+			RMX_LOG_INFO("PlaneManager: using authoritative instance in " << caller
+				<< " because caller object was " << rmx::hexString((uint64)(uintptr_t)self, 16)
+				<< " while authoritative object is " << rmx::hexString((uint64)(uintptr_t)&authoritative, 16));
+		}
+		return authoritative;
+	}
+
+	uint16 readVRamWrapped16(uint16 vramAddress)
+	{
+		return EmulatorInterface::instance().readVRam16(vramAddress);
+	}
+
+	void copyPlanePatternsWithWrap(uint16* dst, uint16 planeBaseAddress, int numPatterns)
+	{
+		const uint8* vram = EmulatorInterface::instance().getVRam();
+		const size_t totalBytes = (size_t)numPatterns * sizeof(uint16);
+		const size_t firstChunkBytes = std::min<size_t>(totalBytes, 0x10000 - (size_t)planeBaseAddress);
+		memcpy(dst, vram + planeBaseAddress, firstChunkBytes);
+		if (firstChunkBytes < totalBytes)
+		{
+			memcpy(((uint8*)dst) + firstChunkBytes, vram, totalBytes - firstChunkBytes);
+		}
+	}
+
 	void fillBufferByAbstraction(uint16* buffer, const Vec2i& cameraPosition, const Vec2i& screenSize)
 	{
 		// TODO: This is entirely S3AIR-specific
@@ -96,6 +156,7 @@ void PlaneManager::refresh()
 	// Build plane pattern textures
 	const bool isDeveloperMode = EngineMain::getDelegate().useDeveloperFeatures();
 	const int numPatterns = mPlayfieldSize.x * mPlayfieldSize.y;
+	RMX_CHECK(numPatterns <= MAX_PLANE_PATTERNS, "Playfield uses " << numPatterns << " patterns, but PlaneManager only supports " << MAX_PLANE_PATTERNS, return);
 	for (int index = 0; index < 4; ++index)
 	{
 		uint16* buffer = mPlanePatternsBuffer[index];
@@ -117,13 +178,12 @@ void PlaneManager::refresh()
 			{
 				if (isPlaneUsed(index))
 				{
-					const uint16* src = getPlaneContent(index);
-					memcpy(buffer, src, numPatterns * sizeof(uint16));
+					copyPlanePatternsWithWrap(buffer, getPlaneBaseVRAMAddress(index), numPatterns);
 					if (isDeveloperMode)
 					{
 						for (int k = 0; k < numPatterns; ++k)
 						{
-							mPatternManager.setLastUsedAtex(src[k], (src[k] >> 9) & 0x70);
+							mPatternManager.setLastUsedAtex(buffer[k], (buffer[k] >> 9) & 0x70);
 						}
 					}
 				}
@@ -174,7 +234,7 @@ bool PlaneManager::isPlaneUsed(int index) const
 
 Vec2i PlaneManager::getPlayfieldSizeInPatterns() const
 {
-	return mPlayfieldSize;
+	return resolveReadablePlaneManager(this, "getPlayfieldSizeInPatterns").mPlayfieldSize;
 }
 
 Vec2i PlaneManager::getPlayfieldSizeInPixels() const
@@ -189,9 +249,24 @@ Vec4i PlaneManager::getPlayfieldSizeForShaders() const
 	return Vec4i(playfieldSize.x * 8, playfieldSize.y * 8, playfieldSize.x, playfieldSize.y);
 }
 
+void PlaneManager::setNameTableBaseB(uint16 vramAddress)
+{
+	mNameTableBaseB = sanitizePlaneBaseVRAMAddress(vramAddress, "B");
+}
+
+void PlaneManager::setNameTableBaseA(uint16 vramAddress)
+{
+	mNameTableBaseA = sanitizePlaneBaseVRAMAddress(vramAddress, "A");
+}
+
+void PlaneManager::setNameTableBaseW(uint16 vramAddress)
+{
+	mNameTableBaseW = sanitizePlaneBaseVRAMAddress(vramAddress, "W");
+}
+
 void PlaneManager::setPlayfieldSizeInPatterns(const Vec2i& size)
 {
-	mPlayfieldSize = size;
+	mPlayfieldSize = sanitizePlayfieldPatternSize(size);
 }
 
 void PlaneManager::setPlayfieldSizeInPixels(const Vec2i& size)
@@ -202,29 +277,38 @@ void PlaneManager::setPlayfieldSizeInPixels(const Vec2i& size)
 const uint16* PlaneManager::getPlanePatternsBuffer(uint8 index) const
 {
 	RMX_ASSERT(index < 4, "Invalid plane index " << index);
-	return mPlanePatternsBuffer[index];
+	return resolveReadablePlaneManager(this, "getPlanePatternsBuffer").mPlanePatternsBuffer[index];
 }
 
 uint16 PlaneManager::getPlaneBaseVRAMAddress(int planeIndex) const
 {
-	switch (planeIndex)
+	const PlaneManager& self = resolveReadablePlaneManager(this, "getPlaneBaseVRAMAddress");
+	if (planeIndex == PLANE_B)
+		return self.mNameTableBaseB;
+	if (planeIndex == PLANE_A)
+		return self.mNameTableBaseA;
+	if (planeIndex == PLANE_W)
+		return self.mNameTableBaseW;
+
+	static int sLoggedInvalidPlaneIndexCount = 0;
+	if (sLoggedInvalidPlaneIndexCount < 8)
 	{
-		case PLANE_B:  return mNameTableBaseB;
-		case PLANE_A:  return mNameTableBaseA;
-		case PLANE_W:  return mNameTableBaseW;
+		++sLoggedInvalidPlaneIndexCount;
+		RMX_LOG_INFO("PlaneManager: falling back to plane B for invalid runtime plane index " << planeIndex);
 	}
-	RMX_ERROR("Invalid plane index", RMX_REACT_THROW);
-	return 0;
+	return self.mNameTableBaseB;
 }
 
 const uint16* PlaneManager::getPlaneDataInVRAM(int planeIndex) const
 {
-	return (const uint16*)(EmulatorInterface::instance().getVRam() + getPlaneBaseVRAMAddress(planeIndex));
+	const PlaneManager& self = resolveReadablePlaneManager(this, "getPlaneDataInVRAM");
+	return (const uint16*)(EmulatorInterface::instance().getVRam() + self.getPlaneBaseVRAMAddress(planeIndex));
 }
 
 size_t PlaneManager::getPlaneSizeInVRAM(int planeIndex) const
 {
-	return (size_t)(mPlayfieldSize.x * mPlayfieldSize.y * 2);
+	const PlaneManager& self = resolveReadablePlaneManager(this, "getPlaneSizeInVRAM");
+	return (size_t)(self.mPlayfieldSize.x * self.mPlayfieldSize.y * 2);
 }
 
 uint16 PlaneManager::getPatternVRAMAddress(int planeIndex, uint16 patternIndex) const
@@ -239,7 +323,7 @@ uint16 PlaneManager::getPatternAtIndex(int planeIndex, uint16 patternIndex) cons
 		if (planeIndex == PLANE_DEBUG)
 			return patternIndex;
 	}
-	return *getPlaneContent(planeIndex, patternIndex);
+	return readVRamWrapped16(getPatternVRAMAddress(planeIndex, patternIndex));
 }
 
 void PlaneManager::setPatternAtIndex(int planeIndex, uint16 patternIndex, uint16 value)
@@ -426,6 +510,20 @@ void PlaneManager::setDefaultPlaneEnabled(uint8 index, bool enabled)
 
 void PlaneManager::setupCustomPlane(const Recti& rect, uint8 sourcePlane, uint8 scrollOffsets, uint16 renderQueue)
 {
+	const int planeIndex = sourcePlane & 0x03;
+	if (!isRenderablePlaneIndex(planeIndex))
+	{
+		static int sLoggedInvalidCustomPlaneCount = 0;
+		if (sLoggedInvalidCustomPlaneCount < 8)
+		{
+			++sLoggedInvalidCustomPlaneCount;
+			RMX_LOG_INFO("PlaneManager: ignoring custom plane with invalid source plane " << (int)sourcePlane
+				<< " (resolved plane index " << planeIndex << "), rect=(" << rect.x << "," << rect.y << "," << rect.width << "," << rect.height
+				<< "), scrollOffsets=" << (int)scrollOffsets << ", renderQueue=0x" << rmx::hexString(renderQueue, 4));
+		}
+		return;
+	}
+
 	CustomPlane& plane = vectorAdd(mCustomPlanes);
 	plane.mRect = rect;
 	plane.mSourcePlane = sourcePlane;
@@ -478,6 +576,22 @@ void PlaneManager::serializeSaveState(VectorBinarySerializer& serializer, uint8 
 			serializer.serialize(customPlane.mSourcePlane);
 			serializer.serialize(customPlane.mScrollOffsets);
 			serializer.serialize(customPlane.mRenderQueue);
+
+			if (serializer.isReading())
+			{
+				const int planeIndex = customPlane.mSourcePlane & 0x03;
+				if (!isRenderablePlaneIndex(planeIndex))
+				{
+					customPlane.mSourcePlane = (customPlane.mSourcePlane & 0x10) | PLANE_B;
+				}
+			}
 		}
+	}
+
+	if (serializer.isReading())
+	{
+		setNameTableBaseA(mNameTableBaseA);
+		setNameTableBaseB(mNameTableBaseB);
+		setNameTableBaseW(mNameTableBaseW);
 	}
 }

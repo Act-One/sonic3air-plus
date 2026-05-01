@@ -21,4 +21,4 @@ call build_imgui.bat no_pause
 popd
 
 :: Done
-pause
+if "%1"=="" pause

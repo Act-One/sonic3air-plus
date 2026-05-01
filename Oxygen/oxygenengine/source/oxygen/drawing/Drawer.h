@@ -26,7 +26,9 @@ public:
 	enum class Type
 	{
 		SOFTWARE,
-		OPENGL
+		OPENGL,
+		DIRECT3D11,
+		VULKAN
 	};
 
 public:

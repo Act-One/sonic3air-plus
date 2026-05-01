@@ -295,7 +295,7 @@ void Simulation::update(float timeElapsed)
 		mCurrentTargetFrame = roundToDouble(mCurrentTargetFrame + 1.0);
 	}
 
-	const bool useFrameInterpolation = (Configuration::instance().mFrameSync == Configuration::FrameSyncType::FRAME_INTERPOLATION);
+	const bool useFrameInterpolation = Configuration::useFrameInterpolation(Configuration::instance().mFrameSync);
 	const uint32 requiredFrameNumber = useFrameInterpolation ? (uint32)std::ceil(mCurrentTargetFrame) : (uint32)roundToInt(mCurrentTargetFrame);
 
 	if (mFrameNumber < requiredFrameNumber)

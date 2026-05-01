@@ -71,6 +71,7 @@ namespace
 		else
 			return nullptr;
 	}
+
 }
 
 
@@ -536,6 +537,14 @@ bool CodeExec::performFrameUpdate()
 
 void CodeExec::yieldExecution()
 {
+	static int sYieldLogCount = 0;
+	if (sYieldLogCount < 8)
+	{
+		++sYieldLogCount;
+		const std::string locationString = mLemonScriptRuntime.getOwnCurrentScriptLocationString();
+		RMX_LOG_INFO("yieldExecution reached" << (locationString.empty() ? "" : " at " + locationString));
+	}
+
 	mCurrentlyRunningScript = false;
 	mLemonScriptRuntime.getInternalLemonRuntime().triggerStopSignal();
 }
@@ -713,6 +722,89 @@ void CodeExec::runScript(bool executeSingleFunction, CallFrameTracking* callFram
 			if (mAccumulatedStepsOfCurrentFrame + stepsCounter >= MAX_STEPS)
 			{
 				mExecutionState = ExecutionState::INTERRUPTED;
+
+				{
+					std::string locationString = mLemonScriptRuntime.getOwnCurrentScriptLocationString();
+					if (locationString.empty())
+					{
+						const lemon::ScriptFunction* currentFunction = nullptr;
+						size_t programCounter = 0;
+						mLemonScriptRuntime.getCurrentExecutionLocation(currentFunction, programCounter);
+						if (nullptr == currentFunction)
+						{
+							mLemonScriptRuntime.getRecentExecutionLocation(currentFunction, programCounter);
+						}
+						if (nullptr != currentFunction)
+						{
+							LemonScriptProgram::ResolvedLocation resolvedLocation;
+							LemonScriptProgram::resolveLocation(resolvedLocation, *currentFunction, (uint32)programCounter);
+							if (!resolvedLocation.mScriptFilename.empty() && resolvedLocation.mLineNumber != 0)
+							{
+								locationString = "function '" + std::string(currentFunction->getName().getString()) + "' at line " + std::to_string(resolvedLocation.mLineNumber) + " of file '" + resolvedLocation.mScriptFilename + "'";
+							}
+						}
+					}
+
+					if (!locationString.empty())
+					{
+						RMX_LOG_INFO("Runtime-step watchdog location: " << locationString);
+					}
+					else
+					{
+						const lemon::ScriptFunction* currentLocationFunction = nullptr;
+						size_t currentProgramCounter = 0;
+						mLemonScriptRuntime.getCurrentExecutionLocation(currentLocationFunction, currentProgramCounter);
+						if (nullptr == currentLocationFunction)
+						{
+							mLemonScriptRuntime.getRecentExecutionLocation(currentLocationFunction, currentProgramCounter);
+						}
+						RMX_LOG_INFO("Runtime-step watchdog location unresolved; function ptr valid = " << (nullptr != currentLocationFunction) << ", programCounter = " << currentProgramCounter);
+					}
+
+					if (mLemonScriptRuntime.getCallStackSize() > 0)
+					{
+						if (const lemon::Function* currentFunction = mLemonScriptRuntime.getCurrentFunction())
+						{
+							RMX_LOG_INFO("Runtime-step watchdog function: " << std::string(currentFunction->getName().getString()));
+						}
+
+						std::vector<const lemon::Function*> rawCallStack;
+						mLemonScriptRuntime.getCallStack(rawCallStack);
+						if (!rawCallStack.empty())
+						{
+							std::string joinedRawCallStack;
+							for (const lemon::Function* function : rawCallStack)
+							{
+								if (!joinedRawCallStack.empty())
+									joinedRawCallStack += " -> ";
+								joinedRawCallStack += std::string(function->getName().getString());
+							}
+							RMX_LOG_INFO("Runtime-step watchdog raw call stack: " << joinedRawCallStack);
+						}
+
+						LemonScriptRuntime::CallStackWithLabels callStack;
+						mLemonScriptRuntime.getCallStackWithLabels(callStack);
+						if (!callStack.empty())
+						{
+							std::string joinedCallStack;
+							for (size_t i = 0; i < callStack.size(); ++i)
+							{
+								if (!joinedCallStack.empty())
+									joinedCallStack += " -> ";
+
+								joinedCallStack += callStack[i].first;
+								if (!callStack[i].second.empty())
+								{
+									joinedCallStack += ':';
+									joinedCallStack += callStack[i].second;
+								}
+							}
+							RMX_LOG_INFO("Runtime-step watchdog call stack: " << joinedCallStack);
+						}
+					}
+
+					RMX_LOG_INFO("Runtime-step watchdog steps: " << (mAccumulatedStepsOfCurrentFrame + stepsCounter));
+				}
 
 				// Show a message box (but only once)
 				static bool showMessageBox = true;

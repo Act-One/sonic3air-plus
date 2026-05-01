@@ -11,6 +11,7 @@
 
 // Platforms overview:
 //  - PLATFORM_WINDOWS	-> Windows
+//  - PLATFORM_UWP		-> Universal Windows Platform / Xbox dev mode
 //  - PLATFORM_LINUX	-> Linux
 //  - PLATFORM_MAC		-> macOS
 //  - PLATFORM_ANDROID	-> Android
@@ -23,6 +24,12 @@
 // Platform specific
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
 	#define PLATFORM_WINDOWS
+	#if defined(_MSC_VER)
+		#include <winapifamily.h>
+		#if defined(WINAPI_FAMILY) && (WINAPI_FAMILY == WINAPI_FAMILY_APP)
+			#define PLATFORM_UWP
+		#endif
+	#endif
 	#if defined(__GNUC__)
 		#define USE_UTF8_PATHS
 	#endif

@@ -79,6 +79,7 @@ public:
 	}
 
 	void getCurrentExecutionLocation(const lemon::ScriptFunction*& outFunction, size_t& outProgramCounter) const;
+	void getRecentExecutionLocation(const lemon::ScriptFunction*& outFunction, size_t& outProgramCounter) const;
 	std::string getOwnCurrentScriptLocationString() const;
 
 private:

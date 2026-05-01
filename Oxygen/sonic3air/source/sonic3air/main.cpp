@@ -25,7 +25,7 @@ long pathconf(const char* path, int name)
 }
 #endif
 
-#if defined(PLATFORM_WINDOWS) & !defined(__GNUC__)
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP) && !defined(__GNUC__)
 extern "C"
 {
 	// Tell graphics drivers to prefer the dedicated GPU, if there's integrated graphics as well
@@ -68,7 +68,7 @@ int main(int argc, char** argv)
 	PlatformFunctions::changeWorkingDirectory(arguments.mExecutableCallPath);
 #endif
 
-#if defined(PLATFORM_WINDOWS)
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	// Check if the user has an old version of "audioremaster.bin", and remove it if that's the case
 	//  -> As the newer installations don't include that file, it is most likely an out-dated one, and could cause problems (at least an assert) down the line
 	if (FTX::FileSystem->exists(L"data/audioremaster.bin"))

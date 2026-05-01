@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -17,32 +17,42 @@
       <Configuration>Release</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
-  </ItemGroup>
+  <ProjectConfiguration Include="DebugUWP|x64"><Configuration>DebugUWP</Configuration><Platform>x64</Platform></ProjectConfiguration><ProjectConfiguration Include="ReleaseUWP|x64"><Configuration>ReleaseUWP</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{013D2171-2009-4CC5-ACE5-A8303B02BA64}</ProjectGuid>
     <RootNamespace>rmxmedia</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <DefaultLanguage>en-US</DefaultLanguage>
   </PropertyGroup>
-  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="('$(Configuration)|$(Platform)'=='DebugUWP|x64') Or ('$(Configuration)|$(Platform)'=='ReleaseUWP|x64')"><AppContainerApplication>true</AppContainerApplication><ApplicationType>Windows Store</ApplicationType><ApplicationTypeRevision>10.0</ApplicationTypeRevision><WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion><WindowsTargetPlatformMinVersion>10.0.19041.0</WindowsTargetPlatformMinVersion></PropertyGroup><Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
@@ -56,12 +66,18 @@
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="librmx.props" />
+  </ImportGroup><ImportGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="librmx.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="librmx.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="librmx.props" />
+  </ImportGroup><ImportGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="librmx.props" />
   </ImportGroup>
@@ -76,12 +92,18 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(ProjectDir)..\..\lib\$(BuildCode)\</OutDir>
     <IntDir>$(ProjectName)_$(BuildCode)\</IntDir>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <OutDir>$(ProjectDir)..\..\lib\$(BuildCode)\</OutDir>
+    <IntDir>$(ProjectName)_$(BuildCode)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <OutDir>$(ProjectDir)..\..\lib\$(BuildCode)\</OutDir>
     <IntDir>$(ProjectName)_$(BuildCode)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(ProjectDir)..\..\lib\$(BuildCode)\</OutDir>
+    <IntDir>$(ProjectName)_$(BuildCode)\</IntDir>
+  </PropertyGroup><PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
     <OutDir>$(ProjectDir)..\..\lib\$(BuildCode)\</OutDir>
     <IntDir>$(ProjectName)_$(BuildCode)\</IntDir>
   </PropertyGroup>
@@ -123,6 +145,33 @@
       <PrecompiledHeaderFile>rmxmedia.h</PrecompiledHeaderFile>
       <WarningLevel>Level3</WarningLevel>
       <PreprocessorDefinitions>DEBUG;GLEW_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Lib>
+      <OutputFile>$(TargetPath)</OutputFile>
+    </Lib>
+    <PreBuildEvent>
+      <Command />
+    </PreBuildEvent>
+    <PreBuildEvent>
+      <Message />
+    </PreBuildEvent>
+    <PostBuildEvent>
+      <Command />
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message />
+    </PostBuildEvent>
+  </ItemDefinitionGroup><ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <AdditionalIncludeDirectories>$(ProjectDir)../../source/rmxmedia;$(ProjectDir)../../source/rmxmedia/_glew;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>rmxmedia.h</PrecompiledHeaderFile>
+      <WarningLevel>Level3</WarningLevel>
+      <PreprocessorDefinitions>PLATFORM_UWP;USE_UTF8_PATHS;DEBUG;GLEW_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Lib>
@@ -196,6 +245,33 @@
     <PostBuildEvent>
       <Message />
     </PostBuildEvent>
+  </ItemDefinitionGroup><ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <AdditionalIncludeDirectories>$(ProjectDir)../../source/rmxmedia;$(ProjectDir)../../source/rmxmedia/_glew;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>rmxmedia.h</PrecompiledHeaderFile>
+      <WarningLevel>Level3</WarningLevel>
+      <PreprocessorDefinitions>PLATFORM_UWP;USE_UTF8_PATHS;GLEW_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Lib>
+      <OutputFile>$(TargetPath)</OutputFile>
+    </Lib>
+    <PreBuildEvent>
+      <Command />
+    </PreBuildEvent>
+    <PreBuildEvent>
+      <Message />
+    </PreBuildEvent>
+    <PostBuildEvent>
+      <Command />
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message />
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\source\rmxmedia\audiovideo\AudioBuffer.cpp" />
@@ -228,6 +304,8 @@
     <ClCompile Include="..\..\source\rmxmedia\threads\Thread.cpp" />
     <ClCompile Include="..\..\source\rmxmedia\_glew\glew.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">true</ExcludedFromBuild>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -277,6 +355,18 @@
   <ItemGroup>
     <Natvis Include="librmx.natvis" />
   </ItemGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

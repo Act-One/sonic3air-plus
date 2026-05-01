@@ -89,7 +89,7 @@ namespace rmx
 	#if defined(PLATFORM_WINDOWS)
 		if (IsDebuggerPresent() != 0)
 		{
-			OutputDebugString((string + "\r\n").c_str());
+			OutputDebugStringA((string + "\r\n").c_str());
 		}
 		SetConsoleTextAttribute(handle, defaultColor);
 	#elif defined(PLATFORM_ANDROID)

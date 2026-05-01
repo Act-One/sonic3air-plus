@@ -9,6 +9,7 @@
 #include "oxygen/pch.h"
 #include "oxygen/simulation/bindings/RendererBindings.h"
 #include "oxygen/simulation/bindings/LemonScriptBindings.h"
+#include "oxygen/application/Configuration.h"
 #include "oxygen/application/video/VideoOut.h"
 #include "oxygen/rendering/parts/RenderParts.h"
 #include "oxygen/resources/FontCollection.h"
@@ -25,30 +26,54 @@ namespace
 		return *lemon::Runtime::getActiveEnvironmentSafe<RuntimeEnvironment>().mEmulatorInterface;
 	}
 
+	Vec2i getSafeGameScreenSize()
+	{
+		Vec2i screenSize = VideoOut::instance().getScreenSize();
+		if (screenSize.x < 128 || screenSize.x > 1024 || screenSize.y < 128 || screenSize.y > 1024)
+		{
+			static bool sLoggedFallback = false;
+			if (!sLoggedFallback)
+			{
+				sLoggedFallback = true;
+				RMX_LOG_INFO("RendererBindings: falling back to configured game screen size because VideoOut reported an invalid size of " << screenSize.x << " x " << screenSize.y);
+			}
+			screenSize = Configuration::instance().mGameScreen;
+		}
+		return screenSize;
+	}
+
 
 	uint16 getScreenWidth()
 	{
-		return (uint16)VideoOut::instance().getScreenWidth();
+		static bool sLoggedOnce = false;
+		const Vec2i screenSize = getSafeGameScreenSize();
+		const uint16 width = (uint16)screenSize.x;
+		if (!sLoggedOnce)
+		{
+			sLoggedOnce = true;
+			RMX_LOG_INFO("RendererBindings: first getScreenWidth/getScreenHeight = " << width << " x " << (uint16)screenSize.y);
+		}
+		return width;
 	}
 
 	uint16 getScreenHeight()
 	{
-		return (uint16)VideoOut::instance().getScreenHeight();
+		return (uint16)getSafeGameScreenSize().y;
 	}
 
 	uint16 getScreenCenterX()
 	{
-		return (uint16)VideoOut::instance().getScreenWidth() / 2;
+		return (uint16)getSafeGameScreenSize().x / 2;
 	}
 
 	uint16 getScreenCenterY()
 	{
-		return (uint16)VideoOut::instance().getScreenHeight() / 2;
+		return (uint16)getSafeGameScreenSize().y / 2;
 	}
 
 	uint16 getScreenExtend()
 	{
-		return (uint16)(VideoOut::instance().getScreenWidth() - 320) / 2;
+		return (uint16)(getSafeGameScreenSize().x - 320) / 2;
 	}
 
 
@@ -281,7 +306,14 @@ namespace
 
 	void VDP_Config_setActiveDisplay(uint8 enable)
 	{
-		RenderParts::instance().setActiveDisplay(enable != 0);
+		const bool activeDisplay = (enable != 0);
+		static bool sLastLoggedState = true;
+		if (activeDisplay != sLastLoggedState)
+		{
+			sLastLoggedState = activeDisplay;
+			RMX_LOG_INFO("RendererBindings: active display -> " << (activeDisplay ? "on" : "off"));
+		}
+		RenderParts::instance().setActiveDisplay(activeDisplay);
 	}
 
 	void VDP_Config_setNameTableBasePlaneB(uint16 vramAddress)
@@ -312,7 +344,7 @@ namespace
 
 	void VDP_Config_setRenderingModeConfiguration(uint8 shadowHighlightPalette)
 	{
-		// TODO: Implement this
+		RenderParts::instance().getPaletteManager().setShadowHighlightMode(shadowHighlightPalette != 0);
 	}
 
 	void VDP_Config_setHorizontalScrollTableBase(uint16 vramAddress)
@@ -605,12 +637,13 @@ namespace
 	{
 		width = clamp(width, 128, 1024);
 		height = clamp(height, 128, 1024);
+		Configuration::instance().mGameScreen.set((int)width, (int)height);
 		VideoOut::instance().setScreenSize(width, height);
 	}
 
 	void Renderer_resetViewport(uint16 renderQueue)
 	{
-		RenderParts::instance().getSpriteManager().addViewport(Recti(Vec2i(), VideoOut::instance().getScreenSize()), renderQueue);
+		RenderParts::instance().getSpriteManager().addViewport(Recti(Vec2i(), getSafeGameScreenSize()), renderQueue);
 	}
 
 	void Renderer_setViewport(int16 px, int16 py, int16 width, int16 height, uint16 renderQueue)

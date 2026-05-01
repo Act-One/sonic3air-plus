@@ -261,13 +261,11 @@ void ImGuiIntegration::onWindowRecreated(bool useOpenGL)
 	if (!mEnabled)
 		return;
 
-	if (mUsingOpenGL != useOpenGL)
-	{
-		// Shutdown and restart
-		shutdown();
-		mUsingOpenGL = useOpenGL;
-		startup();
-	}
+	// Even when both backends are "non-OpenGL", a recreated SDL window can imply a completely different
+	// drawer path (e.g. software vs native D3D11). Reinitialize ImGui against the new window/backend state.
+	shutdown();
+	mUsingOpenGL = useOpenGL;
+	startup();
 }
 
 void ImGuiIntegration::buildContents()
@@ -389,7 +387,7 @@ void ImGuiIntegration::onWindowRecreated(bool useOpenGL)  {}
 void ImGuiIntegration::buildContents()  {}
 bool ImGuiIntegration::isCapturingMouse()  { return false; }
 bool ImGuiIntegration::isCapturingKeyboard()  { return false; }
-bool ImGuiIntegration::hasBlockingImGuiWindow()  { return false; }
+bool ImGuiIntegration::hasBlockingImGuiWindow() const  { return false; }
 void ImGuiIntegration::refreshImGuiStyle()  {}
 void ImGuiIntegration::saveIniSettings()  {}
 

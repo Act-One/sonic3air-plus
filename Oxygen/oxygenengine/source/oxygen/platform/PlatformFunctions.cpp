@@ -13,9 +13,12 @@
 
 #include <thread>
 
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	#include <CleanWindowsInclude.h>
 	#include <shlobj.h>		// For "SHGetKnownFolderPath"
+#elif defined(PLATFORM_UWP)
+	#include <winrt/Windows.ApplicationModel.h>
+	#include <winrt/Windows.Storage.h>
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MAC) || defined(PLATFORM_ANDROID) || defined(PLATFORM_SWITCH) || defined(PLATFORM_IOS) || defined(PLATFORM_VITA)
 	#include <stdlib.h>
 	#include <unistd.h>
@@ -30,7 +33,7 @@
 
 namespace
 {
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 
 	std::wstring getStringRegKey(HKEY hKey, const wchar_t* valueName)
 	{
@@ -238,7 +241,7 @@ double PlatformFunctions::getTimerGranularityMilliseconds()
 	static bool initialized = false;
 	if (!initialized)
 	{
-	#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 		// Query range of possible timer granularities and use the minimum if possible
 		const HINSTANCE hLibrary = LoadLibrary("NTDLL.dll");
 		if (nullptr != hLibrary)
@@ -275,7 +278,7 @@ double PlatformFunctions::getTimerGranularityMilliseconds()
 
 void PlatformFunctions::changeWorkingDirectory(std::wstring_view executableCallPath)
 {
-#if defined(PLATFORM_WINDOWS)
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	// Take the working directory from command line if possible
 	const size_t slashPos = executableCallPath.find_last_of(L"/\\");
 	if (slashPos != std::string::npos)
@@ -319,6 +322,16 @@ void PlatformFunctions::changeWorkingDirectory(std::wstring_view executableCallP
 			}
 		}
 	}
+#elif defined(PLATFORM_UWP)
+	try
+	{
+		std::wstring path = winrt::Windows::ApplicationModel::Package::Current().InstalledLocation().Path().c_str();
+		rmx::FileSystem::normalizePath(path, true);
+		rmx::FileSystem::setCurrentDirectory(path);
+	}
+	catch (...)
+	{
+	}
 #elif defined(PLATFORM_LINUX)
 	// Take the working directory from command line if possible
 	const size_t slashPos = executableCallPath.find_last_of(L'/');
@@ -332,7 +345,7 @@ void PlatformFunctions::changeWorkingDirectory(std::wstring_view executableCallP
 
 void PlatformFunctions::onEngineStartup()
 {
-#if defined(PLATFORM_WINDOWS)
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	// Handle DPI scaling by Windows
 	SetProcessDPIAware();
 #endif
@@ -340,7 +353,7 @@ void PlatformFunctions::onEngineStartup()
 
 void PlatformFunctions::setAppIcon(int iconResource)
 {
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	if (iconResource != 0)
 	{
 		HICON hIcon = LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(iconResource));
@@ -355,7 +368,7 @@ void PlatformFunctions::setAppIcon(int iconResource)
 
 std::wstring PlatformFunctions::getAppDataPath()
 {
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	PWSTR path = nullptr;
 	if (S_OK == SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_DONT_UNEXPAND | KF_FLAG_CREATE, nullptr, &path))
 	{
@@ -363,6 +376,16 @@ std::wstring PlatformFunctions::getAppDataPath()
 		CoTaskMemFree(path);
 		FTX::FileSystem->normalizePath(result, false);	// Do not add a slash at the end
 		return result;
+	}
+#elif defined(PLATFORM_UWP)
+	try
+	{
+		std::wstring result = winrt::Windows::Storage::ApplicationData::Current().LocalFolder().Path().c_str();
+		FTX::FileSystem->normalizePath(result, false);	// Do not add a slash at the end
+		return result;
+	}
+	catch (...)
+	{
 	}
 #elif defined(PLATFORM_LINUX)
 	const String appDataDir = getLinuxAppDataDir();
@@ -378,7 +401,7 @@ std::wstring PlatformFunctions::getAppDataPath()
 
 std::wstring PlatformFunctions::tryGetSteamRomPath(const std::wstring& romName)
 {
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	const std::wstring steamPath = getSteamInstallationPath();
 	if (!steamPath.empty())
 	{
@@ -424,7 +447,7 @@ std::string PlatformFunctions::getCompactSystemTimeString()
 
 void PlatformFunctions::showMessageBox(const std::string& caption, const std::string& text)
 {
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 
 	MessageBoxA((HWND)FTX::Video->getNativeWindowHandle(), text.c_str(), caption.c_str(), MB_OK | MB_ICONEXCLAMATION);
 
@@ -438,7 +461,7 @@ void PlatformFunctions::showMessageBox(const std::string& caption, const std::st
 
 PlatformFunctions::DialogResult PlatformFunctions::showDialogBox(rmx::ErrorSeverity severity, DialogButtons dialogButtons, const std::string& caption, const std::string& text)
 {
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 
 	uint32 type = 0;
 	switch (dialogButtons)
@@ -520,7 +543,7 @@ PlatformFunctions::DialogResult PlatformFunctions::showDialogBox(rmx::ErrorSever
 
 std::wstring PlatformFunctions::openFileSelectionDialog(const std::wstring& title, const std::wstring& defaultFilename, const wchar_t* filter)
 {
-#if defined(PLATFORM_WINDOWS)
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 
 	// This seems to be needed to prevent "GetOpenFileNameW" from randomly crashing
 	HRESULT hresult = CoInitializeEx(nullptr, COINIT_MULTITHREADED | COINIT_DISABLE_OLE1DDE);
@@ -551,7 +574,7 @@ std::wstring PlatformFunctions::openFileSelectionDialog(const std::wstring& titl
 
 void PlatformFunctions::openFileExternal(const std::wstring& path)
 {
-#if defined(PLATFORM_WINDOWS)
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	::ShellExecuteW(nullptr, nullptr, path.c_str(), nullptr, nullptr, SW_SHOW);
 #elif defined(PLATFORM_LINUX)
 	// TODO: What if the path has spaces or non-ASCII characters?
@@ -562,7 +585,7 @@ void PlatformFunctions::openFileExternal(const std::wstring& path)
 
 void PlatformFunctions::openDirectoryExternal(const std::wstring& path)
 {
-#if defined(PLATFORM_WINDOWS)
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	::ShellExecuteW(nullptr, L"open", L"explorer", (L"file://" + path).c_str(), nullptr, SW_SHOW);
 #elif defined(PLATFORM_MAC)
 	system(*(String("open \"") + WString(path).toString() + "\""));
@@ -585,8 +608,9 @@ void PlatformFunctions::openURLExternal(const std::string& url)
 
 bool PlatformFunctions::openApplicationExternal(const std::wstring& path, const std::wstring& arguments, const std::wstring& directory)
 {
-#if defined(PLATFORM_WINDOWS)
-	return ::ShellExecuteW(nullptr, L"open", path.c_str(), arguments.c_str(), directory.c_str(), SW_SHOW);
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
+	const INT_PTR result = reinterpret_cast<INT_PTR>(::ShellExecuteW(nullptr, L"open", path.c_str(), arguments.c_str(), directory.empty() ? nullptr : directory.c_str(), SW_SHOW));
+	return (result > 32);
 #elif defined(PLATFORM_LINUX)
 	return system(rmx::convertToUTF8(path + L" " + arguments).c_str());
 #else
@@ -597,7 +621,7 @@ bool PlatformFunctions::openApplicationExternal(const std::wstring& path, const 
 
 bool PlatformFunctions::isDebuggerPresent()
 {
-#ifdef PLATFORM_WINDOWS
+#if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	return IsDebuggerPresent() != 0;
 #else
 	return false;
@@ -606,7 +630,7 @@ bool PlatformFunctions::isDebuggerPresent()
 
 bool PlatformFunctions::hasClipboardSupport()
 {
-#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_MAC) || defined(PLATFORM_LINUX)
+#if (defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)) || defined(PLATFORM_MAC) || defined(PLATFORM_LINUX)
 	return true;
 #else
 	return false;
