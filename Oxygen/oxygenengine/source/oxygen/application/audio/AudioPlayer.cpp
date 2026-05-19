@@ -685,7 +685,19 @@ AudioPlayer::PlayingSound* AudioPlayer::startPlaybackInternal(SourceRegistration
 	// Startup audio source and get the audio buffer
 	AudioBuffer* audioBuffer = audioSource.startup();
 	if (nullptr == audioBuffer)
+	{
+#if defined(PLATFORM_WIIU) && defined(S3AIR_WIIU_TRACE_AUDIO)
+	static int sStartupFailLogCount = 0;
+	if (sStartupFailLogCount < 32)
+	{
+			RMX_LOG_INFO("AudioPlayer: startup failed key=0x" << rmx::hexString(sourceReg.mAudioDefinition ? sourceReg.mAudioDefinition->mKeyId : 0, 16)
+				<< " sourceType=" << (int)audioSource.getAudioSourceType()
+				<< " regType=" << (int)sourceReg.mType);
+			++sStartupFailLogCount;
+		}
+#endif
 		return nullptr;
+	}
 
 	// Start playing audio
 	rmx::AudioManager::PlaybackOptions options;
@@ -713,6 +725,21 @@ AudioPlayer::PlayingSound* AudioPlayer::startPlaybackInternal(SourceRegistration
 		audioSource.onPlaybackStart(audioRef, time);
 	}
 	FTX::Audio->unlockAudio();
+
+#if defined(PLATFORM_WIIU) && defined(S3AIR_WIIU_TRACE_AUDIO)
+	static int sPlaybackLogCount = 0;
+	if (sPlaybackLogCount < 96)
+	{
+		RMX_LOG_INFO("AudioPlayer: startPlayback key=0x" << rmx::hexString(sourceReg.mAudioDefinition ? sourceReg.mAudioDefinition->mKeyId : 0, 16)
+			<< " sourceType=" << (int)audioSource.getAudioSourceType()
+			<< " regType=" << (int)sourceReg.mType
+			<< " context=" << contextId
+			<< " channel=" << channelId
+			<< " volume=" << volume
+			<< " validRef=" << (audioRef.valid() ? "yes" : "no"));
+		++sPlaybackLogCount;
+	}
+#endif
 
 	// Register as playing sound here
 #if DEBUG && defined(PLATFORM_WINDOWS)

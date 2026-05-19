@@ -14,9 +14,21 @@
 
 
 // If buffer textures are not supported, we use normal textures instead
-#if !defined(RMX_USE_GLES2)
+#if !defined(RMX_USE_GLES2) && !defined(PLATFORM_WIIU)
 	#define SUPPORTS_BUFFER_TEXTURES
 #endif
+
+namespace
+{
+	GLint getFallbackTextureFormat(BufferTexture::PixelFormat pixelFormat)
+	{
+	#if defined(PLATFORM_WIIU)
+		return (pixelFormat == BufferTexture::PixelFormat::UINT_8) ? GL_RED : GL_RG;
+	#else
+		return (pixelFormat == BufferTexture::PixelFormat::UINT_8) ? GL_LUMINANCE : GL_LUMINANCE_ALPHA;
+	#endif
+	}
+}
 
 
 bool BufferTexture::supportsBufferTextures()
@@ -47,6 +59,32 @@ BufferTexture::~BufferTexture()
 	}
 }
 
+const void* BufferTexture::prepareUploadData(const void* data, int width, int height)
+{
+#if defined(PLATFORM_WIIU)
+	if (nullptr != data && mPixelFormat != PixelFormat::UINT_8)
+	{
+		const size_t numBytes = (size_t)width * (size_t)height * 2;
+		mUploadScratch.resize(numBytes);
+
+		uint8* dst = mUploadScratch.data();
+		const uint16* src = (const uint16*)data;
+		for (int y = 0; y < height; ++y)
+		{
+			for (int x = 0; x < width; ++x)
+			{
+				const size_t dstIndex = ((size_t)y * (size_t)width + (size_t)x) * 2;
+				const uint16 value = src[(size_t)y * (size_t)width + (size_t)x];
+				dst[dstIndex] = (uint8)(value & 0xff);
+				dst[dstIndex + 1] = (uint8)(value >> 8);
+			}
+		}
+		return dst;
+	}
+#endif
+	return data;
+}
+
 void BufferTexture::create(PixelFormat pixelFormat, int width, int height, const void* data)
 {
 	// Only 1 or 2 bytes supported at the moment
@@ -71,9 +109,10 @@ void BufferTexture::create(PixelFormat pixelFormat, int width, int height, const
 	glTexBuffer(GL_TEXTURE_BUFFER, internalFormat, mTexBuffer);
 	glBindTexture(GL_TEXTURE_BUFFER, 0);
 #else
-	const GLint internalFormat = (mPixelFormat == PixelFormat::UINT_8) ? GL_LUMINANCE : GL_LUMINANCE_ALPHA;
+	const GLint internalFormat = getFallbackTextureFormat(mPixelFormat);
+	const void* uploadData = prepareUploadData(data, width, height);
 	glBindTexture(GL_TEXTURE_2D, mTextureHandle);
-	glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, internalFormat, GL_UNSIGNED_BYTE, data);
+	glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, internalFormat, GL_UNSIGNED_BYTE, uploadData);
 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -123,9 +162,10 @@ void BufferTexture::bufferData(const void* data, int width, int height)
 	glBufferData(GL_TEXTURE_BUFFER, width * height * bytesPerPixel, data, GL_STATIC_DRAW);
 	glBindBuffer(GL_TEXTURE_BUFFER, 0);
 #else
-	const GLint internalFormat = (mPixelFormat == PixelFormat::UINT_8) ? GL_LUMINANCE : GL_LUMINANCE_ALPHA;
+	const GLint internalFormat = getFallbackTextureFormat(mPixelFormat);
+	const void* uploadData = prepareUploadData(data, width, height);
 	glBindTexture(GL_TEXTURE_2D, mTextureHandle);
-	glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, internalFormat, GL_UNSIGNED_BYTE, data);
+	glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, internalFormat, GL_UNSIGNED_BYTE, uploadData);
 	glBindTexture(GL_TEXTURE_2D, 0);
 #endif
 }

@@ -129,25 +129,46 @@ namespace
 			return (value + 1) + (value / 15);
 		}
 	}
+
+	inline void writeU16BE(uint8* dst, uint16 value)
+	{
+		dst[0] = (uint8)(value >> 8);
+		dst[1] = (uint8)(value & 0xff);
+	}
 }
 
 
 void BlueSpheresRendering::startup()
 {
-	if (!mInitializedLookups)
+	ensureLookupData();
+}
+
+bool BlueSpheresRendering::ensureLookupData()
+{
+	if (mInitializedLookups)
+		return true;
+
+#ifndef OUTPUT_FOG_BITMAPS
+	// Try to load lookup data from a cache file, otherwise calculate the data.
+	if (loadLookupData())
 	{
-	#ifndef OUTPUT_FOG_BITMAPS
-		// Try to load lookup data from a cache file, otherwise calculate the data
-		if (loadLookupData())
-		{
-			mInitializedLookups = true;
-		}
-		else
-	#endif
-		{
-			performLookupCalculations();
-		}
+		mInitializedLookups = true;
+		return true;
 	}
+#endif
+
+#if defined(PLATFORM_WIIU)
+	static bool sLoggedMissingCache = false;
+	if (!sLoggedMissingCache)
+	{
+		sLoggedMissingCache = true;
+		RMX_LOG_INFO("BlueSpheresRendering: required lookup cache 'data/binary/bluespheresrendering.bin' is missing or invalid; skipping Blue Spheres ground sprites on Wii U");
+	}
+	return false;
+#else
+	performLookupCalculations();
+	return mInitializedLookups;
+#endif
 }
 
 void BlueSpheresRendering::createSprites(Vec2i screenSize)
@@ -159,10 +180,8 @@ void BlueSpheresRendering::createSprites(Vec2i screenSize)
 		return;
 
 	// Perform calculations that only need to be done once
-	if (!mInitializedLookups)
-	{
-		performLookupCalculations();
-	}
+	if (!ensureLookupData())
+		return;
 
 	mLastScreenSize = screenSize;
 
@@ -170,7 +189,7 @@ void BlueSpheresRendering::createSprites(Vec2i screenSize)
 	const int offsetX = (LOOKUP_WIDTH - maxX) / 2;
 
 	int numPureGroundRows = 0;
-	for (int row = LOOKUP_HEIGHT - 1; ; --row)
+	for (int row = LOOKUP_HEIGHT - 1; row >= 0; --row)
 	{
 		if (mNonOpaquePixelIndent[row] > offsetX)
 			break;
@@ -178,6 +197,7 @@ void BlueSpheresRendering::createSprites(Vec2i screenSize)
 	}
 
 	std::vector<uint8> uncompressedBuffer;
+	uncompressedBuffer.reserve((size_t)LOOKUP_WIDTH * (size_t)LOOKUP_HEIGHT);
 
 	// Build or update all sprites
 	for (int index = 0; index < 0x2f; ++index)
@@ -206,6 +226,16 @@ void BlueSpheresRendering::createSprites(Vec2i screenSize)
 			{
 				uncompressedBuffer.clear();
 				ZlibDeflate::decode(uncompressedBuffer, &lookup->mData[0], lookup->mData.size());
+				if (uncompressedBuffer.size() != (size_t)LOOKUP_WIDTH * (size_t)LOOKUP_HEIGHT)
+				{
+					static bool sLoggedBadDecompress = false;
+					if (!sLoggedBadDecompress)
+					{
+						sLoggedBadDecompress = true;
+						RMX_LOG_INFO("BlueSpheresRendering: skipping corrupted compressed lookup data");
+					}
+					continue;
+				}
 				lookupData = &uncompressedBuffer[0];
 			}
 
@@ -270,17 +300,17 @@ void BlueSpheresRendering::writeVisibleSpheresData(uint32 targetAddress, uint32 
 			if (size < 0x1400)
 				continue;
 
-			*(uint16*)(&outputPtr[0]) = swapBytes16(roundToInt(199.5f + viewCoords.x));
-			*(uint16*)(&outputPtr[2]) = swapBytes16(roundToInt(111.5f - viewCoords.z));
-			*(uint16*)(&outputPtr[4]) = swapBytes16(size);
-			*(uint8*) (&outputPtr[6]) = sphereType;
+			writeU16BE(&outputPtr[0], (uint16)roundToInt(199.5f + viewCoords.x));
+			writeU16BE(&outputPtr[2], (uint16)roundToInt(111.5f - viewCoords.z));
+			writeU16BE(&outputPtr[4], size);
+			outputPtr[6] = sphereType;
 
 			outputPtr += 7;
 			++count;
 		}
 	}
 
-	*(uint16*)(&originalOutputPtr[0]) = swapBytes16(count);
+	writeU16BE(&originalOutputPtr[0], count);
 }
 
 bool BlueSpheresRendering::loadLookupData()
@@ -289,34 +319,54 @@ bool BlueSpheresRendering::loadLookupData()
 	if (!FTX::FileSystem->readFile(L"data/binary/bluespheresrendering.bin", fileContent))
 		return false;
 
+	VectorBinarySerializer serializer(true, fileContent);
+
+	char signature[5] = { 0 };
+	serializer.read(signature, 4);
+	if (memcmp(signature, "BSL4", 4) != 0)	// Older versions are not supported any more
+		return false;
+
+	const uint16 width = serializer.read<uint16>();
+	const uint16 height = serializer.read<uint16>();
+	if (width != LOOKUP_WIDTH || height != LOOKUP_HEIGHT)
+		return false;
+
+	int numPureSkyRows = serializer.read<uint8>();
+	if (numPureSkyRows > LOOKUP_HEIGHT)
+		return false;
+
+	int nonOpaquePixelIndent[LOOKUP_HEIGHT] = { 0 };
+	for (int& indent : nonOpaquePixelIndent)
 	{
-		VectorBinarySerializer serializer(true, fileContent);
-
-		char signature[5] = { 0 };
-		serializer.read(signature, 4);
-		if (memcmp(signature, "BSL4", 4) != 0)	// Older versions are not supported any more
+		indent = serializer.read<int32>();
+		if (indent < 0 || indent > LOOKUP_WIDTH)
 			return false;
-
-		const uint16 width = serializer.read<uint16>();
-		const uint16 height = serializer.read<uint16>();
-		if (width != LOOKUP_WIDTH || height != LOOKUP_HEIGHT)
-			return false;
-
-		mNumPureSkyRows = serializer.read<uint8>();
-		serializer.read(&mNonOpaquePixelIndent[0], sizeof(mNonOpaquePixelIndent));
-
-		std::vector<uint8> compressed;
-
-		for (int i = 0; i < 0x2f; ++i)
-		{
-			const size_t compressedSize = (size_t)serializer.read<uint32>();
-
-			Lookup& lookup = (i < 0x20) ? mStraightIntensityLookup[i] : mRotationIntensityLookup[i - 0x20];
-			lookup.mData.resize(compressedSize);
-			serializer.read(&lookup.mData[0], compressedSize);
-			lookup.mIsCompressed = true;
-		}
 	}
+
+	Lookup straightIntensityLookup[0x20];
+	Lookup rotationIntensityLookup[0x0f];
+
+	for (int i = 0; i < 0x2f; ++i)
+	{
+		const size_t compressedSize = (size_t)serializer.read<uint32>();
+		if (compressedSize == 0 || compressedSize > serializer.getRemaining() || compressedSize > (size_t)LOOKUP_WIDTH * (size_t)LOOKUP_HEIGHT)
+			return false;
+
+		Lookup& lookup = (i < 0x20) ? straightIntensityLookup[i] : rotationIntensityLookup[i - 0x20];
+		lookup.mData.resize(compressedSize);
+		serializer.read(&lookup.mData[0], compressedSize);
+		lookup.mIsCompressed = true;
+	}
+
+	if (serializer.hasError())
+		return false;
+
+	mNumPureSkyRows = numPureSkyRows;
+	memcpy(mNonOpaquePixelIndent, nonOpaquePixelIndent, sizeof(mNonOpaquePixelIndent));
+	for (int i = 0; i < 0x20; ++i)
+		mStraightIntensityLookup[i] = std::move(straightIntensityLookup[i]);
+	for (int i = 0; i < 0x0f; ++i)
+		mRotationIntensityLookup[i] = std::move(rotationIntensityLookup[i]);
 	return true;
 }
 
@@ -551,7 +601,10 @@ void BlueSpheresRendering::performLookupCalculations()
 		serializer.write<uint16>(LOOKUP_WIDTH);
 		serializer.write<uint16>(LOOKUP_HEIGHT);
 		serializer.write<uint8>(mNumPureSkyRows);
-		serializer.write(&mNonOpaquePixelIndent[0], sizeof(mNonOpaquePixelIndent));
+		for (int indent : mNonOpaquePixelIndent)
+		{
+			serializer.writeAs<int32>(indent);
+		}
 
 		std::vector<uint8> compressed;
 		for (int i = 0; i < 0x2f; ++i)
@@ -574,10 +627,15 @@ void BlueSpheresRendering::performLookupCalculations()
 
 void BlueSpheresRendering::buildSprite(const uint8* lookupDataBase, const String spriteIdentifier[2], int numPureGroundRows, Vec2i screenSize)
 {
+	if (nullptr == lookupDataBase || screenSize.x <= 0 || screenSize.y <= 0)
+		return;
+
 	const int maxX = std::min(LOOKUP_WIDTH, screenSize.x);
 	const int maxY = LOOKUP_HEIGHT;
-	const int indentX = (screenSize.x - maxX) / 2;
+	const int spriteOffsetX = (screenSize.x - maxX) / 2;
 	const int offsetX = (LOOKUP_WIDTH - maxX) / 2;
+	numPureGroundRows = clamp(numPureGroundRows, 0, LOOKUP_HEIGHT);
+	mNumPureSkyRows = clamp(mNumPureSkyRows, 0, LOOKUP_HEIGHT);
 
 	SpriteCollection& spriteCollection = SpriteCollection::instance();
 	SpriteCollection::Item* items[2];
@@ -596,23 +654,26 @@ void BlueSpheresRendering::buildSprite(const uint8* lookupDataBase, const String
 
 	// Then we have some rows of pixels that can be anything -- sky or ground or something in between
 	const int numRowsUntilPureGround = LOOKUP_HEIGHT - numPureGroundRows;
-	bitmaps[0]->create(maxX, numRowsUntilPureGround - mNumPureSkyRows);
-	for (int y = mNumPureSkyRows; y < numRowsUntilPureGround; ++y)
+	const int alphaRows = std::max(0, numRowsUntilPureGround - mNumPureSkyRows);
+	bitmaps[0]->create(maxX, alphaRows, 0);
+	for (int y = mNumPureSkyRows; y < numRowsUntilPureGround && y < LOOKUP_HEIGHT; ++y)
 	{
-		uint8* output = bitmaps[0]->getPixelPointer(indentX, y - mNumPureSkyRows);
+		uint8* output = bitmaps[0]->getPixelPointer(0, y - mNumPureSkyRows);
 		const uint8* lookupData = &lookupDataBase[y * LOOKUP_WIDTH + offsetX];
 		memcpy(output, lookupData, maxX);
 	}
 
 	// And the rest is only ground
-	bitmaps[1]->create(maxX, numPureGroundRows);
+	bitmaps[1]->create(maxX, numPureGroundRows, 0);
 	for (int y = numRowsUntilPureGround; y < maxY; ++y)
 	{
-		uint8* output = bitmaps[1]->getPixelPointer(indentX, y - numRowsUntilPureGround);
+		uint8* output = bitmaps[1]->getPixelPointer(0, y - numRowsUntilPureGround);
 		const uint8* lookupData = &lookupDataBase[y * LOOKUP_WIDTH + offsetX];
 		memcpy(output, lookupData, maxX);
 	}
 
+	items[0]->mSprite->mOffset.x = spriteOffsetX;
+	items[1]->mSprite->mOffset.x = spriteOffsetX;
 	items[0]->mSprite->mOffset.y = screenSize.y - bitmaps[0]->getHeight() - bitmaps[1]->getHeight();
 	items[1]->mSprite->mOffset.y = screenSize.y - bitmaps[1]->getHeight();
 }

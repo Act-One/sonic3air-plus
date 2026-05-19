@@ -286,14 +286,14 @@ bool Configuration::isSupportedRenderMethod(RenderMethod renderMethod)
 #endif
 
 		case RenderMethod::VULKAN_SOFT:
-#if !defined(PLATFORM_UWP) && !defined(PLATFORM_WEB) && !defined(PLATFORM_VITA)
+#if defined(OXYGEN_ENABLE_VULKAN_RENDERER) && !defined(PLATFORM_UWP) && !defined(PLATFORM_WEB) && !defined(PLATFORM_VITA)
 			return true;
 #else
 			return false;
 #endif
 
 		case RenderMethod::VULKAN_FULL:
-#if !defined(PLATFORM_UWP) && !defined(PLATFORM_WEB) && !defined(PLATFORM_VITA)
+#if defined(OXYGEN_ENABLE_VULKAN_RENDERER) && !defined(PLATFORM_UWP) && !defined(PLATFORM_WEB) && !defined(PLATFORM_VITA)
 			return true;
 #else
 			return false;
@@ -386,6 +386,12 @@ Configuration::Configuration()
 #if defined(PLATFORM_WEB)
 	// Threading in general is not (afaik) supported by emscripten
 	mAudio.mUseAudioThreading = false;
+#endif
+
+#if defined(PLATFORM_WIIU)
+	// Streaming audio needs its worker path on Cafe; synchronous decode in the
+	// audio callback can underrun badly on real hardware.
+	mAudio.mUseAudioThreading = true;
 #endif
 
 #if defined(PLATFORM_ANDROID) || defined(PLATFORM_WEB)
@@ -653,6 +659,11 @@ void Configuration::serializeStandardSettings(JsonSerializer& serializer)
 
 	if (serializer.isReading() && mFailSafeMode)
 		mAudio.mUseAudioThreading = false;
+
+#if defined(PLATFORM_WIIU)
+	if (serializer.isReading())
+		mAudio.mUseAudioThreading = true;
+#endif
 
 	// Graphics
 	if (serializer.isReading())

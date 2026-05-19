@@ -161,24 +161,31 @@ namespace lemon
 		mLineNumber = lineNumber;
 
 		// Try to resolve identifiers
+		genericmanager::setDebugCompilerStage("processTokens:resolveIdentifiers", mLineNumber);
 		resolveIdentifiers(tokensRoot);
 
 		// Process defines early, as they can introduce new tokens that need to be considered in the following steps
+		genericmanager::setDebugCompilerStage("processTokens:processDefines", mLineNumber);
 		processDefines(tokensRoot);
 
 		// Process constants
+		genericmanager::setDebugCompilerStage("processTokens:processConstants", mLineNumber);
 		processConstants(tokensRoot);
 
 		// Build hierarchy by processing parentheses
+		genericmanager::setDebugCompilerStage("processTokens:processParentheses", mLineNumber);
 		processParentheses(tokensRoot);
 
 		// Build hierarchy by processing commas (usually those separating parameters in function calls)
+		genericmanager::setDebugCompilerStage("processTokens:processCommaSeparators", mLineNumber);
 		processCommaSeparators(tokensRoot);
 
 		// Recursively go through the hierarchy of tokens for the main part of processing
+		genericmanager::setDebugCompilerStage("processTokens:processTokenListRecursive", mLineNumber);
 		processTokenListRecursive(tokensRoot);
 
 		// TODO: Statement type assignment will require resolving all identifiers first -- check if this is done here
+		genericmanager::setDebugCompilerStage("processTokens:assignStatementDataTypes", mLineNumber);
 		assignStatementDataTypes(tokensRoot, resultType);
 	}
 
@@ -187,9 +194,11 @@ namespace lemon
 		mLineNumber = lineNumber;
 
 		// Build hierarchy by processing parentheses
+		genericmanager::setDebugCompilerStage("processForPreprocessor:processParentheses", mLineNumber);
 		processParentheses(tokensRoot);
 
 		// Recursively go through the hierarchy of tokens for the main part of processing
+		genericmanager::setDebugCompilerStage("processForPreprocessor:processTokenListRecursive", mLineNumber);
 		processTokenListRecursiveForPreprocessor(tokensRoot);
 	}
 
@@ -467,10 +476,13 @@ namespace lemon
 	{
 		// Resolve occurrences of "addressof" that refer to functions
 		//  -> These need to be resolved before processing the child tokens, because the function name as a sole identifier would cause a syntax error
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:resolveAddressOfFunctions", mLineNumber);
 		resolveAddressOfFunctions(tokens);
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:resolveMakeCallable", mLineNumber);
 		resolveMakeCallable(tokens);
 
 		// Go through the child token lists
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:children", mLineNumber);
 		for (size_t i = 0; i < tokens.size(); ++i)
 		{
 			switch (tokens[i].getType())
@@ -498,24 +510,35 @@ namespace lemon
 		}
 
 		// Now for the other processing steps, which are done after processing the child tokens
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:processVariableDefinitions", mLineNumber);
 		processVariableDefinitions(tokens);
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:processFunctionCalls", mLineNumber);
 		processFunctionCalls(tokens);
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:processMemoryAccesses", mLineNumber);
 		processMemoryAccesses(tokens);
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:processArrayAccesses", mLineNumber);
 		processArrayAccesses(tokens);
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:processExplicitCasts", mLineNumber);
 		processExplicitCasts(tokens);
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:processVariables", mLineNumber);
 		processVariables(tokens);
 
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:resolveAddressOfMemoryAccesses", mLineNumber);
 		resolveAddressOfMemoryAccesses(tokens);
 
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:processUnaryOperations", mLineNumber);
 		processUnaryOperations(tokens);
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:processBinaryOperations", mLineNumber);
 		processBinaryOperations(tokens);
 
+		genericmanager::setDebugCompilerStage("processTokenListRecursive:evaluateCompileTimeConstants", mLineNumber);
 		evaluateCompileTimeConstants(tokens);
 	}
 
 	void TokenProcessing::processTokenListRecursiveForPreprocessor(TokenList& tokens)
 	{
 		// Go through the child token lists
+		genericmanager::setDebugCompilerStage("processTokenListRecursiveForPreprocessor:children", mLineNumber);
 		for (size_t i = 0; i < tokens.size(); ++i)
 		{
 			if (tokens[i].isA<ParenthesisToken>())
@@ -526,7 +549,9 @@ namespace lemon
 		}
 
 		// Now for the other processing steps
+		genericmanager::setDebugCompilerStage("processTokenListRecursiveForPreprocessor:processUnaryOperations", mLineNumber);
 		processUnaryOperations(tokens);
+		genericmanager::setDebugCompilerStage("processTokenListRecursiveForPreprocessor:processBinaryOperations", mLineNumber);
 		processBinaryOperations(tokens);
 	}
 
@@ -1177,8 +1202,8 @@ namespace lemon
 					// Move parenthesis content to the output token pointer, so it will replace the parenthesis itself
 					TokenPtr<StatementToken> tempContentPtr;
 					tempContentPtr = pt.mContent[0].as<StatementToken>();	// This intermediate step is needed to avoid reference count reaching 0 in between
-					outTokenPtr = tempContentPtr;
 					pt.mContent.clear();
+					outTokenPtr = tempContentPtr;
 					return true;
 				}
 				break;

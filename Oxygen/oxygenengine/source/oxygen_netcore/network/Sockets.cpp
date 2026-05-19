@@ -33,7 +33,11 @@
 
 #endif
 
-#ifdef __vita__
+#if defined(PLATFORM_WIIU) || defined(PLATFORM_SWITCH)
+	#define OXYGEN_SOCKETS_NO_IPV6
+#endif
+
+#if defined(__vita__) || defined(PLATFORM_WIIU)
 	#define SOMAXCONN 4096
 #endif
 
@@ -66,7 +70,7 @@ namespace
 		// Allow re-use of the port
 		setSocketOptionBool(socket, SOL_SOCKET, SO_REUSEADDR, true);
 
-	#if !defined(PLATFORM_SWITCH)	// The IPv6 part won't compile on Switch, but isn't really needed there anyways
+	#if !defined(OXYGEN_SOCKETS_NO_IPV6)	// The IPv6 part won't compile on some homebrew SDKs, and is not needed there.
 		if (protocolFamily >= Sockets::ProtocolFamily::IPv6)
 		{
 			// Optionally allow IPv4 + IPv6 dual stack support on the socket
@@ -118,7 +122,12 @@ bool Sockets::resolveToIP(const std::string& hostName, std::string& outIP, bool 
 		addrinfo* firstAddrInfo = addrInfo;
 
 		// Return either IPv4 or IPv6, depending on requested protocol family
+	#if defined(OXYGEN_SOCKETS_NO_IPV6)
+		(void)useIPv6;
+		const int aiFamily = AF_INET;
+	#else
 		const int aiFamily = useIPv6 ? AF_INET6 : AF_INET;
+	#endif
 
 		for (addrInfo = firstAddrInfo; nullptr != addrInfo; addrInfo = addrInfo->ai_next)
 		{
@@ -181,7 +190,7 @@ void SocketAddress::assureSockAddr() const
 	{
 		memset(&mSockAddr, 0, sizeof(mSockAddr));
 		bool success = false;
-	#if !defined(PLATFORM_SWITCH)	// The IPv6 part won't compile on Switch, but isn't really needed there anyways
+	#if !defined(OXYGEN_SOCKETS_NO_IPV6)	// The IPv6 part won't compile on some homebrew SDKs, and is not needed there.
 		{
 			// IPv6
 			sockaddr_in6& addr = *reinterpret_cast<sockaddr_in6*>(&mSockAddr);
@@ -216,7 +225,7 @@ void SocketAddress::assureIpPort() const
 				inet_ntop(addressFamily, &(reinterpret_cast<sockaddr_in&>(mSockAddr).sin_addr), myIP, sizeof(myIP));
 				mPort = ntohs(reinterpret_cast<sockaddr_in&>(mSockAddr).sin_port);
 			}
-		#if !defined(PLATFORM_SWITCH)	// The IPv6 part won't compile on Switch, but isn't really needed there anyways
+		#if !defined(OXYGEN_SOCKETS_NO_IPV6)	// The IPv6 part won't compile on some homebrew SDKs, and is not needed there.
 			else
 			{
 				// IPv6
@@ -313,7 +322,12 @@ bool TCPSocket::setupServer(uint16 serverPort, Sockets::ProtocolFamily protocolF
 
 	addrinfo hints;
 	memset(&hints, 0, sizeof(hints));
+#if defined(OXYGEN_SOCKETS_NO_IPV6)
+	(void)protocolFamily;
+	hints.ai_family = AF_INET;
+#else
 	hints.ai_family = (protocolFamily >= Sockets::ProtocolFamily::IPv6) ? AF_INET6 : AF_INET;
+#endif
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 	hints.ai_flags = AI_PASSIVE;
@@ -449,7 +463,12 @@ bool TCPSocket::connectTo(const std::string& serverAddress, uint16 serverPort, S
 	{
 		addrinfo hints;
 		memset(&hints, 0, sizeof(hints));
+#if defined(OXYGEN_SOCKETS_NO_IPV6)
+		(void)protocolFamily;
+		hints.ai_family = AF_INET;
+#else
 		hints.ai_family = (protocolFamily >= Sockets::ProtocolFamily::IPv6) ? AF_INET6 : AF_INET;
+#endif
 		hints.ai_socktype = SOCK_STREAM;	// Needed for TCP
 		hints.ai_protocol = IPPROTO_TCP;	// Use TCP
 
@@ -654,7 +673,12 @@ bool UDPSocket::bindToPort(uint16 port, Sockets::ProtocolFamily protocolFamily)
 
 	addrinfo hints;
 	memset(&hints, 0, sizeof(hints));
+#if defined(OXYGEN_SOCKETS_NO_IPV6)
+	(void)protocolFamily;
+	hints.ai_family = AF_INET;
+#else
 	hints.ai_family = (protocolFamily >= Sockets::ProtocolFamily::IPv6) ? AF_INET6 : AF_INET;
+#endif
 	hints.ai_socktype = SOCK_DGRAM;
 	hints.ai_protocol = IPPROTO_UDP;
 	hints.ai_flags = AI_PASSIVE;
@@ -720,7 +744,12 @@ bool UDPSocket::bindToAnyPort(Sockets::ProtocolFamily protocolFamily)
 	}
 
 	// Create a socket
+#if defined(OXYGEN_SOCKETS_NO_IPV6)
+	(void)protocolFamily;
+	mInternal->mSocket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+#else
 	mInternal->mSocket = ::socket((protocolFamily >= Sockets::ProtocolFamily::IPv6) ? AF_INET6 : AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+#endif
 	if (mInternal->mSocket < 0)
 	{
 		RMX_ERROR("socket failed with error: " << mInternal->mSocket, );

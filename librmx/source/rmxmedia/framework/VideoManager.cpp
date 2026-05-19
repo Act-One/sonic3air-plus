@@ -24,6 +24,9 @@
 	#include <emscripten.h>
 	#include <emscripten/html5.h>
 
+#elif defined(PLATFORM_WIIU)
+	#include <whb/gfx.h>
+
 #endif
 
 
@@ -44,6 +47,21 @@ namespace rmx
 				SDL_GetWindowSize(window, &outWidth, &outHeight);
 			}
 		}
+
+	#if defined(PLATFORM_WIIU)
+		void setVideoConfigToTVDrawableSize(VideoConfig& videoConfig)
+		{
+			GX2ColorBuffer* tvColorBuffer = WHBGfxGetTVColourBuffer();
+			if (nullptr != tvColorBuffer && tvColorBuffer->surface.width > 0 && tvColorBuffer->surface.height > 0)
+			{
+				videoConfig.mWindowRect.set(0, 0, (int)tvColorBuffer->surface.width, (int)tvColorBuffer->surface.height);
+			}
+			else
+			{
+				videoConfig.mWindowRect.set(0, 0, 1280, 720);
+			}
+		}
+	#endif
 	}
 
 	VideoManager::VideoManager()
@@ -62,56 +80,76 @@ namespace rmx
 
 	bool VideoManager::setVideoMode(const VideoConfig& videoconfig)
 	{
+		VideoConfig effectiveVideoConfig = videoconfig;
+	#if defined(PLATFORM_WIIU)
+		// The Wii U path renders directly to the TV scan buffer, not to the
+		// desktop-sized SDL window requested by config.json.
+		setVideoConfigToTVDrawableSize(effectiveVideoConfig);
+		effectiveVideoConfig.mBorderless = true;
+		effectiveVideoConfig.mResizeable = false;
+	#endif
+
 		// Change video mode
 		uint32 flags = 0;
 	#ifdef RMX_WITH_OPENGL_SUPPORT
-		if (videoconfig.mRenderer == VideoConfig::Renderer::OPENGL)
+		if (effectiveVideoConfig.mRenderer == VideoConfig::Renderer::OPENGL)
 		{
+		#if !defined(PLATFORM_WIIU)
 			flags |= SDL_WINDOW_OPENGL;
+		#endif
 		}
 	#endif
-		if (videoconfig.mFullscreen)
+		if (effectiveVideoConfig.mFullscreen)
 		{
 			flags |= SDL_WINDOW_FULLSCREEN;
 		}
 		else
 		{
-			if (videoconfig.mBorderless)
+			if (effectiveVideoConfig.mBorderless)
 				flags |= SDL_WINDOW_BORDERLESS;
-			if (videoconfig.mResizeable)
+			if (effectiveVideoConfig.mResizeable)
 				flags |= SDL_WINDOW_RESIZABLE;
 		}
 
-		int startX = SDL_WINDOWPOS_CENTERED_DISPLAY(videoconfig.mDisplayIndex);
-		int startY = SDL_WINDOWPOS_CENTERED_DISPLAY(videoconfig.mDisplayIndex);
-		if (videoconfig.mPositioning)
+		int startX = SDL_WINDOWPOS_CENTERED_DISPLAY(effectiveVideoConfig.mDisplayIndex);
+		int startY = SDL_WINDOWPOS_CENTERED_DISPLAY(effectiveVideoConfig.mDisplayIndex);
+		if (effectiveVideoConfig.mPositioning)
 		{
-			startX = videoconfig.mStartPos.x;
-			startY = videoconfig.mStartPos.y;
+			startX = effectiveVideoConfig.mStartPos.x;
+			startY = effectiveVideoConfig.mStartPos.y;
 		}
 
-		mMainWindow = SDL_CreateWindow(*videoconfig.mCaption, startX, startY, videoconfig.mWindowRect.width, videoconfig.mWindowRect.height, flags);
+		mMainWindow = SDL_CreateWindow(*effectiveVideoConfig.mCaption, startX, startY, effectiveVideoConfig.mWindowRect.width, effectiveVideoConfig.mWindowRect.height, flags);
 
 		// Success so far?
 		if (nullptr == mMainWindow)
 			return false;
 
 	#ifdef RMX_WITH_OPENGL_SUPPORT
-		if (videoconfig.mRenderer == VideoConfig::Renderer::OPENGL)
+		if (effectiveVideoConfig.mRenderer == VideoConfig::Renderer::OPENGL)
 		{
+		#if defined(PLATFORM_WIIU)
+			GX2GL_CreateContext();
+			GX2GL_SetSwapInterval(effectiveVideoConfig.mVSync ? 1 : 0);
+			setVideoConfigToTVDrawableSize(effectiveVideoConfig);
+		#else
 			SDL_GL_CreateContext(mMainWindow);
-			SDL_GL_SetSwapInterval(videoconfig.mVSync ? 1 : 0);
+			SDL_GL_SetSwapInterval(effectiveVideoConfig.mVSync ? 1 : 0);
+		#endif
 		}
 	#endif
 
 		// Copy video config
-		mVideoConfig = videoconfig;
+		mVideoConfig = effectiveVideoConfig;
 
 		SDL_GetWindowSize(mMainWindow, &mVideoConfig.mWindowRect.width, &mVideoConfig.mWindowRect.height);
-		SDL_ShowCursor(!videoconfig.mHideCursor);
+	#if defined(PLATFORM_WIIU)
+		setVideoConfigToTVDrawableSize(mVideoConfig);
+	#endif
+		SDL_ShowCursor(!effectiveVideoConfig.mHideCursor);
 
 	#ifdef RMX_WITH_OPENGL_SUPPORT
-		if (videoconfig.mRenderer == VideoConfig::Renderer::OPENGL)
+		if (effectiveVideoConfig.mRenderer == VideoConfig::Renderer::OPENGL)
 		{
 			// Defaults for OpenGL
 			glEnable(GL_BLEND);
@@ -138,6 +176,7 @@ namespace rmx
 	#ifdef RMX_WITH_OPENGL_SUPPORT
 		if (videoconfig.mRenderer == VideoConfig::Renderer::OPENGL)
 		{
+		#if !defined(PLATFORM_WIIU)
 			// Setup video mode for OpenGL
 			SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
 			SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
@@ -145,6 +184,7 @@ namespace rmx
 			SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
 			SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, videoconfig.mMultisampling);
+		#endif
 		}
 	#endif
 
@@ -258,7 +298,11 @@ namespace rmx
 		#ifdef RMX_WITH_OPENGL_SUPPORT
 			if (mVideoConfig.mRenderer == VideoConfig::Renderer::OPENGL)
 			{
+			#if defined(PLATFORM_WIIU)
+				GX2GL_SwapWindow();
+			#else
 				SDL_GL_SwapWindow(mMainWindow);
+			#endif
 			}
 		#endif
 		}

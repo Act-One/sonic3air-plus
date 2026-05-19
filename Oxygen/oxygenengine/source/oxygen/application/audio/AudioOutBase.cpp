@@ -119,7 +119,18 @@ bool AudioOutBase::isPlayingSfxId(uint64 sfxId) const
 
 bool AudioOutBase::playAudioBase(uint64 sfxId, uint8 contextId)
 {
-	return mAudioPlayer.playAudio(sfxId, contextId);
+	const bool result = mAudioPlayer.playAudio(sfxId, contextId);
+#if defined(PLATFORM_WIIU) && defined(S3AIR_WIIU_TRACE_AUDIO)
+	static int sLogCount = 0;
+	if (sLogCount < 96)
+	{
+		RMX_LOG_INFO("AudioOutBase: playAudioBase sfx=0x" << rmx::hexString(sfxId, 16)
+			<< " context=0x" << rmx::hexString((uint32)contextId, 2)
+			<< " result=" << (result ? "ok" : "failed"));
+		++sLogCount;
+	}
+#endif
+	return result;
 }
 
 void AudioOutBase::playOverride(uint64 sfxId, uint8 contextId, uint8 channelId, uint8 overriddenChannelId)

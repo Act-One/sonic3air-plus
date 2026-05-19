@@ -13,6 +13,14 @@
 
 namespace genericmanager
 {
+	inline const char* gDebugCompilerStage = "<none>";
+	inline uint32 gDebugCompilerLine = 0;
+
+	inline void setDebugCompilerStage(const char* stage, uint32 line)
+	{
+		gDebugCompilerStage = (nullptr != stage) ? stage : "<none>";
+		gDebugCompilerLine = line;
+	}
 
 	template<class ELEMENT> class Manager;
 	namespace detail
@@ -47,7 +55,7 @@ namespace genericmanager
 			++mReferenceCounter;
 		}
 
-		void removeReference()
+		void removeReference(const char* context = nullptr, const void* owner = nullptr, size_t index = (size_t)-1)
 		{
 			if (mReferenceCounter >= 2)
 			{
@@ -55,7 +63,14 @@ namespace genericmanager
 			}
 			else
 			{
-				RMX_CHECK(mReferenceCounter == 1, "Invalid reference count of genericmanager::Element", RMX_REACT_THROW);
+			#if defined(PLATFORM_WIIU)
+				if (mReferenceCounter == 0)
+				{
+					RMX_LOG_WARNING("Ignoring stale genericmanager::Element release (type " << mType << ", ptr " << static_cast<const void*>(this) << ", context " << (nullptr != context ? context : "<unknown>") << ", owner " << owner << ", index " << index << ", compiler stage " << gDebugCompilerStage << ", line " << gDebugCompilerLine << ")");
+					return;
+				}
+			#endif
+				RMX_CHECK(mReferenceCounter == 1, "Invalid reference count of genericmanager::Element (type " << mType << ", count " << mReferenceCounter << ", ptr " << static_cast<const void*>(this) << ", context " << (nullptr != context ? context : "<unknown>") << ", owner " << owner << ", index " << index << ", compiler stage " << gDebugCompilerStage << ", line " << gDebugCompilerLine << ")", RMX_REACT_THROW);
 				mReferenceCounter = 0;
 				Manager<ELEMENT>::destroy(static_cast<ELEMENT&>(*this));
 			}
@@ -235,8 +250,8 @@ namespace genericmanager
 		inline ElementPtr() : mElement(nullptr)  {}
 		inline explicit ElementPtr(ELEMENT& element) : mElement(nullptr)  { set(&element); }
 		inline explicit ElementPtr(ELEMENT* element) : mElement(nullptr)  { set(element); }
-		inline explicit ElementPtr(const ElementPtr& other) : mElement(nullptr) { set(other.mElement); }
-		inline explicit ElementPtr(ElementPtr&& other) : mElement(other.mElement) { other.mElement = nullptr; }
+		inline ElementPtr(const ElementPtr& other) : mElement(nullptr) { set(other.mElement); }
+		inline ElementPtr(ElementPtr&& other) noexcept : mElement(other.mElement) { other.mElement = nullptr; }
 		inline virtual ~ElementPtr() { clear(); }
 
 		inline bool valid() const  { return (nullptr != mElement); }
@@ -252,8 +267,11 @@ namespace genericmanager
 
 		void set(ELEMENT* element)
 		{
+			if (mElement == element)
+				return;
+
 			if (nullptr != mElement)
-				mElement->removeReference();
+				mElement->removeReference("ElementPtr::set", this);
 			mElement = element;
 			if (nullptr != mElement)
 				mElement->addReference();
@@ -264,16 +282,20 @@ namespace genericmanager
 			std::swap(mElement, ptr.mElement);
 		}
 
-		inline void operator=(ELEMENT& element)		 { set(element); }
-		inline void operator=(ELEMENT* element)		 { set(element); }
-		inline void operator=(const ElementPtr& ptr) { set(ptr); }
+		inline ElementPtr& operator=(ELEMENT& element)		  { set(element); return *this; }
+		inline ElementPtr& operator=(ELEMENT* element)		  { set(element); return *this; }
+		inline ElementPtr& operator=(const ElementPtr& ptr) { set(ptr); return *this; }
 
-		inline void operator=(ElementPtr&& ptr)
+		inline ElementPtr& operator=(ElementPtr&& ptr) noexcept
 		{
+			if (this == &ptr)
+				return *this;
+
 			if (nullptr != mElement)
-				mElement->removeReference();
+				mElement->removeReference("ElementPtr::moveAssign", this);
 			mElement = ptr.mElement;
 			ptr.mElement = nullptr;
+			return *this;
 		}
 
 		inline ELEMENT& operator*()				  { return *mElement; }
@@ -297,7 +319,8 @@ namespace genericmanager
 			mElements(mBuffer)
 		{}
 
-		inline explicit ElementList(const ElementList& other)
+		inline ElementList(const ElementList& other) :
+			ElementList()
 		{
 			const size_t size = other.mSize;
 			reserve(size);
@@ -310,7 +333,7 @@ namespace genericmanager
 			}
 		}
 
-		inline ElementList(ElementList&& other) :
+		inline ElementList(ElementList&& other) noexcept :
 			ElementList()
 		{
 			swapWith(other);
@@ -327,7 +350,7 @@ namespace genericmanager
 		{
 			for (size_t i = 0; i < mSize; ++i)
 			{
-				mElements[i]->removeReference();
+				mElements[i]->removeReference("ElementList::clear", this, i);
 			}
 			mSize = 0;
 		}
@@ -418,7 +441,10 @@ namespace genericmanager
 			}
 			else
 			{
-				mElements[index]->removeReference();
+				if (mElements[index] == &element)
+					return;
+
+				mElements[index]->removeReference("ElementList::replace", this, index);
 				mElements[index] = &element;
 				element.addReference();
 			}
@@ -430,7 +456,7 @@ namespace genericmanager
 				return;
 
 			//RMX_CHECK(nullptr != mElements[index], "Invalid entry in element list", RMX_REACT_THROW);
-			mElements[index]->removeReference();
+			mElements[index]->removeReference("ElementList::erase", this, index);
 			for (size_t i = index; i < mSize-1; ++i)
 			{
 				mElements[i] = mElements[i+1];
@@ -450,7 +476,7 @@ namespace genericmanager
 			for (size_t i = index; i < limit; ++i)
 			{
 				//RMX_CHECK(nullptr != mElements[i], "Invalid entry in element list", RMX_REACT_THROW);
-				mElements[i]->removeReference();
+				mElements[i]->removeReference("ElementList::eraseRange", this, i);
 			}
 			for (size_t i = index; i < mSize - count; ++i)
 			{
@@ -470,7 +496,7 @@ namespace genericmanager
 				RMX_ASSERT(index < mSize, "Invalid index " << index);
 				if (nullptr != mElements[index])	// In case the index is twice in the list
 				{
-					mElements[index]->removeReference();
+					mElements[index]->removeReference("ElementList::eraseIndices", this, index);
 					mElements[index] = nullptr;
 					++actuallyRemoved;
 				}
@@ -513,10 +539,6 @@ namespace genericmanager
 			{
 				mElements[mSize + i] = other.mElements[startIndex + i];
 				mElements[mSize + i]->addReference();
-			}
-			for (size_t i = startIndex; i < other.mSize - count; ++i)
-			{
-				other.mElements[i] = other.mElements[i + count];
 			}
 			mSize += count;
 		}
@@ -581,16 +603,24 @@ namespace genericmanager
 		ELEMENT& back() const  { return *mElements[mSize-1]; }
 		ELEMENT& operator[](size_t index) const { return *mElements[index]; }
 
-		void operator=(const ElementList& other)
+		ElementList& operator=(const ElementList& other)
 		{
+			if (this == &other)
+				return *this;
+
 			clear();
 			copyFrom(other, 0, other.size());
+			return *this;
 		}
 
-		void operator=(ElementList&& other)
+		ElementList& operator=(ElementList&& other) noexcept
 		{
+			if (this == &other)
+				return *this;
+
 			clear();
 			moveFrom(other, 0, other.size());
+			return *this;
 		}
 
 	private:

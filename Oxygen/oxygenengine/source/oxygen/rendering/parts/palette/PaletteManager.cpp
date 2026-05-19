@@ -19,10 +19,9 @@ Color PaletteManager::unpackColor(uint16 packedColor)
 	// Note that extended packed colors can be matched to the original packed colors when not using the lowermost 2 bits of each channel
 	//  -> That also means when using these bits as well, they can even go higher than pure white at 0xff, but they will get clamped at that point
 
-	uint32 color = 0xff000000;
-	uint8& r = ((uint8*)&color)[0];
-	uint8& g = ((uint8*)&color)[1];
-	uint8& b = ((uint8*)&color)[2];
+	uint8 r = 0;
+	uint8 g = 0;
+	uint8 b = 0;
 	if (packedColor & 0x8000)
 	{
 		r = (uint8)std::min(((packedColor) & 0x1f) * 0x09, 0xff);
@@ -35,6 +34,7 @@ Color PaletteManager::unpackColor(uint16 packedColor)
 		g = ((packedColor >> 5) & 0x07) * 0x24;
 		b = ((packedColor >> 9) & 0x07) * 0x24;
 	}
+	const uint32 color = (uint32)r | ((uint32)g << 8) | ((uint32)b << 16) | 0xff000000u;
 	return Color::fromABGR32(color);
 }
 

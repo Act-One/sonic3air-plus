@@ -30,7 +30,7 @@ namespace rmx
 			if (fname.startsWith("./"))
 				fname.remove(0, 2);
 		#endif
-			return SDL_RWFromFile(*fname, "r");
+			return SDL_RWFromFile(*fname, "rb");
 		}
 	}
 

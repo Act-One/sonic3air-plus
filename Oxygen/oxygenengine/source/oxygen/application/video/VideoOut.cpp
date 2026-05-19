@@ -15,9 +15,9 @@
 #include "oxygen/rendering/Geometry.h"
 #if defined(PLATFORM_WINDOWS)
 #include "oxygen/rendering/d3d11/D3D11Renderer.h"
+#endif
 #if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
 #include "oxygen/rendering/vulkan/VulkanRenderer.h"
-#endif
 #endif
 #include "oxygen/rendering/RenderResources.h"
 #include "oxygen/rendering/opengl/OpenGLRenderer.h"
@@ -42,9 +42,9 @@ VideoOut::~VideoOut()
 	delete mSoftwareRenderer;
 #if defined(PLATFORM_WINDOWS)
 	delete mD3D11Renderer;
+#endif
 #if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
 	delete mVulkanRenderer;
-#endif
 #endif
 #ifdef RMX_WITH_OPENGL_SUPPORT
 	delete mOpenGLRenderer;
@@ -140,9 +140,9 @@ void VideoOut::destroyRenderer()
 	SAFE_DELETE(mSoftwareRenderer);
 #if defined(PLATFORM_WINDOWS)
 	SAFE_DELETE(mD3D11Renderer);
+#endif
 #if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
 	SAFE_DELETE(mVulkanRenderer);
-#endif
 #endif
 #ifdef RMX_WITH_OPENGL_SUPPORT
 	SAFE_DELETE(mOpenGLRenderer);
@@ -152,6 +152,8 @@ void VideoOut::destroyRenderer()
 
 void VideoOut::setActiveRenderer(Configuration::RenderMethod renderMethod, bool reset)
 {
+	Renderer* selectedRenderer = nullptr;
+
 #ifdef RMX_WITH_OPENGL_SUPPORT
 	if (renderMethod == Configuration::RenderMethod::OPENGL_FULL)
 	{
@@ -163,12 +165,11 @@ void VideoOut::setActiveRenderer(Configuration::RenderMethod renderMethod, bool 
 			RMX_LOG_INFO("VideoOut: Renderer initialization");
 			mOpenGLRenderer->initialize();
 		}
-		mActiveRenderer = mOpenGLRenderer;
+		selectedRenderer = mOpenGLRenderer;
 	}
-	else
 #endif
 #if defined(PLATFORM_WINDOWS)
-	if (renderMethod == Configuration::RenderMethod::D3D11_FULL)
+	if (nullptr == selectedRenderer && renderMethod == Configuration::RenderMethod::D3D11_FULL)
 	{
 		if (nullptr == mD3D11Renderer)
 		{
@@ -178,10 +179,11 @@ void VideoOut::setActiveRenderer(Configuration::RenderMethod renderMethod, bool 
 			RMX_LOG_INFO("VideoOut: Renderer initialization");
 			mD3D11Renderer->initialize();
 		}
-		mActiveRenderer = mD3D11Renderer;
+		selectedRenderer = mD3D11Renderer;
 	}
+#endif
 #if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
-	else if (renderMethod == Configuration::RenderMethod::VULKAN_SOFT || renderMethod == Configuration::RenderMethod::VULKAN_FULL)
+	if (nullptr == selectedRenderer && (renderMethod == Configuration::RenderMethod::VULKAN_SOFT || renderMethod == Configuration::RenderMethod::VULKAN_FULL))
 	{
 		if (nullptr == mVulkanRenderer)
 		{
@@ -191,11 +193,10 @@ void VideoOut::setActiveRenderer(Configuration::RenderMethod renderMethod, bool 
 			RMX_LOG_INFO("VideoOut: Renderer initialization");
 			mVulkanRenderer->initialize();
 		}
-		mActiveRenderer = mVulkanRenderer;
+		selectedRenderer = mVulkanRenderer;
 	}
 #endif
-	else
-#endif
+	if (nullptr == selectedRenderer)
 	{
 		if (nullptr == mSoftwareRenderer)
 		{
@@ -205,8 +206,9 @@ void VideoOut::setActiveRenderer(Configuration::RenderMethod renderMethod, bool 
 			RMX_LOG_INFO("VideoOut: Renderer initialization");
 			mSoftwareRenderer->initialize();
 		}
-		mActiveRenderer = mSoftwareRenderer;
+		selectedRenderer = mSoftwareRenderer;
 	}
+	mActiveRenderer = selectedRenderer;
 
 	if (reset)
 	{
@@ -654,13 +656,6 @@ void VideoOut::renderGameScreen()
 	if (mRenderParts->getActiveDisplay())
 	{
 		collectGeometries(mGeometries);
-	}
-
-	static int sGeometryLogCount = 0;
-	if (sGeometryLogCount < 6)
-	{
-		++sGeometryLogCount;
-		RMX_LOG_INFO("VideoOut: renderGameScreen activeDisplay=" << (mRenderParts->getActiveDisplay() ? 1 : 0) << ", geometries=" << mGeometries.size());
 	}
 
 	// Render them

@@ -138,6 +138,8 @@ namespace lemon
 			// Setup runtime functions (all empty at first)
 			const std::vector<ScriptFunction*>& scriptFunctions = mProgram->getScriptFunctions();
 			mRuntimeFunctions.resize(scriptFunctions.size());
+			mRuntimeFunctionsMapped.reserve(scriptFunctions.size());
+			mRuntimeFunctionsBySignature.reserve(scriptFunctions.size());
 			for (size_t i = 0; i < scriptFunctions.size(); ++i)
 			{
 				RuntimeFunction& runtimeFunc = mRuntimeFunctions[i];
@@ -435,15 +437,16 @@ namespace lemon
 		result.mStepsExecuted = 0;
 		result.mResult = ExecuteResult::Result::OKAY;
 
-		if (mSelectedControlFlow->mCallStack.count <= minimumCallStackSize)
+		ControlFlow* controlFlow = mSelectedControlFlow;
+		if (controlFlow->mCallStack.count <= minimumCallStackSize)
 		{
 			result.mResult = ExecuteResult::Result::HALT;
 			return;
 		}
 
 		RuntimeOpcodeContext context;
-		context.mControlFlow = mSelectedControlFlow;
-		mActiveControlFlow = mSelectedControlFlow;
+		context.mControlFlow = controlFlow;
+		mActiveControlFlow = controlFlow;
 		mCurrentOpcodePtr = &context.mOpcode;
 
 		// Outer loop
@@ -452,7 +455,10 @@ namespace lemon
 		mReceivedStopSignal = false;
 		while (!mReceivedStopSignal)
 		{
-			ControlFlow::State& state = mSelectedControlFlow->mCallStack.back();
+			controlFlow = mSelectedControlFlow;
+			context.mControlFlow = controlFlow;
+			mActiveControlFlow = controlFlow;
+			ControlFlow::State& state = controlFlow->mCallStack.back();
 
 		#ifdef DEBUG
 			// Reached the end already?
@@ -468,12 +474,12 @@ namespace lemon
 			}
 		#endif
 
-			RMX_CHECK(mSelectedControlFlow->mValueStackPtr >= mSelectedControlFlow->mValueStackStart, "Value stack error: Removed elements from empty stack", mSelectedControlFlow->mValueStackPtr = mSelectedControlFlow->mValueStackStart);
-			RMX_CHECK(mSelectedControlFlow->mValueStackPtr < &mSelectedControlFlow->mValueStackBuffer[ControlFlow::VALUE_STACK_LAST_INDEX], "Value stack error: Too many elements", mSelectedControlFlow->mValueStackPtr = &mSelectedControlFlow->mValueStackBuffer[0x77]);
+			RMX_CHECK(controlFlow->mValueStackPtr >= controlFlow->mValueStackStart, "Value stack error: Removed elements from empty stack", controlFlow->mValueStackPtr = controlFlow->mValueStackStart);
+			RMX_CHECK(controlFlow->mValueStackPtr < &controlFlow->mValueStackBuffer[ControlFlow::VALUE_STACK_LAST_INDEX], "Value stack error: Too many elements", controlFlow->mValueStackPtr = &controlFlow->mValueStackBuffer[0x77]);
 
-			RMX_ASSERT(mSelectedControlFlow->mLocalVariablesSize <= ControlFlow::VAR_STACK_LIMIT, "Reached var stack limit");
-			mSelectedControlFlow->mCurrentLocalVariables = reinterpret_cast<uint8*>(&mSelectedControlFlow->mLocalVariablesBuffer[state.mLocalVariablesStart]);
-			RMX_ASSERT(nullptr != mSelectedControlFlow->mCurrentLocalVariables, "Reached var stack limit");
+			RMX_ASSERT(controlFlow->mLocalVariablesSize <= ControlFlow::VAR_STACK_LIMIT, "Reached var stack limit");
+			controlFlow->mCurrentLocalVariables = reinterpret_cast<uint8*>(&controlFlow->mLocalVariablesBuffer[state.mLocalVariablesStart]);
+			RMX_ASSERT(nullptr != controlFlow->mCurrentLocalVariables, "Reached var stack limit");
 
 			context.mOpcode = (const RuntimeOpcode*)state.mProgramCounter;
 
@@ -517,8 +523,8 @@ namespace lemon
 				{
 					case Opcode::Type::JUMP_CONDITIONAL:
 					{
-						--mSelectedControlFlow->mValueStackPtr;
-						if (*mSelectedControlFlow->mValueStackPtr != 0)
+						--controlFlow->mValueStackPtr;
+						if (*controlFlow->mValueStackPtr != 0)
 						{
 							context.mOpcode = context.mOpcode->mNext;
 							++result.mStepsExecuted;
@@ -530,7 +536,8 @@ namespace lemon
 
 					case Opcode::Type::JUMP:
 					{
-						state.mProgramCounter = reinterpret_cast<const uint8*>(context.mOpcode->getParameter<uint64>());
+						const RuntimeOpcode* jumpOpcode = context.mOpcode;
+						state.mProgramCounter = jumpOpcode->getParameter<const uint8*>();
 
 						// Check if steps limit is reached (this usually means the limit was exceeded already, but that's okay)
 						//  -> This is needed to prevent endless loops
@@ -548,15 +555,15 @@ namespace lemon
 					case Opcode::Type::JUMP_SWITCH:
 					{
 						// Jump if top of stack is zero
-						if (mSelectedControlFlow->mValueStackPtr[-1] == 0)
+						if (controlFlow->mValueStackPtr[-1] == 0)
 						{
-							--mSelectedControlFlow->mValueStackPtr;
-							context.mOpcode = reinterpret_cast<const RuntimeOpcode*>(context.mOpcode->getParameter<uint64>());
+							--controlFlow->mValueStackPtr;
+							context.mOpcode = context.mOpcode->getParameter<const RuntimeOpcode*>();
 						}
 						else
 						{
 							// Otherwise decrease it and go on with the next opcode
-							--mSelectedControlFlow->mValueStackPtr[-1];
+							--controlFlow->mValueStackPtr[-1];
 							context.mOpcode = context.mOpcode->mNext;
 							++result.mStepsExecuted;
 						}
@@ -566,7 +573,8 @@ namespace lemon
 					case Opcode::Type::CALL:
 					{
 						state.mProgramCounter = (uint8*)context.mOpcode->mNext;
-						const uint64 callTarget = context.mOpcode->getParameter<uint64>();
+						const bool callTargetIsResolvedPointer = context.mOpcode->mFlags.isSet(RuntimeOpcode::Flag::CALL_TARGET_RUNTIME_FUNC) || context.mOpcode->mFlags.isSet(RuntimeOpcode::Flag::CALL_TARGET_RESOLVED);
+						const uint64 callTarget = callTargetIsResolvedPointer ? 0 : context.mOpcode->getParameter<uint64>();
 						++result.mStepsExecuted;
 
 						const Function* func = handleResultCall(*context.mOpcode);
@@ -586,14 +594,14 @@ namespace lemon
 
 					case Opcode::Type::RETURN:
 					{
-						mSelectedControlFlow->mLocalVariablesSize = mSelectedControlFlow->mCallStack.back().mLocalVariablesStart;
-						mSelectedControlFlow->mCallStack.pop_back();
+						controlFlow->mLocalVariablesSize = controlFlow->mCallStack.back().mLocalVariablesStart;
+						controlFlow->mCallStack.pop_back();
 						++result.mStepsExecuted;
 
 						if (result.handleReturn())
 						{
 							// Check stop conditions
-							if (mSelectedControlFlow->mCallStack.count > minimumCallStackSize && result.mStepsExecuted < stepsLimit)
+							if (controlFlow->mCallStack.count > minimumCallStackSize && result.mStepsExecuted < stepsLimit)
 							{
 								// Restart the outer loop now that the running function has changed
 								stayInsideInnerLoop = false;
@@ -609,8 +617,8 @@ namespace lemon
 					case Opcode::Type::EXTERNAL_CALL:
 					{
 						state.mProgramCounter = (uint8*)context.mOpcode + context.mOpcode->mSize;
-						--mSelectedControlFlow->mValueStackPtr;
-						const uint64 targetAddress = *mSelectedControlFlow->mValueStackPtr;
+						--controlFlow->mValueStackPtr;
+						const uint64 targetAddress = *controlFlow->mValueStackPtr;
 						++result.mStepsExecuted;
 
 						if (result.handleExternalCall(targetAddress))
@@ -629,15 +637,15 @@ namespace lemon
 					case Opcode::Type::EXTERNAL_JUMP:
 					{
 						state.mProgramCounter = (uint8*)context.mOpcode + context.mOpcode->mSize;
-						--mSelectedControlFlow->mValueStackPtr;
+						--controlFlow->mValueStackPtr;
 						returnFromFunction();
-						const uint64 targetAddress = *mSelectedControlFlow->mValueStackPtr;
+						const uint64 targetAddress = *controlFlow->mValueStackPtr;
 						++result.mStepsExecuted;
 
 						if (result.handleExternalJump(targetAddress))
 						{
 							// Check stop conditions
-							if (mSelectedControlFlow->mCallStack.count > minimumCallStackSize && result.mStepsExecuted < stepsLimit)
+							if (controlFlow->mCallStack.count > minimumCallStackSize && result.mStepsExecuted < stepsLimit)
 							{
 								// Restart the outer loop now that the running function has changed
 								stayInsideInnerLoop = false;

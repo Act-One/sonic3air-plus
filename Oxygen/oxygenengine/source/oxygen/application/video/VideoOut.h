@@ -15,9 +15,9 @@
 class Renderer;
 #if defined(PLATFORM_WINDOWS)
 class D3D11Renderer;
+#endif
 #if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
 class VulkanRenderer;
-#endif
 #endif
 class OpenGLRenderer;
 class SoftwareRenderer;
@@ -105,9 +105,9 @@ private:
 	SoftwareRenderer* mSoftwareRenderer = nullptr;
 #if defined(PLATFORM_WINDOWS)
 	D3D11Renderer* mD3D11Renderer = nullptr;
+#endif
 #if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
 	VulkanRenderer* mVulkanRenderer = nullptr;
-#endif
 #endif
 #ifdef RMX_WITH_OPENGL_SUPPORT
 	OpenGLRenderer* mOpenGLRenderer = nullptr;

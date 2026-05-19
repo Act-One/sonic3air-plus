@@ -44,6 +44,10 @@
 #if defined(PLATFORM_ANDROID)
 	#include "oxygen/platform/android/AndroidJavaInterface.h"
 #endif
+#if defined(PLATFORM_WIIU)
+	#include "gx2gl/sdl_bridge.h"
+	#include <whb/gfx.h>
+#endif
 
 #include <filesystem>
 
@@ -67,6 +71,21 @@ namespace
 			SDL_GetWindowSize(window, &outWidth, &outHeight);
 		}
 	}
+
+#if defined(PLATFORM_WIIU)
+	void setVideoConfigToTVDrawableSize(rmx::VideoConfig& videoConfig)
+	{
+		GX2ColorBuffer* tvColorBuffer = WHBGfxGetTVColourBuffer();
+		if (nullptr != tvColorBuffer && tvColorBuffer->surface.width > 0 && tvColorBuffer->surface.height > 0)
+		{
+			videoConfig.mWindowRect.set(0, 0, (int)tvColorBuffer->surface.width, (int)tvColorBuffer->surface.height);
+		}
+		else
+		{
+			videoConfig.mWindowRect.set(0, 0, 1280, 720);
+		}
+	}
+#endif
 }
 
 
@@ -247,11 +266,19 @@ void EngineMain::setVSyncMode(Configuration::FrameSyncType frameSyncMode)
 	{
 		if (Configuration::useVSync(frameSyncMode))
 		{
+		#if defined(PLATFORM_WIIU)
+			GX2GL_SetSwapInterval(1);
+		#else
 			SDL_GL_SetSwapInterval(1);
+		#endif
 		}
 		else
 		{
+		#if defined(PLATFORM_WIIU)
+			GX2GL_SetSwapInterval(0);
+		#else
 			SDL_GL_SetSwapInterval(0);
+		#endif
 		}
 	}
 }
@@ -654,6 +681,16 @@ bool EngineMain::initFileSystem()
 	if (!loadFilePackages(false))
 		return false;
 
+#if defined(PLATFORM_WIIU)
+	// The Wii U port stages clean unpacked data next to optional packages. Prefer those unpacked
+	// files so stale package builds cannot override source assets with mismatched payload formats.
+	{
+		rmx::RealFileProvider* provider = new rmx::RealFileProvider();
+		FTX::FileSystem->addManagedFileProvider(*provider);
+		FTX::FileSystem->addMountPoint(*provider, L"data/", config.mGameDataPath + L'/', 0x80);
+	}
+#endif
+
 	// Sanity check if engine data exists
 	//  -> The Oxygen icon is a file that is always part of the engine data, so we just check for that
 	if (!FTX::FileSystem->exists(config.mEngineDataPath + L"/oxygen_icon.png"))
@@ -758,6 +795,10 @@ bool EngineMain::createWindow()
 	// Setup video config
 	rmx::VideoConfig videoConfig(config.mWindowMode != Configuration::WindowMode::WINDOWED, config.mWindowSize.x, config.mWindowSize.y, appMetaData.mTitle.c_str());
 	videoConfig.mRenderer = useOpenGL ? rmx::VideoConfig::Renderer::OPENGL : rmx::VideoConfig::Renderer::SOFTWARE;
+#if defined(PLATFORM_WIIU)
+	// Fallback until GX2GL has initialized WHB/GX2 and can report the real TV surface.
+	setVideoConfigToTVDrawableSize(videoConfig);
+#endif
 #if defined(PLATFORM_UWP)
 	videoConfig.mResizeable = false;
 #else
@@ -783,6 +824,9 @@ bool EngineMain::createWindow()
 	{
 		// Set SDL OpenGL attributes
 		RMX_LOG_INFO("Setup of OpenGL attributes...");
+	#if defined(PLATFORM_WIIU)
+		RMX_LOG_INFO("Using gx2gl over GX2");
+	#else
 	#if !defined(RMX_USE_GLES2)
 		{
 			// OpenGL 3.1 or 3.2
@@ -816,13 +860,20 @@ bool EngineMain::createWindow()
 			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, minorVersion);
 		}
 	#endif
+	#endif
 	}
 
 	// Create window
 	{
 		const int displayIndex = config.mDisplayIndex;
 
-		uint32 flags = useOpenGL ? SDL_WINDOW_OPENGL : 0;
+		uint32 flags = 0;
+	#if !defined(PLATFORM_WIIU)
+		if (useOpenGL)
+			flags |= SDL_WINDOW_OPENGL;
+	#else
+		flags |= SDL_WINDOW_WIIU_TV_ONLY | SDL_WINDOW_WIIU_PREVENT_SWAP;
+	#endif
 #if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
 		if (useVulkan)
 			flags |= SDL_WINDOW_VULKAN;
@@ -863,7 +914,20 @@ bool EngineMain::createWindow()
 			}
 		}
 
+#if defined(PLATFORM_WIIU)
+		setVideoConfigToTVDrawableSize(videoConfig);
+#endif
+
 		RMX_LOG_INFO("Creating window...");
+#if defined(PLATFORM_WIIU)
+		if (useOpenGL)
+		{
+			RMX_LOG_INFO("Using direct WHB/GX2 presentation without an SDL video window");
+			mSDLWindow = nullptr;
+		}
+		else
+#endif
+		{
 		mSDLWindow = SDL_CreateWindow(*videoConfig.mCaption, SDL_WINDOWPOS_CENTERED_DISPLAY(displayIndex), SDL_WINDOWPOS_CENTERED_DISPLAY(displayIndex), videoConfig.mWindowRect.width, videoConfig.mWindowRect.height, flags);
 		if (nullptr == mSDLWindow)
 		{
@@ -873,6 +937,7 @@ bool EngineMain::createWindow()
 		RMX_LOG_INFO("Retrieving actual window size...");
 		getWindowSizeForRendering(mSDLWindow, videoConfig.mWindowRect.width, videoConfig.mWindowRect.height);
 		SDL_ShowCursor(!videoConfig.mHideCursor);
+		}
 
 	#if defined(PLATFORM_UWP)
 		if (config.mWindowMode != Configuration::WindowMode::WINDOWED)
@@ -886,6 +951,17 @@ bool EngineMain::createWindow()
 		if (useOpenGL)
 		{
 			RMX_LOG_INFO("Creating OpenGL context...");
+		#if defined(PLATFORM_WIIU)
+			mSDLGLContext = GX2GL_CreateContext();
+			if (nullptr != mSDLGLContext)
+			{
+				GX2GL_MakeCurrent(mSDLGLContext);
+				GX2GL_SetAutomaticDRCEnabled(1);
+				setVideoConfigToTVDrawableSize(videoConfig);
+				RMX_LOG_INFO("Vsync setup...");
+				setVSyncMode(config.mFrameSync);
+			}
+		#else
 			mSDLGLContext = SDL_GL_CreateContext(mSDLWindow);
 			if (nullptr != mSDLGLContext)
 			{
@@ -893,6 +969,7 @@ bool EngineMain::createWindow()
 				RMX_LOG_INFO("Vsync setup...");
 				setVSyncMode(config.mFrameSync);
 			}
+		#endif
 			else
 			{
 				RMX_LOG_INFO("Failed to create OpenGL context, fallback to pure software renderer");
@@ -917,6 +994,7 @@ bool EngineMain::createWindow()
 	else
 #endif
 	{
+#if defined(PLATFORM_WINDOWS)
 		if (useDirect3D11)
 		{
 			if (!mDrawer.createDrawer<D3D11Drawer>())
@@ -938,6 +1016,7 @@ bool EngineMain::createWindow()
 		}
 #endif
 		else
+#endif
 		{
 			mDrawer.createDrawer<SoftwareDrawer>();
 		}
@@ -994,8 +1073,13 @@ void EngineMain::destroyWindow()
 
 	if (nullptr != mSDLGLContext)
 	{
+	#if defined(PLATFORM_WIIU)
+		GX2GL_MakeCurrent(nullptr);
+		GX2GL_DeleteContext(mSDLGLContext);
+	#else
 		SDL_GL_MakeCurrent(nullptr, nullptr);
 		SDL_GL_DeleteContext(mSDLGLContext);
+	#endif
 		mSDLGLContext = nullptr;
 	}
 

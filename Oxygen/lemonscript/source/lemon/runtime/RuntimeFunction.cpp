@@ -58,6 +58,7 @@ namespace lemon
 		mOpcodePointers.push_back((RuntimeOpcode*)opcodePointer);
 
 		// Setup some default values
+		memset(opcodePointer, 0, size);
 		RuntimeOpcode& runtimeOpcode = *(RuntimeOpcode*)opcodePointer;
 		runtimeOpcode.mExecFunc = nullptr;
 		runtimeOpcode.mOpcodeType = Opcode::Type::NOP;
@@ -146,11 +147,11 @@ namespace lemon
 				RuntimeOpcode& runtimeOpcode = *runtimeOpcodePointers[i];
 				if (runtimeOpcode.mOpcodeType == Opcode::Type::JUMP || runtimeOpcode.mOpcodeType == Opcode::Type::JUMP_SWITCH)
 				{
-					runtimeOpcode.setParameter(translateJumpTarget(runtimeOpcode.getParameter<uint32>()));
+					runtimeOpcode.setParameter(translateJumpTarget((uint32)runtimeOpcode.getParameter<uint64>()));
 				}
 				else if (runtimeOpcode.mOpcodeType == Opcode::Type::JUMP_CONDITIONAL)
 				{
-					runtimeOpcode.setParameter(translateJumpTarget(runtimeOpcode.getParameter<uint32>(0)), 0);
+					runtimeOpcode.setParameter(translateJumpTarget((uint32)runtimeOpcode.getParameter<uint64>(0)), 0);
 				#ifdef USE_JUMP_CONDITIONAL_RUNTIME_EXEC
 					runtimeOpcode.setParameter(translateJumpTarget(runtimeOpcode.getParameter<uint32>(8)), 8);
 				#endif
@@ -191,7 +192,7 @@ namespace lemon
 					// Take a shortcut by skipping the jump opcode and directly pointing to its target as next opcode
 					//  -> But only do that for jumps forward, otherwise it's possible that script execution can get stuck in an infinite loop
 					//  -> That's because counted steps are only checked in actually executed jumps, but not in those that we optimize away here
-					RuntimeOpcode* targetPointer = reinterpret_cast<RuntimeOpcode*>(runtimeOpcode.mNext->getParameter<uint64>());
+					RuntimeOpcode* targetPointer = runtimeOpcode.mNext->getParameter<RuntimeOpcode*>();
 					RuntimeOpcode* ownPointer = &runtimeOpcode;
 					if (targetPointer <= ownPointer)
 						break;

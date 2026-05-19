@@ -55,8 +55,13 @@ private:
 	State mState = State::NONE;
 	std::wstring mOutputFilename;
 	FileHandle mOutputFile;
+#if defined(PLATFORM_WIIU)
+	uint64 mBytesDownloaded = 0;
+	bool mThreadRunning = false;
+#else
 	std::atomic<uint64> mBytesDownloaded = 0;
 	std::atomic<bool> mThreadRunning = false;
+#endif
 
 #ifdef PLATFORM_WEB
 	emscripten_fetch_t* mFetch = nullptr;

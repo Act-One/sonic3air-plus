@@ -35,6 +35,8 @@ namespace
 		return "ios";
 	#elif defined(PLATFORM_WEB)
 		return "web";
+	#elif defined(PLATFORM_WIIU)
+		return "wiiu";
 	#elif defined(PLATFORM_SWITCH)
 		return "switch";
 	#else

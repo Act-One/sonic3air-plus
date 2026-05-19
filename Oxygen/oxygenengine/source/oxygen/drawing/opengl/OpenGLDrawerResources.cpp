@@ -20,10 +20,41 @@
 #include "oxygen/rendering/opengl/shaders/SimpleRectVertexColorShader.h"
 #include "oxygen/rendering/parts/palette/PaletteManager.h"
 
+#include <vector>
+
 
 namespace
 {
 	static const Vec2i PALETTE_TEXTURE_SIZE = Vec2i(256, PaletteManager::MAIN_PALETTE_SIZE / 256 * 2);
+
+	const void* getPaletteUploadData(const Bitmap& bitmap, int width, int height, std::vector<uint8>& scratch)
+	{
+	#if RMX_IS_BIG_ENDIAN
+		const size_t numPixels = (size_t)width * (size_t)height;
+		scratch.resize(numPixels * 4);
+
+		const uint8* src = reinterpret_cast<const uint8*>(bitmap.getData());
+		for (int y = 0; y < height; ++y)
+		{
+			const int srcY = y;
+			for (int x = 0; x < width; ++x)
+			{
+				const uint8* pixel = src + ((size_t)srcY * (size_t)bitmap.getWidth() + (size_t)x) * 4;
+				const size_t dstIndex = ((size_t)y * (size_t)width + (size_t)x) * 4;
+				scratch[dstIndex + 0] = pixel[ABGR32_BYTE_R];
+				scratch[dstIndex + 1] = pixel[ABGR32_BYTE_G];
+				scratch[dstIndex + 2] = pixel[ABGR32_BYTE_B];
+				scratch[dstIndex + 3] = pixel[ABGR32_BYTE_A];
+			}
+		}
+		return scratch.data();
+	#else
+		(void)width;
+		(void)height;
+		(void)scratch;
+		return bitmap.getData();
+	#endif
+	}
 }
 
 
@@ -253,15 +284,17 @@ bool OpenGLDrawerResources::updatePalette(PaletteData& data, const PaletteBase& 
 
 	// Upload changes to the GPU
 	glBindTexture(GL_TEXTURE_2D, data.mTexture.getHandle());
+	std::vector<uint8> scratch;
 	if (secondaryPaletteChanged)
 	{
 		// Update everything
-		glTexImage2D(GL_TEXTURE_2D, 0, rmx::OpenGLHelper::FORMAT_RGBA, data.mBitmap.getWidth(), data.mBitmap.getHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, data.mBitmap.getData());
+		glTexImage2D(GL_TEXTURE_2D, 0, rmx::OpenGLHelper::FORMAT_RGBA, data.mBitmap.getWidth(), data.mBitmap.getHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, getPaletteUploadData(data.mBitmap, data.mBitmap.getWidth(), data.mBitmap.getHeight(), scratch));
 	}
 	else
 	{
 		// Update only the primary palette
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 2, GL_RGBA, GL_UNSIGNED_BYTE, data.mBitmap.getData());
+		const int uploadY = 0;
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, uploadY, 256, 2, GL_RGBA, GL_UNSIGNED_BYTE, getPaletteUploadData(data.mBitmap, 256, 2, scratch));
 	}
 	return true;
 }

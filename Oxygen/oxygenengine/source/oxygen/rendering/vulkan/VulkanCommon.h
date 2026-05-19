@@ -71,11 +71,6 @@ namespace vulkan
 	{
 		return (alignment > 0) ? ((value + alignment - 1) / alignment * alignment) : value;
 	}
-
-	inline uint32_t alignUp(uint32_t value, uint32_t alignment)
-	{
-		return (alignment > 0) ? ((value + alignment - 1) / alignment * alignment) : value;
-	}
 }
 
 #endif

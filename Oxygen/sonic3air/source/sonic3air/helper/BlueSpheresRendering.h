@@ -22,6 +22,7 @@ public:
 	void writeVisibleSpheresData(uint32 targetAddress, uint32 sourceAddress, uint16 px, uint16 py, uint8 rotation, EmulatorInterface& emulatorInterface);
 
 private:
+	bool ensureLookupData();
 	bool loadLookupData();
 	void performLookupCalculations();
 	void buildSprite(const uint8* lookupDataBase, const String spriteIdentifier[2], int numPureGroundRows, Vec2i screenSize);

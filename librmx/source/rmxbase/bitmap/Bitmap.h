@@ -9,6 +9,20 @@
 #pragma once
 
 
+// Byte indices for ABGR32 (0xAABBGGRR) pixels when accessed as uint8 bytes.
+#if RMX_IS_BIG_ENDIAN
+	static constexpr int ABGR32_BYTE_R = 3;
+	static constexpr int ABGR32_BYTE_G = 2;
+	static constexpr int ABGR32_BYTE_B = 1;
+	static constexpr int ABGR32_BYTE_A = 0;
+#else
+	static constexpr int ABGR32_BYTE_R = 0;
+	static constexpr int ABGR32_BYTE_G = 1;
+	static constexpr int ABGR32_BYTE_B = 2;
+	static constexpr int ABGR32_BYTE_A = 3;
+#endif
+
+
 class API_EXPORT Bitmap
 {
 public:

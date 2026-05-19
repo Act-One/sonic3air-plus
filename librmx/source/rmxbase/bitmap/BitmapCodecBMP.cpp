@@ -38,6 +38,52 @@ namespace rmx
 		return (color & 0xff00ff00) | ((color & 0x00ff0000) >> 16) | ((color & 0x000000ff) << 16);
 	}
 
+	inline bool isLittleEndianHost()
+	{
+		const uint16 value = 0x1234;
+		return (*(const uint8*)&value == 0x34);
+	}
+
+	inline uint16 swap16(uint16 value)
+	{
+		return (uint16)((value >> 8) | (value << 8));
+	}
+
+	inline uint32 swap32(uint32 value)
+	{
+		return ((value & 0x000000ffu) << 24) |
+			   ((value & 0x0000ff00u) << 8) |
+			   ((value & 0x00ff0000u) >> 8) |
+			   ((value & 0xff000000u) >> 24);
+	}
+
+	inline void convertBmpHeaderEndian(BmpHeader& header)
+	{
+		if (isLittleEndianHost())
+			return;
+
+		header.fileSize = swap32(header.fileSize);
+		header.creator1 = swap16(header.creator1);
+		header.creator2 = swap16(header.creator2);
+		header.headerSize = swap32(header.headerSize);
+		header.dibHeaderSize = swap32(header.dibHeaderSize);
+		header.width = (int32)swap32((uint32)header.width);
+		header.height = (int32)swap32((uint32)header.height);
+		header.numPlanes = swap16(header.numPlanes);
+		header.bpp = swap16(header.bpp);
+		header.compression = swap32(header.compression);
+		header.dataSize = swap32(header.dataSize);
+		header.resolutionX = (int32)swap32((uint32)header.resolutionX);
+		header.resolutionY = (int32)swap32((uint32)header.resolutionY);
+		header.numColors = swap32(header.numColors);
+		header.importantColors = swap32(header.importantColors);
+	}
+
+	inline uint32 makePixelABGR(uint8 r, uint8 g, uint8 b, uint8 a)
+	{
+		return ((uint32)a << 24) | ((uint32)b << 16) | ((uint32)g << 8) | (uint32)r;
+	}
+
 	#define RETURN(errcode) \
 	{ \
 		outResult.mError = errcode; \
@@ -61,6 +107,7 @@ namespace rmx
 		// Read header
 		BmpHeader header;
 		stream >> header;
+		convertBmpHeaderEndian(header);
 		if (memcmp(header.signature, "BM", 2) != 0)
 			RETURN(Bitmap::LoadResult::Error::INVALID_FILE);
 
@@ -85,10 +132,12 @@ namespace rmx
 
 		// Read and convert palette
 		uint32 palette[256];
-		stream.read(palette, palSize * sizeof(uint32));
+		uint8 paletteBytes[256 * 4];
+		stream.read(paletteBytes, palSize * 4);
 		for (int i = 0; i < palSize; ++i)
 		{
-			palette[i] = swapRedBlue(palette[i] | 0xff000000);
+			const uint8* entry = &paletteBytes[i * 4];
+			palette[i] = makePixelABGR(entry[2], entry[1], entry[0], 0xff);
 		}
 
 		// Skip unrecognized parts of the header
@@ -111,7 +160,7 @@ namespace rmx
 			{
 				case 1:
 					for (int x = 0; x < width; ++x)
-						dataPtr[x] = palette[(buffer[x/8] >> (x%8)) & 0x01];
+						dataPtr[x] = palette[(buffer[x/8] >> (7 - (x & 0x07))) & 0x01];
 					break;
 
 				case 4:
@@ -131,7 +180,10 @@ namespace rmx
 
 				case 32:
 					for (int x = 0; x < width; ++x)
-						dataPtr[x] = swapRedBlue(*(uint32*)&buffer[x*4]);
+					{
+						const uint8* pixel = &buffer[x * 4];
+						dataPtr[x] = makePixelABGR(pixel[2], pixel[1], pixel[0], pixel[3]);
+					}
 					break;
 			}
 			buffer += stride;
@@ -181,16 +233,23 @@ namespace rmx
 		header.dataSize = dataSize;
 		header.resolutionX = 0xb40;
 		header.resolutionY = 0xb40;
-		stream << header;
+		BmpHeader fileHeader = header;
+		convertBmpHeaderEndian(fileHeader);
+		stream.write(&fileHeader, sizeof(fileHeader));
 
-		uint32* output = new uint32[width];
+		uint8* output = new uint8[width * 4];
 
 		for (int y = 0; y < height; ++y)
 		{
 			const uint32* src = bitmap.getPixelPointer(0, height-y-1);
 			for (int x = 0; x < width; ++x)
-				output[x] = swapRedBlue(src[x]);
-			stream.write(output, width*4);
+			{
+				output[x * 4] = (uint8)((src[x] >> 16) & 0xff);
+				output[x * 4 + 1] = (uint8)((src[x] >> 8) & 0xff);
+				output[x * 4 + 2] = (uint8)(src[x] & 0xff);
+				output[x * 4 + 3] = (uint8)((src[x] >> 24) & 0xff);
+			}
+			stream.write(output, width * 4);
 		}
 
 		delete[] output;

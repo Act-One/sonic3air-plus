@@ -96,6 +96,11 @@ void GameView::updateGameViewport()
 	const Recti gameScreenRect = VideoOut::instance().getScreenRect();
 	mGameViewport.setResolution(gameScreenRect.getSize());
 
+#if defined(PLATFORM_WIIU)
+	// Console output should cover the full TV surface. Aspect-preserving modes
+	// can leave small bars because Sonic 3 A.I.R.'s 400x224 buffer is not 16:9.
+	mGameViewport.setRectOnScreen(mRect);
+#else
 	switch (config.mUpscaling)
 	{
 		default:
@@ -147,6 +152,7 @@ void GameView::updateGameViewport()
 	{
 		mGameViewport.buildRectWithAlignment(mRect, config.mDevMode.mGameViewScale, config.mDevMode.mGameViewAlignment, config.mUpscaling == 1);
 	}
+#endif
 }
 
 bool GameView::translatePositionIntoGameViewport(Vec2f& outPosition, const Vec2f& inPosition) const
@@ -754,7 +760,11 @@ void GameView::render()
 	}
 	drawer.setWindowRenderTarget(FTX::screenRect());
 	drawer.setBlendMode(BlendMode::OPAQUE);
+#if defined(PLATFORM_WIIU)
+	drawer.drawRect(FTX::screenRect(), mFinalGameTexture);
+#else
 	drawer.drawUpscaledRect(gameViewportRect, mFinalGameTexture);
+#endif
 
 	if (!FTX::Video->getVideoConfig().mAutoClearScreen)
 	{

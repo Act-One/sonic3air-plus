@@ -10,6 +10,37 @@
 
 #ifdef RMX_WITH_OPENGL_SUPPORT
 
+#include <vector>
+
+namespace
+{
+	const void* getUploadDataRGBA(const void* data, int width, int height, GLenum format, GLenum type, std::vector<uint8>& scratch)
+	{
+	#if RMX_IS_BIG_ENDIAN
+		if (nullptr != data && format == GL_RGBA && type == GL_UNSIGNED_BYTE)
+		{
+			const size_t numPixels = (size_t)width * (size_t)height;
+			scratch.resize(numPixels * 4);
+
+			const uint8* src = static_cast<const uint8*>(data);
+			for (size_t i = 0; i < numPixels; ++i)
+			{
+				const uint8* pixel = src + i * 4;
+				scratch[i * 4 + 0] = pixel[ABGR32_BYTE_R];
+				scratch[i * 4 + 1] = pixel[ABGR32_BYTE_G];
+				scratch[i * 4 + 2] = pixel[ABGR32_BYTE_B];
+				scratch[i * 4 + 3] = pixel[ABGR32_BYTE_A];
+			}
+			return scratch.data();
+		}
+	#endif
+		(void)width;
+		(void)height;
+		(void)scratch;
+		return data;
+	}
+}
+
 Texture::Texture()
 {
 	initialize();
@@ -191,7 +222,9 @@ void Texture::load(const void* data, int width, int height)
 		return;
 
 	create(width, height, rmx::OpenGLHelper::FORMAT_RGBA);
-	glTexImage2D(mType, 0, mFormat, mWidth, mHeight, 0, getDefaultDataFormat(mFormat), GL_UNSIGNED_BYTE, data);
+	std::vector<uint8> scratch;
+	const GLenum dataFormat = getDefaultDataFormat(mFormat);
+	glTexImage2D(mType, 0, mFormat, mWidth, mHeight, 0, dataFormat, GL_UNSIGNED_BYTE, getUploadDataRGBA(data, width, height, dataFormat, GL_UNSIGNED_BYTE, scratch));
 }
 
 void Texture::load(const void* data, const Vec2i& size)
@@ -232,13 +265,16 @@ void Texture::loadCubemap(const String& filename)
 		fname[pos+1] = 'x' + (i/2);
 		if (!bitmap.load(fname.toWString()))
 			continue;
-		glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, mFormat, bitmap.getWidth(), bitmap.getHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, bitmap.getData());
+		std::vector<uint8> scratch;
+		glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, mFormat, bitmap.getWidth(), bitmap.getHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, getUploadDataRGBA(bitmap.getData(), bitmap.getWidth(), bitmap.getHeight(), GL_RGBA, GL_UNSIGNED_BYTE, scratch));
 	}
 }
 
 void Texture::updateAll(const void* data)
 {
-	glTexImage2D(mType, 0, mFormat, mWidth, mHeight, 0, getDefaultDataFormat(mFormat), GL_UNSIGNED_BYTE, data);
+	std::vector<uint8> scratch;
+	const GLenum dataFormat = getDefaultDataFormat(mFormat);
+	glTexImage2D(mType, 0, mFormat, mWidth, mHeight, 0, dataFormat, GL_UNSIGNED_BYTE, getUploadDataRGBA(data, mWidth, mHeight, dataFormat, GL_UNSIGNED_BYTE, scratch));
 }
 
 void Texture::updateRect(const void* data, const Recti& rect)
@@ -247,7 +283,9 @@ void Texture::updateRect(const void* data, const Recti& rect)
 		return;
 
 	glBindTexture(mType, mHandle);
-	glTexSubImage2D(mType, 0, rect.x, rect.y, rect.width, rect.height, getDefaultDataFormat(mFormat), GL_UNSIGNED_BYTE, data);
+	std::vector<uint8> scratch;
+	const GLenum dataFormat = getDefaultDataFormat(mFormat);
+	glTexSubImage2D(mType, 0, rect.x, rect.y, rect.width, rect.height, dataFormat, GL_UNSIGNED_BYTE, getUploadDataRGBA(data, rect.width, rect.height, dataFormat, GL_UNSIGNED_BYTE, scratch));
 }
 
 void Texture::updateRect(const Bitmap& bitmap, int px, int py)

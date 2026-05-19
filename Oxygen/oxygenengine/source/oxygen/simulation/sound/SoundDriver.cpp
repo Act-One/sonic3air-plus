@@ -3482,7 +3482,7 @@ private:
 	}
 
 private:
-	#pragma pack(1)
+	#pragma pack(push, 1)
 	struct zTrack
 	{
 		// Playback control bits:
@@ -3574,9 +3574,49 @@ private:
 		uint8 VoicesHigh;			// S&K: 2Bh		; High byte of pointer to track's voices, used only if zUpdatingSFX is set
 		uint32 Stack_top;			// S&K: 2Ch-2Fh	; Track stack; can be used by LoopCounters
 	};
+	#pragma pack(pop)
+
+	struct Z80WordRef
+	{
+		explicit Z80WordRef(uint8* data) : mData(data) {}
+
+		operator uint16() const
+		{
+			return (uint16)mData[0] | ((uint16)mData[1] << 8);
+		}
+
+		Z80WordRef& operator=(uint16 value)
+		{
+			mData[0] = (uint8)(value & 0xff);
+			mData[1] = (uint8)(value >> 8);
+			return *this;
+		}
+
+		Z80WordRef& operator=(const Z80WordRef& other)
+		{
+			return (*this = (uint16)other);
+		}
+
+	private:
+		uint8* mData = nullptr;
+	};
 
 private:
-	uint8 mRegisters[0x20] = { 0 };
+	alignas(2) uint8 mRegisters[0x20] = { 0 };
+#if RMX_IS_BIG_ENDIAN
+	uint8& f = mRegisters[1];
+	uint8& a = mRegisters[0];
+	uint16& af = *(uint16*)&mRegisters[0];
+	uint8& c = mRegisters[3];
+	uint8& b = mRegisters[2];
+	uint16& bc = *(uint16*)&mRegisters[2];
+	uint8& e = mRegisters[5];
+	uint8& d = mRegisters[4];
+	uint16& de = *(uint16*)&mRegisters[4];
+	uint8& l = mRegisters[7];
+	uint8& h = mRegisters[6];
+	uint16& hl = *(uint16*)&mRegisters[6];
+#else
 	uint8& f = mRegisters[0];
 	uint8& a = mRegisters[1];
 	uint16& af = *(uint16*)&mRegisters[0];
@@ -3589,6 +3629,7 @@ private:
 	uint8& l = mRegisters[6];
 	uint8& h = mRegisters[7];
 	uint16& hl = *(uint16*)&mRegisters[6];
+#endif
 	uint16& ix = *(uint16*)&mRegisters[8];
 	uint16& iy = *(uint16*)&mRegisters[10];
 
@@ -3626,7 +3667,7 @@ private:
 	uint8& zSpindashRev		  = mRam[0x1c27];
 	uint8& zRingSpeaker		  = mRam[0x1c28];
 	uint8& zFadeInTimeout	  = mRam[0x1c29];
-	uint16& zVoiceTblPtrSave  = *(uint16*)&mRam[0x1c2a];
+	Z80WordRef zVoiceTblPtrSave = Z80WordRef(&mRam[0x1c2a]);
 	uint8& zCurrentTempoSave  = mRam[0x1c2c];
 	uint8& zSongBankSave	  = mRam[0x1c2d];
 	uint8& zTempoSpeedupSave  = mRam[0x1c2e];
@@ -3634,10 +3675,10 @@ private:
 	uint8& zDACIndex		  = mRam[0x1c30];
 	uint8& zContSFXLoopCnt	  = mRam[0x1c31];
 	uint8& zSFXSaveIndex	  = mRam[0x1c32];
-	uint16& zSongPosition	  = *(uint16*)&mRam[0x1c33];
-	uint16& zTrackInitPos	  = *(uint16*)&mRam[0x1c35];
-	uint16& zVoiceTblPtr	  = *(uint16*)&mRam[0x1c37];
-	uint16& zSFXVoiceTblPtr	  = *(uint16*)&mRam[0x1c39];
+	Z80WordRef zSongPosition	  = Z80WordRef(&mRam[0x1c33]);
+	Z80WordRef zTrackInitPos	  = Z80WordRef(&mRam[0x1c35]);
+	Z80WordRef zVoiceTblPtr	  = Z80WordRef(&mRam[0x1c37]);
+	Z80WordRef zSFXVoiceTblPtr	  = Z80WordRef(&mRam[0x1c39]);
 	uint8& zSFXTempoDivider	  = mRam[0x1c3b];
 	uint8& zSongBank		  = mRam[0x1c3e];	//mRam[0x1c3f];			// Bits 15 to 22 of M68K bank address
 	uint8 zFadeToPrevFlag = 0;

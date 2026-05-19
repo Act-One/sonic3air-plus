@@ -24,12 +24,16 @@ void OpenGLDrawerTexture::updateFromBitmap(const Bitmap& bitmap)
 
 void OpenGLDrawerTexture::setupAsRenderTarget(const Vec2i& size)
 {
-	mTexture.setup(size, rmx::OpenGLHelper::FORMAT_RGB);
+	mTexture.setup(size, rmx::OpenGLHelper::FORMAT_RGBA);
 
 	if (mFrameBuffer.getHandle() == 0)
 	{
 		mFrameBuffer.create();
 		mFrameBuffer.attachTexture(GL_COLOR_ATTACHMENT0, mTexture.getHandle(), GL_TEXTURE_2D);
+	#if defined(PLATFORM_WIIU) && (defined(USE_GX2GL) && USE_GX2GL)
+		glDrawBuffer(GL_COLOR_ATTACHMENT0);
+		glReadBuffer(GL_COLOR_ATTACHMENT0);
+	#endif
 		mFrameBuffer.finishCreation();
 		mFrameBuffer.unbind();
 	}
@@ -42,7 +46,21 @@ void OpenGLDrawerTexture::writeContentToBitmap(Bitmap& outBitmap)
 #if !defined(RMX_USE_GLES2)
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, mTexture.getHandle());
+#if RMX_IS_BIG_ENDIAN
+	std::vector<uint8> rgbaBytes((size_t)mTexture.getSize().x * (size_t)mTexture.getSize().y * 4);
+	glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgbaBytes.data());
+	uint32* dstPixels = outBitmap.getData();
+	for (int i = 0; i < mTexture.getSize().x * mTexture.getSize().y; ++i)
+	{
+		uint8* dst = reinterpret_cast<uint8*>(&dstPixels[i]);
+		dst[ABGR32_BYTE_R] = rgbaBytes[(size_t)i * 4 + 0];
+		dst[ABGR32_BYTE_G] = rgbaBytes[(size_t)i * 4 + 1];
+		dst[ABGR32_BYTE_B] = rgbaBytes[(size_t)i * 4 + 2];
+		dst[ABGR32_BYTE_A] = rgbaBytes[(size_t)i * 4 + 3];
+	}
+#else
 	glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, outBitmap.getData());
+#endif
 	glBindTexture(GL_TEXTURE_2D, 0);
 #else
 	RMX_ASSERT(false, "Not supported");

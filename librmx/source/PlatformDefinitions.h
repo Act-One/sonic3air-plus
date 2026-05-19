@@ -17,6 +17,7 @@
 //  - PLATFORM_ANDROID	-> Android
 //  - PLATFORM_IOS		-> iOS
 //  - PLATFORM_WEB		-> Web version (via emscripten)
+//  - PLATFORM_WIIU		-> Nintendo Wii U (homebrew)
 //  - PLATFORM_SWITCH	-> Nintendo Switch (homebrew)
 //  - PLATFORM_VITA		-> Playstation Vita (homebrew)
 
@@ -53,6 +54,10 @@
 
 #elif __EMSCRIPTEN__
 	#define PLATFORM_WEB
+	#define USE_UTF8_PATHS
+
+#elif defined(__WIIU__) || defined(__WUT__)
+	#define PLATFORM_WIIU
 	#define USE_UTF8_PATHS
 
 #elif __SWITCH__

@@ -19,7 +19,13 @@
 
 void RenderPaletteSpriteShader::initialize(bool alphaTest)
 {
-	const std::string additionalDefines = BufferTexture::supportsBufferTextures() ? "USE_BUFFER_TEXTURES" : "";
+	std::string additionalDefines = BufferTexture::supportsBufferTextures() ? "USE_BUFFER_TEXTURES" : "";
+#if defined(PLATFORM_WIIU)
+	if (!BufferTexture::supportsBufferTextures())
+	{
+		additionalDefines = "USE_DATA_TEXTURE_Y_FLIP";
+	}
+#endif
 	if (FileHelper::loadShader(mShader, L"data/shader/render_sprite_palette.shader", alphaTest ? "Standard_AlphaTest" : "Standard", additionalDefines))
 	{
 		bindShader();

@@ -26,6 +26,10 @@ function void MainMenuBG.Run()
 		A4 = MainGame.getLevelDataPointer()
 		A1 = 0x1cfb44
 		D4.u16 = u16[A1]
+#if GAMEAPP
+		Kosinski.loadDataToVRAMNative(A1, 0x0000)
+		LoadRequiredSpritePatterns()
+#else
 		Kosinski.addToDMAQueue(A1, 0x0000)
 
 		while (true)
@@ -38,6 +42,7 @@ function void MainMenuBG.Run()
 			if (kosinski.waiting_modules == 0)
 				break
 		}
+#endif
 	}
 
 	// Load level chunks and stuff

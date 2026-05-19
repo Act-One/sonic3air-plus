@@ -14,9 +14,13 @@
 
 function void Nemesis.loadDataToVRAM(u32 sourceInROM, u16 targetInVRAM)
 {
+#if GAMEAPP
+	Nemesis.loadDataToVRAMNative(sourceInROM, targetInVRAM)
+#else
 	VDP.setupVRAMWrite(targetInVRAM)
 	A0 = sourceInROM
 	fn0015ba()
+#endif
 }
 
 

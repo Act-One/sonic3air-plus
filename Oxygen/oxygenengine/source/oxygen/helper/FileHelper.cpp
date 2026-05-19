@@ -30,6 +30,36 @@
 
 namespace
 {
+	std::string formatBytePrefix(const std::vector<uint8>& content)
+	{
+		static const char HEX[] = "0123456789abcdef";
+		const size_t count = std::min<size_t>(content.size(), 16);
+		std::string result;
+		result.reserve(count * 3);
+		for (size_t i = 0; i < count; ++i)
+		{
+			if (i != 0)
+				result += ' ';
+			const uint8 byte = content[i];
+			result += HEX[byte >> 4];
+			result += HEX[byte & 0x0f];
+		}
+		return result;
+	}
+
+	void logBitmapDecodeFailure(const std::wstring& filename, const String& format, const std::vector<uint8>& content, const Bitmap::LoadResult& loadResult)
+	{
+		static int sLogCount = 0;
+		if (sLogCount >= 48)
+			return;
+		++sLogCount;
+		RMX_LOG_INFO("Bitmap decode failed: file='" << WString(filename).toStdString()
+			<< "', format='" << *format
+			<< "', bytes=" << content.size()
+			<< ", head=" << formatBytePrefix(content)
+			<< ", error=" << (int)loadResult.mError);
+	}
+
 	bool ExtractCurrentFileFromZip(unzFile zipFile, const std::wstring& outputBasePath)
 	{
 		// Get file info
@@ -131,8 +161,16 @@ bool FileHelper::loadBitmap(Bitmap& bitmap, const std::wstring& filename, bool s
 
 	MemInputStream stream(&content[0], (int)content.size());
 	Bitmap::LoadResult loadResult;
-	if (!bitmap.decode(stream, loadResult, *format))
+	bool success = bitmap.decode(stream, loadResult, *format);
+	if (!success && !format.empty())
 	{
+		// Some legacy/package builds contain BMP payloads under .png names. Trust the bytes if the extension lies.
+		stream.rewind();
+		success = bitmap.decode(stream, loadResult);
+	}
+	if (!success)
+	{
+		logBitmapDecodeFailure(filename, format, content, loadResult);
 		RMX_CHECK(!showError, "Failed to load image file '" << *WString(filename).toString() << "': Format not supported", );
 		return false;
 	}

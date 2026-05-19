@@ -46,10 +46,16 @@ public:
 	void bufferData(const void* data, int width, int height);
 
 private:
+	const void* prepareUploadData(const void* data, int width, int height);
+
+private:
 	GLuint mTextureHandle = 0;
 	GLuint mTexBuffer = (GLuint)~0;
 	PixelFormat mPixelFormat = PixelFormat::UINT_8;
 	Vec2i mSize;
+#if defined(PLATFORM_WIIU)
+	std::vector<uint8> mUploadScratch;
+#endif
 };
 
 #endif

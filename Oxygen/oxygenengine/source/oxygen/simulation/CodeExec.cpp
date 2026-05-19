@@ -537,14 +537,6 @@ bool CodeExec::performFrameUpdate()
 
 void CodeExec::yieldExecution()
 {
-	static int sYieldLogCount = 0;
-	if (sYieldLogCount < 8)
-	{
-		++sYieldLogCount;
-		const std::string locationString = mLemonScriptRuntime.getOwnCurrentScriptLocationString();
-		RMX_LOG_INFO("yieldExecution reached" << (locationString.empty() ? "" : " at " + locationString));
-	}
-
 	mCurrentlyRunningScript = false;
 	mLemonScriptRuntime.getInternalLemonRuntime().triggerStopSignal();
 }
@@ -723,6 +715,10 @@ void CodeExec::runScript(bool executeSingleFunction, CallFrameTracking* callFram
 			{
 				mExecutionState = ExecutionState::INTERRUPTED;
 
+				static int sWatchdogLogCount = 0;
+				const bool logWatchdogDetails = (sWatchdogLogCount < 8);
+				++sWatchdogLogCount;
+				if (logWatchdogDetails)
 				{
 					std::string locationString = mLemonScriptRuntime.getOwnCurrentScriptLocationString();
 					if (locationString.empty())
@@ -871,7 +867,8 @@ bool CodeExec::executeRuntimeStepsDev(size_t& stepsExecuted, size_t minimumCallS
 
 bool CodeExec::tryCallAddressHook(uint32 address)
 {
-	return mLemonScriptRuntime.callAddressHook(address);
+	const bool handled = mLemonScriptRuntime.callAddressHook(address);
+	return handled;
 }
 
 bool CodeExec::tryCallAddressHookDev(uint32 address)

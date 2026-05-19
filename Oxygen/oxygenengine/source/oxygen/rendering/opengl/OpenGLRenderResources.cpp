@@ -17,6 +17,15 @@
 
 namespace
 {
+	GLint getPatternCacheUploadFormat()
+	{
+	#if defined(PLATFORM_WIIU)
+		return GL_RED;
+	#else
+		return GL_LUMINANCE;
+	#endif
+	}
+
 	void writeToBufferIfNeeded(int firstPattern, int lastPattern, const PaletteBitmap& bitmap)
 	{
 	#if !defined(RMX_USE_GLES2)
@@ -33,13 +42,14 @@ namespace
 			if (lastPattern - firstPattern >= 0x700)
 			{
 				// Update the whole texture
-				glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 0x40, 0x800, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, bitmap.getData());
+				const GLint format = getPatternCacheUploadFormat();
+				glTexImage2D(GL_TEXTURE_2D, 0, format, 0x40, 0x800, 0, format, GL_UNSIGNED_BYTE, bitmap.getData());
 			}
 			else
 			{
 				// Update only the changed lines
 				//  -> There's exactly one patterns per texture row
-				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, firstPattern, 0x40, (lastPattern - firstPattern + 1), GL_LUMINANCE, GL_UNSIGNED_BYTE, &bitmap[firstPattern * 0x40]);
+				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, firstPattern, 0x40, (lastPattern - firstPattern + 1), getPatternCacheUploadFormat(), GL_UNSIGNED_BYTE, &bitmap[firstPattern * 0x40]);
 			}
 		}
 	}
@@ -171,6 +181,7 @@ void OpenGLRenderResources::refresh()
 			writeToBufferIfNeeded(pendingChanges.mFirst, pendingChanges.mLast, bitmap);
 		}
 		mPatternCacheTexture.unbindBuffer();
+
 	}
 
 	// Update plane pattern textures

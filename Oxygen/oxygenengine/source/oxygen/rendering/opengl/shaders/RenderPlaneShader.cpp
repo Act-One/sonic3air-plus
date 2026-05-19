@@ -25,6 +25,13 @@ void RenderPlaneShader::initialize(Variation variation)
 
 	const std::string techname = noRepeat ? "HorizontalScrollingNoRepeat" : mHorizontalScrolling ? (mVerticalScrolling ? "HorizontalVerticalScrolling" : "HorizontalScrolling") : (mVerticalScrolling ? "VerticalScrolling" : "Standard");
 	std::string additionalDefines = BufferTexture::supportsBufferTextures() ? "USE_BUFFER_TEXTURES" : "";
+#if defined(PLATFORM_WIIU)
+	if (!BufferTexture::supportsBufferTextures())
+	{
+		additionalDefines = additionalDefines.empty() ? "USE_RG_TEXTURE_FALLBACK" : (additionalDefines + ",USE_RG_TEXTURE_FALLBACK");
+		additionalDefines += ",USE_DATA_TEXTURE_Y_FLIP";
+	}
+#endif
 
 	// Always add ALPHA_TEST, there's no variant without
 	additionalDefines = (additionalDefines.empty() ? std::string() : (additionalDefines + ",")) + "ALPHA_TEST";

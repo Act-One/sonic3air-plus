@@ -15,6 +15,31 @@
 
 namespace
 {
+	bool isLittleEndian()
+	{
+		const uint16 value = 0x1234;
+		return (*(const uint8*)&value == 0x34);
+	}
+
+	bool needsPortableEndianSwap()
+	{
+		static const bool result = !isLittleEndian();
+		return result;
+	}
+
+	template<typename T>
+	FORCE_INLINE T swapPrimitiveBytes(T value)
+	{
+		T result;
+		const uint8* src = reinterpret_cast<const uint8*>(&value);
+		uint8* dst = reinterpret_cast<uint8*>(&result);
+		for (size_t i = 0; i < sizeof(T); ++i)
+		{
+			dst[i] = src[sizeof(T) - 1 - i];
+		}
+		return result;
+	}
+
 	template<typename T>
 	FORCE_INLINE bool serializePrimitiveDataType(T& value, bool reading, std::vector<uint8>& buffer, size_t& readPosition)
 	{
@@ -23,19 +48,23 @@ namespace
 			if (readPosition + sizeof(T) > buffer.size())
 				return false;
 
-			value = rmx::readMemoryUnaligned<T>(&buffer[readPosition]);
+			memcpy(&value, &buffer[readPosition], sizeof(T));
+			if (sizeof(T) > 1 && needsPortableEndianSwap())
+			{
+				value = swapPrimitiveBytes(value);
+			}
 			readPosition += sizeof(T);
 		}
 		else
 		{
 			const size_t oldSize = buffer.size();
 			buffer.resize(oldSize + sizeof(T));
-		#if !defined(PLATFORM_VITA)
-			*(T*)&buffer[oldSize] = value;
-		#else
-			// Use memcpy to avoid issues with unaligned memory access
-			sceClibMemcpy(&buffer[oldSize], &value, sizeof(T));
-		#endif
+			T storedValue = value;
+			if (sizeof(T) > 1 && needsPortableEndianSwap())
+			{
+				storedValue = swapPrimitiveBytes(storedValue);
+			}
+			memcpy(&buffer[oldSize], &storedValue, sizeof(T));
 		}
 		return true;
 	}

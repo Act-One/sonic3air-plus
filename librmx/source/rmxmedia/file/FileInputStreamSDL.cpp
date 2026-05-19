@@ -30,7 +30,7 @@ namespace rmx
 	bool FileInputStreamSDL::open(const String& filename)
 	{
 		close();
-		mContext = SDL_RWFromFile(*filename, "r");
+		mContext = SDL_RWFromFile(*filename, "rb");
 		mLastStreamingState = (nullptr != mContext) ? StreamingState::STREAMING : StreamingState::COMPLETED;
 		return (nullptr != mContext);
 	}
@@ -38,7 +38,7 @@ namespace rmx
 	bool FileInputStreamSDL::open(const WString& filename)
 	{
 		close();
-		mContext = SDL_RWFromFile(*filename.toUTF8(), "r");
+		mContext = SDL_RWFromFile(*filename.toUTF8(), "rb");
 		mLastStreamingState = (nullptr != mContext) ? StreamingState::STREAMING : StreamingState::COMPLETED;
 		return (nullptr != mContext);
 	}

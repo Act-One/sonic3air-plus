@@ -27,7 +27,6 @@
 #include "oxygen/resources/PaletteCollection.h"
 #include "oxygen/resources/SpriteCollection.h"
 
-
 #if defined(DEBUG) && defined(PLATFORM_WINDOWS)
 	// Note that this requires OpenGL 4.3
 	#define USE_OPENGL_MESSAGE_CALLBACK
@@ -531,6 +530,7 @@ void OpenGLDrawer::performRendering(const DrawCollection& drawCollection)
 					//  -> That requires the sprite texture manager to store (more high level) OpenGLDrawerTexture instead of OpenGLTexture instances
 					glBindTexture(GL_TEXTURE_2D, texture->getHandle());
 					mInternal.applySamplingMode();
+					mInternal.applyWrapMode();
 
 					mInternal.drawRect(targetRect, texture->getHandle(), sc.mTintColor);
 				}
@@ -567,6 +567,7 @@ void OpenGLDrawer::performRendering(const DrawCollection& drawCollection)
 				//  -> That requires the sprite texture manager to store (more high level) OpenGLDrawerTexture instead of OpenGLTexture instances
 				glBindTexture(GL_TEXTURE_2D, texture->getHandle());
 				mInternal.applySamplingMode();
+				mInternal.applyWrapMode();
 
 				mInternal.drawRect(sc.mRect, texture->getHandle(), sc.mTintColor);
 				break;
@@ -719,7 +720,11 @@ void OpenGLDrawer::performRendering(const DrawCollection& drawCollection)
 
 void OpenGLDrawer::presentScreen()
 {
+#if defined(PLATFORM_WIIU)
+	GX2GL_SwapWindow();
+#else
 	SDL_GL_SwapWindow(mInternal.mOutputWindow);
+#endif
 }
 
 OpenGLDrawerResources& OpenGLDrawer::getResources()

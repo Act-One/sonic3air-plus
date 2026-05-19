@@ -95,10 +95,31 @@ namespace
 		return *lemon::Runtime::getActiveEnvironmentSafe<RuntimeEnvironment>().mEmulatorInterface;
 	}
 
-	int64* accessRegister(size_t index)
+	FORCE_INLINE bool isBigEndianHost()
+	{
+		const uint16 value = 0x0102;
+		return *(const uint8*)&value == 0x01;
+	}
+
+	FORCE_INLINE uint8* accessRegisterBytes(size_t index)
 	{
 		uint32& reg = getEmulatorInterface().getRegister(index);
-		return reinterpret_cast<int64*>(&reg);
+		return reinterpret_cast<uint8*>(&reg);
+	}
+
+	int64* accessRegister32(size_t index)
+	{
+		return reinterpret_cast<int64*>(accessRegisterBytes(index));
+	}
+
+	int64* accessRegister16(size_t index)
+	{
+		return reinterpret_cast<int64*>(accessRegisterBytes(index) + (isBigEndianHost() ? 2 : 0));
+	}
+
+	int64* accessRegister8(size_t index)
+	{
+		return reinterpret_cast<int64*>(accessRegisterBytes(index) + (isBigEndianHost() ? 3 : 0));
 	}
 
 	void scriptAssert1(uint8 condition, lemon::StringRef text)
@@ -178,10 +199,10 @@ namespace
 
 		uint8* pointer = getEmulatorInterface().getMemoryPointer(startAddress, true, bytes);
 
-		value = (value << 8) + (value >> 8);
 		for (uint32 i = 0; i < bytes; i += 2)
 		{
-			*(uint16*)(&pointer[i]) = value;
+			pointer[i] = (uint8)(value >> 8);
+			pointer[i + 1] = (uint8)value;
 		}
 	}
 
@@ -192,14 +213,12 @@ namespace
 
 		uint8* pointer = getEmulatorInterface().getMemoryPointer(startAddress, true, bytes);
 
-		value = ((value & 0x000000ff) << 24)
-			  + ((value & 0x0000ff00) << 8)
-			  + ((value & 0x00ff0000) >> 8)
-			  + ((value & 0xff000000) >> 24);
-
 		for (uint32 i = 0; i < bytes; i += 4)
 		{
-			*(uint32*)(&pointer[i]) = value;
+			pointer[i] = (uint8)(value >> 24);
+			pointer[i + 1] = (uint8)(value >> 16);
+			pointer[i + 2] = (uint8)(value >> 8);
+			pointer[i + 3] = (uint8)value;
 		}
 	}
 
@@ -533,11 +552,15 @@ namespace
 			return 0;
 
 		const uint32* colors = palette->getRawColors();
-		uint32* targetPointer = (uint32*)getEmulatorInterface().getMemoryPointer(targetAddress, true, (uint32)numColors * sizeof(uint32));
+		uint8* targetPointer = getEmulatorInterface().getMemoryPointer(targetAddress, true, (uint32)numColors * sizeof(uint32));
 		for (size_t i = 0; i < numColors; ++i)
 		{
-			// Maintain ABGR32 color format despite endianness change by swapping bytes
-			targetPointer[i] = swapBytes32(colors[i]);
+			const uint32 color = colors[i];
+			uint8* dst = &targetPointer[i * sizeof(uint32)];
+			dst[0] = (uint8)(color >> 24);
+			dst[1] = (uint8)(color >> 16);
+			dst[2] = (uint8)(color >> 8);
+			dst[3] = (uint8)color;
 		}
 		return (uint16)numColors;
 	}
@@ -1158,13 +1181,13 @@ void LemonScriptBindings::registerBindings(lemon::Module& module)
 		const std::string registerNamesDAR[16] = { "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7" };
 		for (size_t i = 0; i < 16; ++i)
 		{
-			module.addExternalVariable(registerNamesDAR[i],			 &lemon::PredefinedDataTypes::UINT_32, std::bind(accessRegister, i));
-			module.addExternalVariable(registerNamesDAR[i] + ".u8",  &lemon::PredefinedDataTypes::UINT_8,  std::bind(accessRegister, i));
-			module.addExternalVariable(registerNamesDAR[i] + ".s8",  &lemon::PredefinedDataTypes::INT_8,   std::bind(accessRegister, i));
-			module.addExternalVariable(registerNamesDAR[i] + ".u16", &lemon::PredefinedDataTypes::UINT_16, std::bind(accessRegister, i));
-			module.addExternalVariable(registerNamesDAR[i] + ".s16", &lemon::PredefinedDataTypes::INT_16,  std::bind(accessRegister, i));
-			module.addExternalVariable(registerNamesDAR[i] + ".u32", &lemon::PredefinedDataTypes::UINT_32, std::bind(accessRegister, i));
-			module.addExternalVariable(registerNamesDAR[i] + ".s32", &lemon::PredefinedDataTypes::INT_32,  std::bind(accessRegister, i));
+			module.addExternalVariable(registerNamesDAR[i],			 &lemon::PredefinedDataTypes::UINT_32, std::bind(accessRegister32, i));
+			module.addExternalVariable(registerNamesDAR[i] + ".u8",  &lemon::PredefinedDataTypes::UINT_8,  std::bind(accessRegister8, i));
+			module.addExternalVariable(registerNamesDAR[i] + ".s8",  &lemon::PredefinedDataTypes::INT_8,   std::bind(accessRegister8, i));
+			module.addExternalVariable(registerNamesDAR[i] + ".u16", &lemon::PredefinedDataTypes::UINT_16, std::bind(accessRegister16, i));
+			module.addExternalVariable(registerNamesDAR[i] + ".s16", &lemon::PredefinedDataTypes::INT_16,  std::bind(accessRegister16, i));
+			module.addExternalVariable(registerNamesDAR[i] + ".u32", &lemon::PredefinedDataTypes::UINT_32, std::bind(accessRegister32, i));
+			module.addExternalVariable(registerNamesDAR[i] + ".s32", &lemon::PredefinedDataTypes::INT_32,  std::bind(accessRegister32, i));
 		}
 
 

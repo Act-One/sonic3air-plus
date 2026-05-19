@@ -65,6 +65,12 @@ uniform int Atex;
 uniform vec4 TintColor;
 uniform vec4 AddedColor;
 
+#ifdef USE_DATA_TEXTURE_Y_FLIP
+	#define DATA_TEXTURE_Y(row, height) (1.0 - ((float(row) + 0.5) / float(height)))
+#else
+	#define DATA_TEXTURE_Y(row, height) ((float(row) + 0.5) / float(height))
+#endif
+
 
 vec4 getPaletteColor(int paletteIndex, float paletteOffsetY)
 {
@@ -87,7 +93,7 @@ void main()
 #ifdef USE_BUFFER_TEXTURES
 	int paletteIndex = Atex + texelFetch(SpriteTexture, ix + iy * Size.x).x;
 #else
-	int paletteIndex = Atex + int(texture(SpriteTexture, vec2(((float(ix) + 0.5) / float(Size.x)), (float(iy) + 0.5) / float(Size.y))).x * 256.0);
+	int paletteIndex = Atex + int(texture(SpriteTexture, vec2(((float(ix) + 0.5) / float(Size.x)), DATA_TEXTURE_Y(iy, Size.y))).x * 256.0);
 #endif
 
 	vec4 color = getPaletteColor(paletteIndex, clamp(LocalOffset.z, 0.0, 0.5));

@@ -82,10 +82,10 @@ namespace softwaredrawer
 
 		for (uint32 i = 0; i < numPixels; ++i)
 		{
-			dst[0] = (dst[0] * multiplicators[0]) >> 8;
-			dst[1] = (dst[1] * multiplicators[1]) >> 8;
-			dst[2] = (dst[2] * multiplicators[2]) >> 8;
-			dst[3] = (dst[3] * multiplicators[3]) >> 8;
+			dst[ABGR32_BYTE_R] = (dst[ABGR32_BYTE_R] * multiplicators[0]) >> 8;
+			dst[ABGR32_BYTE_G] = (dst[ABGR32_BYTE_G] * multiplicators[1]) >> 8;
+			dst[ABGR32_BYTE_B] = (dst[ABGR32_BYTE_B] * multiplicators[2]) >> 8;
+			dst[ABGR32_BYTE_A] = (dst[ABGR32_BYTE_A] * multiplicators[3]) >> 8;
 			dst += 4;
 		}
 	}
@@ -506,7 +506,7 @@ namespace softwaredrawer
 			{
 			#if !defined(PLATFORM_VITA)
 				// On 64-bit architectures: Process 2 pixels at once
-				for (; k < numPixels; k += 2)
+				for (; k + 1 < numPixels; k += 2)
 				{
 					const uint64 colors = *(uint64*)&src[k];
 					*(uint64*)&dst[k] = ((colors & 0x00ff000000ff0000ull) >> 16) | (colors & 0xff00ff00ff00ff00ull) | ((colors & 0x000000ff000000ffull) << 16);

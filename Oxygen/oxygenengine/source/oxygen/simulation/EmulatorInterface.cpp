@@ -14,6 +14,91 @@
 #include "oxygen/resources/ResourcesCache.h"
 
 
+namespace
+{
+	FORCE_INLINE bool hostNeedsBigEndianSwap()
+	{
+		const uint16 value = 1;
+		return *(const uint8*)&value == 1;
+	}
+
+	FORCE_INLINE bool canUseDirectEmulatedMemoryAccess(uint32 address, size_t size)
+	{
+	#if defined(PLATFORM_WIIU)
+		if (size > 1 && (address & (uint32)(size - 1)) != 0)
+			return false;
+	#endif
+		return true;
+	}
+
+	FORCE_INLINE uint16 readBigEndian16(const uint8* pointer)
+	{
+		return ((uint16)pointer[0] << 8) | (uint16)pointer[1];
+	}
+
+	FORCE_INLINE uint32 readBigEndian32(const uint8* pointer)
+	{
+		return ((uint32)pointer[0] << 24) |
+			((uint32)pointer[1] << 16) |
+			((uint32)pointer[2] << 8) |
+			(uint32)pointer[3];
+	}
+
+	FORCE_INLINE uint64 readBigEndian64(const uint8* pointer)
+	{
+		return ((uint64)readBigEndian32(pointer) << 32) | (uint64)readBigEndian32(pointer + 4);
+	}
+
+	FORCE_INLINE void writeBigEndian16(uint8* pointer, uint16 value)
+	{
+		pointer[0] = (uint8)(value >> 8);
+		pointer[1] = (uint8)value;
+	}
+
+	FORCE_INLINE void writeBigEndian32(uint8* pointer, uint32 value)
+	{
+		pointer[0] = (uint8)(value >> 24);
+		pointer[1] = (uint8)(value >> 16);
+		pointer[2] = (uint8)(value >> 8);
+		pointer[3] = (uint8)value;
+	}
+
+	FORCE_INLINE void writeBigEndian64(uint8* pointer, uint64 value)
+	{
+		writeBigEndian32(pointer, (uint32)(value >> 32));
+		writeBigEndian32(pointer + 4, (uint32)value);
+	}
+
+	FORCE_INLINE uint16 readVRamWordWrapped(const uint8* vram, uint16 vramAddress)
+	{
+		const uint8 hi = vram[vramAddress];
+		const uint8 lo = vram[(uint16)(vramAddress + 1)];
+		return ((uint16)hi << 8) | (uint16)lo;
+	}
+
+	FORCE_INLINE void writeVRamWordWrapped(uint8* vram, uint16 vramAddress, uint16 value)
+	{
+		vram[vramAddress] = (uint8)(value >> 8);
+		vram[(uint16)(vramAddress + 1)] = (uint8)value;
+	}
+
+	FORCE_INLINE void markVRamChanged(BitArray<0x800>& changeBits, uint16 vramAddress, uint16 bytes)
+	{
+		uint32 address = vramAddress;
+		uint32 remaining = bytes;
+		while (remaining > 0)
+		{
+			const uint16 wrappedAddress = (uint16)address;
+			changeBits.setBit(wrappedAddress >> 5);
+			const uint32 bytesUntilNextBit = 0x20u - (uint32)(wrappedAddress & 0x1f);
+			const uint32 consumed = (remaining < bytesUntilNextBit) ? remaining : bytesUntilNextBit;
+			address += consumed;
+			remaining -= consumed;
+		}
+	}
+}
+
+
 namespace emulatorinterface
 {
 
@@ -223,19 +308,19 @@ uint8 EmulatorInterface::readMemory8(uint32 address)
 uint16 EmulatorInterface::readMemory16(uint32 address)
 {
 	const uint8* pointer = mInternal.accessMemory<MEMORY_MODE_READ>(address, 2);
-	return rmx::readMemoryUnalignedSwapped<uint16>(pointer);
+	return readBigEndian16(pointer);
 }
 
 uint32 EmulatorInterface::readMemory32(uint32 address)
 {
 	const uint8* pointer = mInternal.accessMemory<MEMORY_MODE_READ>(address, 4);
-	return rmx::readMemoryUnalignedSwapped<uint32>(pointer);
+	return readBigEndian32(pointer);
 }
 
 uint64 EmulatorInterface::readMemory64(uint32 address)
 {
 	const uint8* pointer = mInternal.accessMemory<MEMORY_MODE_READ>(address, 8);
-	return rmx::readMemoryUnalignedSwapped<uint64>(pointer);
+	return readBigEndian64(pointer);
 }
 
 void EmulatorInterface::writeMemory8(uint32 address, uint8 value)
@@ -245,21 +330,20 @@ void EmulatorInterface::writeMemory8(uint32 address, uint8 value)
 
 void EmulatorInterface::writeMemory16(uint32 address, uint16 value)
 {
-	uint16* mem = (uint16*)mInternal.accessMemory<MEMORY_MODE_WRITE>(address, 2);
-	*mem = swapBytes16(value);
+	uint8* mem = mInternal.accessMemory<MEMORY_MODE_WRITE>(address, 2);
+	writeBigEndian16(mem, value);
 }
 
 void EmulatorInterface::writeMemory32(uint32 address, uint32 value)
 {
-	uint32* mem = (uint32*)mInternal.accessMemory<MEMORY_MODE_WRITE>(address, 4);
-	*mem = swapBytes32(value);
+	uint8* mem = mInternal.accessMemory<MEMORY_MODE_WRITE>(address, 4);
+	writeBigEndian32(mem, value);
 }
 
 void EmulatorInterface::writeMemory64(uint32 address, uint64 value)
 {
-	// TODO: Check if the ARM byte alignment issue an Android (see "readMemory64") can happen here as well
-	uint64* mem = (uint64*)mInternal.accessMemory<MEMORY_MODE_WRITE>(address, 8);
-	*mem = swapBytes64(value);
+	uint8* mem = mInternal.accessMemory<MEMORY_MODE_WRITE>(address, 8);
+	writeBigEndian64(mem, value);
 }
 
 void EmulatorInterface::writeMemory8_dev(uint32 address, uint8 value)
@@ -269,20 +353,20 @@ void EmulatorInterface::writeMemory8_dev(uint32 address, uint8 value)
 
 void EmulatorInterface::writeMemory16_dev(uint32 address, uint16 value)
 {
-	uint16* mem = (uint16*)mInternal.accessMemory<MEMORY_MODE_WRITE_DEV>(address, 2);
-	*mem = swapBytes16(value);
+	uint8* mem = mInternal.accessMemory<MEMORY_MODE_WRITE_DEV>(address, 2);
+	writeBigEndian16(mem, value);
 }
 
 void EmulatorInterface::writeMemory32_dev(uint32 address, uint32 value)
 {
-	uint32* mem = (uint32*)mInternal.accessMemory<MEMORY_MODE_WRITE_DEV>(address, 4);
-	*mem = swapBytes32(value);
+	uint8* mem = mInternal.accessMemory<MEMORY_MODE_WRITE_DEV>(address, 4);
+	writeBigEndian32(mem, value);
 }
 
 void EmulatorInterface::writeMemory64_dev(uint32 address, uint64 value)
 {
-	uint64* mem = (uint64*)mInternal.accessMemory<MEMORY_MODE_WRITE_DEV>(address, 8);
-	*mem = swapBytes64(value);
+	uint8* mem = mInternal.accessMemory<MEMORY_MODE_WRITE_DEV>(address, 8);
+	writeBigEndian64(mem, value);
 }
 
 uint32& EmulatorInterface::getRegister(size_t index)
@@ -322,29 +406,13 @@ uint8* EmulatorInterface::getVRam()
 
 uint16 EmulatorInterface::readVRam16(uint16 vramAddress)
 {
-	if (vramAddress == 0xffff)
-	{
-		return (uint16)mInternal.mVRam[0xffff] | ((uint16)mInternal.mVRam[0] << 8);
-	}
-	return *(uint16*)(mInternal.mVRam + vramAddress);
+	return readVRamWordWrapped(mInternal.mVRam, vramAddress);
 }
 
 void EmulatorInterface::writeVRam16(uint16 vramAddress, uint16 value)
 {
-	if (vramAddress == 0xffff)
-	{
-		mInternal.mVRam[0xffff] = (uint8)(value & 0xff);
-		mInternal.mVRam[0] = (uint8)(value >> 8);
-		mInternal.mVRamChangeBits.setBit(0x7ff);
-		mInternal.mVRamChangeBits.setBit(0);
-		return;
-	}
-
-	uint16* dst = (uint16*)(mInternal.mVRam + vramAddress);
-	*dst = value;
-
-	// Mark as changed
-	mInternal.mVRamChangeBits.setBit(vramAddress >> 5);
+	writeVRamWordWrapped(mInternal.mVRam, vramAddress, value);
+	markVRamChanged(mInternal.mVRamChangeBits, vramAddress, 2);
 }
 
 void EmulatorInterface::fillVRam(uint16 vramAddress, uint16 fillValue, uint16 bytes)
@@ -352,26 +420,12 @@ void EmulatorInterface::fillVRam(uint16 vramAddress, uint16 fillValue, uint16 by
 	if (bytes == 0)
 		return;
 
-	if ((uint32)vramAddress + (uint32)bytes > 0x10000u)
-	{
-		for (uint16 i = 0; i < bytes; i += 2)
-		{
-			writeVRam16((uint16)(vramAddress + i), fillValue);
-		}
-		return;
-	}
-
-	uint16* dst = (uint16*)(mInternal.mVRam + vramAddress);
 	for (uint16 i = 0; i < bytes; i += 2)
 	{
-		*dst = fillValue;
-		++dst;
+		writeVRamWordWrapped(mInternal.mVRam, (uint16)(vramAddress + i), fillValue);
 	}
 
-	// Mark as changed
-	const size_t bitIndexStart = (vramAddress >> 5);
-	const size_t bitIndexEnd = ((vramAddress + bytes - 1) >> 5);
-	mInternal.mVRamChangeBits.setBitsInRange(bitIndexStart, bitIndexEnd);
+	markVRamChanged(mInternal.mVRamChangeBits, vramAddress, bytes);
 }
 
 void EmulatorInterface::copyFromMemoryToVRam(uint16 vramAddress, uint32 sourceAddress, uint16 bytes)
@@ -379,28 +433,13 @@ void EmulatorInterface::copyFromMemoryToVRam(uint16 vramAddress, uint32 sourceAd
 	if (bytes == 0)
 		return;
 
-	const uint16* src = (uint16*)(mInternal.accessMemory<MEMORY_MODE_READ>(sourceAddress, bytes));
-	if ((uint32)vramAddress + (uint32)bytes > 0x10000u)
+	const uint8* src = mInternal.accessMemory<MEMORY_MODE_READ>(sourceAddress, bytes);
+	for (uint16 offset = 0; offset < bytes; offset += 2)
 	{
-		const uint16* end = src + (bytes / 2);
-		for (uint16 offset = 0; src != end; ++src, offset += 2)
-		{
-			writeVRam16((uint16)(vramAddress + offset), swapBytes16(*src));
-		}
-		return;
+		writeVRamWordWrapped(mInternal.mVRam, (uint16)(vramAddress + offset), readBigEndian16(src + offset));
 	}
 
-	uint16* dst = (uint16*)(mInternal.mVRam + vramAddress);
-	const uint16* end = src + (bytes / 2);
-	for (; src != end; ++src, ++dst)
-	{
-		*dst = swapBytes16(*src);
-	}
-
-	// Mark as changed
-	const size_t bitIndexStart = (vramAddress >> 5);
-	const size_t bitIndexEnd = ((vramAddress + bytes - 1) >> 5);
-	mInternal.mVRamChangeBits.setBitsInRange(bitIndexStart, bitIndexEnd);
+	markVRamChanged(mInternal.mVRamChangeBits, vramAddress, bytes);
 }
 
 BitArray<0x800>& EmulatorInterface::getVRamChangeBits()
@@ -420,7 +459,7 @@ std::vector<EmulatorInterface::Watch>& EmulatorInterface::getWatches()
 
 void EmulatorInterface::getDirectAccessSpecialization(SpecializationResult& outResult, uint64 address, size_t size, bool writeAccess)
 {
-	outResult.mSwapBytes = true;
+	outResult.mSwapBytes = hostNeedsBigEndianSwap();
 	address &= 0x00ffffff;
 	if (address >= 0xff0000)
 	{
@@ -432,6 +471,11 @@ void EmulatorInterface::getDirectAccessSpecialization(SpecializationResult& outR
 		}
 		else
 		{
+			if (!canUseDirectEmulatedMemoryAccess(address, size))
+			{
+				outResult.mResult = SpecializationResult::Result::NO_SPECIALIZATION;
+				return;
+			}
 			outResult.mResult = SpecializationResult::Result::HAS_SPECIALIZATION;
 			outResult.mDirectAccessPointer = &mInternal.mRam[address];
 		}
@@ -445,6 +489,11 @@ void EmulatorInterface::getDirectAccessSpecialization(SpecializationResult& outR
 		}
 		else
 		{
+			if (!canUseDirectEmulatedMemoryAccess(address, size))
+			{
+				outResult.mResult = SpecializationResult::Result::NO_SPECIALIZATION;
+				return;
+			}
 			outResult.mResult = SpecializationResult::Result::HAS_SPECIALIZATION;
 			outResult.mDirectAccessPointer = &mInternal.mRom[address];
 		}
@@ -466,6 +515,11 @@ void EmulatorInterface::getDirectAccessSpecialization(SpecializationResult& outR
 				return;
 			}
 
+			if (!canUseDirectEmulatedMemoryAccess(address, size))
+			{
+				outResult.mResult = SpecializationResult::Result::NO_SPECIALIZATION;
+				return;
+			}
 			outResult.mResult = SpecializationResult::Result::HAS_SPECIALIZATION;
 			outResult.mDirectAccessPointer = &mInternal.mSharedMemory[address];
 		}

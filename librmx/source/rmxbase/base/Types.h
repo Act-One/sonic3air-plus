@@ -35,6 +35,15 @@
 #endif
 
 
+// Endianness detection. Bitmap and emulated Mega Drive memory helpers use this
+// to keep byte-oriented code stable on PPC/Wii U.
+#if defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)) || defined(PLATFORM_WIIU)
+	#define RMX_IS_BIG_ENDIAN 1
+#else
+	#define RMX_IS_BIG_ENDIAN 0
+#endif
+
+
 // Data types
 typedef signed char		int8;
 typedef unsigned char	uint8;

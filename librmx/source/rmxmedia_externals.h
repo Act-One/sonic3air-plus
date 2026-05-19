@@ -81,6 +81,65 @@
 	#include <OpenGLES/ES2/gl.h>
 	#include <OpenGLES/ES2/glext.h>
 
+#elif defined(PLATFORM_WIIU)
+	#include "gl/gl.h"
+	#include "gx2gl/sdl_bridge.h"
+	#ifndef GL_LUMINANCE
+		#define GL_LUMINANCE GL_RED
+	#endif
+	#ifndef GL_TEXTURE_CUBE_MAP_POSITIVE_X
+		#define GL_TEXTURE_CUBE_MAP_POSITIVE_X 0x8515
+		#define GL_TEXTURE_CUBE_MAP_NEGATIVE_X 0x8516
+		#define GL_TEXTURE_CUBE_MAP_POSITIVE_Y 0x8517
+		#define GL_TEXTURE_CUBE_MAP_NEGATIVE_Y 0x8518
+		#define GL_TEXTURE_CUBE_MAP_POSITIVE_Z 0x8519
+		#define GL_TEXTURE_CUBE_MAP_NEGATIVE_Z 0x851A
+	#endif
+	#ifndef GL_FRAMEBUFFER_BINDING
+		#define GL_FRAMEBUFFER_BINDING 0x8CA6
+	#endif
+	#ifndef GL_R8UI
+		#define GL_R8UI   0x8232
+		#define GL_R16I   0x8233
+		#define GL_R16UI  0x8234
+	#endif
+	#ifndef GL_RED_INTEGER
+		#define GL_RED_INTEGER 0x8D94
+	#endif
+	#ifndef GL_TEXTURE1
+		#define GL_TEXTURE1  (GL_TEXTURE0 + 1)
+		#define GL_TEXTURE2  (GL_TEXTURE0 + 2)
+		#define GL_TEXTURE3  (GL_TEXTURE0 + 3)
+		#define GL_TEXTURE4  (GL_TEXTURE0 + 4)
+		#define GL_TEXTURE5  (GL_TEXTURE0 + 5)
+		#define GL_TEXTURE6  (GL_TEXTURE0 + 6)
+		#define GL_TEXTURE7  (GL_TEXTURE0 + 7)
+		#define GL_TEXTURE8  (GL_TEXTURE0 + 8)
+		#define GL_TEXTURE9  (GL_TEXTURE0 + 9)
+		#define GL_TEXTURE10 (GL_TEXTURE0 + 10)
+		#define GL_TEXTURE11 (GL_TEXTURE0 + 11)
+		#define GL_TEXTURE12 (GL_TEXTURE0 + 12)
+		#define GL_TEXTURE13 (GL_TEXTURE0 + 13)
+		#define GL_TEXTURE14 (GL_TEXTURE0 + 14)
+		#define GL_TEXTURE15 (GL_TEXTURE0 + 15)
+		#define GL_TEXTURE16 (GL_TEXTURE0 + 16)
+		#define GL_TEXTURE17 (GL_TEXTURE0 + 17)
+		#define GL_TEXTURE18 (GL_TEXTURE0 + 18)
+		#define GL_TEXTURE19 (GL_TEXTURE0 + 19)
+		#define GL_TEXTURE20 (GL_TEXTURE0 + 20)
+		#define GL_TEXTURE21 (GL_TEXTURE0 + 21)
+		#define GL_TEXTURE22 (GL_TEXTURE0 + 22)
+		#define GL_TEXTURE23 (GL_TEXTURE0 + 23)
+		#define GL_TEXTURE24 (GL_TEXTURE0 + 24)
+		#define GL_TEXTURE25 (GL_TEXTURE0 + 25)
+		#define GL_TEXTURE26 (GL_TEXTURE0 + 26)
+		#define GL_TEXTURE27 (GL_TEXTURE0 + 27)
+		#define GL_TEXTURE28 (GL_TEXTURE0 + 28)
+		#define GL_TEXTURE29 (GL_TEXTURE0 + 29)
+		#define GL_TEXTURE30 (GL_TEXTURE0 + 30)
+		#define GL_TEXTURE31 (GL_TEXTURE0 + 31)
+	#endif
+
 #elif defined(PLATFORM_SWITCH)
 	#include <EGL/egl.h>    // EGL library
 	#include <EGL/eglext.h> // EGL extensions

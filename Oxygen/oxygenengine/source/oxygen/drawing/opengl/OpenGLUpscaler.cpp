@@ -219,7 +219,14 @@ void OpenGLUpscaler::renderImage(const Recti& rect, GLuint textureHandle, Vec2i 
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 	glViewport_Recti(FTX::screenRect());
 
-	secondShader->unbind();
+	if (nullptr != secondShader)
+	{
+		secondShader->unbind();
+	}
+	else
+	{
+		Shader::unbindShader();
+	}
 	OpenGLShader::resetLastUsedShader();
 }
 

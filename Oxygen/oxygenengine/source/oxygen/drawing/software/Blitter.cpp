@@ -477,10 +477,10 @@ void Blitter::processIntermediateBitmap(BitmapViewMutable<uint32>& bitmap, Optio
 				uint8* dst = (uint8*)bitmap.getLinePointer(y);
 				for (int x = 0; x < bitmap.getSize().x; ++x)
 				{
-					dst[0] = (uint8)clamp((dst[0] * mult[0]) >> 8, 0, 0xff);
-					dst[1] = (uint8)clamp((dst[1] * mult[1]) >> 8, 0, 0xff);
-					dst[2] = (uint8)clamp((dst[2] * mult[2]) >> 8, 0, 0xff);
-					dst[3] = (uint8)clamp((dst[3] * mult[3]) >> 8, 0, 0xff);
+					dst[ABGR32_BYTE_R] = (uint8)clamp((dst[ABGR32_BYTE_R] * mult[0]) >> 8, 0, 0xff);
+					dst[ABGR32_BYTE_G] = (uint8)clamp((dst[ABGR32_BYTE_G] * mult[1]) >> 8, 0, 0xff);
+					dst[ABGR32_BYTE_B] = (uint8)clamp((dst[ABGR32_BYTE_B] * mult[2]) >> 8, 0, 0xff);
+					dst[ABGR32_BYTE_A] = (uint8)clamp((dst[ABGR32_BYTE_A] * mult[3]) >> 8, 0, 0xff);
 					dst += 4;
 				}
 			}
@@ -500,10 +500,10 @@ void Blitter::processIntermediateBitmap(BitmapViewMutable<uint32>& bitmap, Optio
 				uint8* dst = (uint8*)bitmap.getLinePointer(y);
 				for (int x = 0; x < bitmap.getSize().x; ++x)
 				{
-					dst[0] = (uint8)clamp(((dst[0] * mult[0]) >> 8) + add[0], 0, 0xff);
-					dst[1] = (uint8)clamp(((dst[1] * mult[1]) >> 8) + add[1], 0, 0xff);
-					dst[2] = (uint8)clamp(((dst[2] * mult[2]) >> 8) + add[2], 0, 0xff);
-					dst[3] = (uint8)clamp(((dst[3] * mult[3]) >> 8),          0, 0xff);
+					dst[ABGR32_BYTE_R] = (uint8)clamp(((dst[ABGR32_BYTE_R] * mult[0]) >> 8) + add[0], 0, 0xff);
+					dst[ABGR32_BYTE_G] = (uint8)clamp(((dst[ABGR32_BYTE_G] * mult[1]) >> 8) + add[1], 0, 0xff);
+					dst[ABGR32_BYTE_B] = (uint8)clamp(((dst[ABGR32_BYTE_B] * mult[2]) >> 8) + add[2], 0, 0xff);
+					dst[ABGR32_BYTE_A] = (uint8)clamp(((dst[ABGR32_BYTE_A] * mult[3]) >> 8),          0, 0xff);
 					dst += 4;
 				}
 			}
@@ -519,7 +519,7 @@ void Blitter::processIntermediateBitmap(BitmapViewMutable<uint32>& bitmap, Optio
 				uint8* dst = (uint8*)bitmap.getLinePointer(y);
 				for (int x = 0; x < bitmap.getSize().x; ++x)
 				{
-					dst[3] = (dst[3] > 0) ? alphaValue : 0;
+					dst[ABGR32_BYTE_A] = (dst[ABGR32_BYTE_A] > 0) ? alphaValue : 0;
 					dst += 4;
 				}
 			}
@@ -537,7 +537,7 @@ void Blitter::processIntermediateBitmap(BitmapViewMutable<uint32>& bitmap, Optio
 			if constexpr (sizeof(void*) == 8)
 			{
 				// On 64-bit architectures: Process 2 pixels at once
-				for (; k < numPixels; k += 2)
+				for (; k + 1 < numPixels; k += 2)
 				{
 					const uint64 colors = *(uint64*)dst;
 					*(uint64*)dst = ((colors & 0x00ff000000ff0000ull) >> 16) | (colors & 0xff00ff00ff00ff00ull) | ((colors & 0x000000ff000000ffull) << 16);

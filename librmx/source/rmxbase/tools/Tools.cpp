@@ -12,6 +12,20 @@
 
 namespace rmx
 {
+	namespace
+	{
+		FORCE_INLINE uint64 readLittleEndian64(const uint8* data)
+		{
+			return ((uint64)data[0]) |
+				((uint64)data[1] << 8) |
+				((uint64)data[2] << 16) |
+				((uint64)data[3] << 24) |
+				((uint64)data[4] << 32) |
+				((uint64)data[5] << 40) |
+				((uint64)data[6] << 48) |
+				((uint64)data[7] << 56);
+		}
+	}
 
 	uint32 getFNV1a_32(const uint8* data, size_t bytes)
 	{
@@ -71,42 +85,19 @@ namespace rmx
 		const int r = 47;
 		uint64 h = (uint64)bytes * m;
 
-		const uint64* data64 = (const uint64_t*)data;
-		const uint64* end = data64 + (bytes / 8);
-
-	#if defined(__arm__) || defined(__vita__)
-		const bool isAligned64 = ((size_t)data & 7) == 0;
-		if (!isAligned64)
+		const uint8* data8 = data;
+		const uint8* end = data8 + (bytes & ~(size_t)0x07);
+		while (data8 != end)
 		{
-			uint64 k;
-			while (data64 != end)
-			{
-				// Do not access memory directly, but byte-wise to avoid "SIGBUS illegal alignment" issues (this happened on Android Release builds, but not in Debug for some reason)
-				//  -> This somewhat defeats the purpose of the whole optimization by using Murmur2...
-				k = rmx::readMemoryUnaligned<uint64>(data64);
-				++data64;
-				k *= m;
-				k ^= k >> r;
-				k *= m;
-				h ^= k;
-				h *= m;
-			}
-		}
-		else
-	#endif
-		{
-			while (data64 != end)
-			{
-				uint64 k = *data64++;
-				k *= m;
-				k ^= k >> r;
-				k *= m;
-				h ^= k;
-				h *= m;
-			}
+			uint64 k = readLittleEndian64(data8);
+			data8 += 8;
+			k *= m;
+			k ^= k >> r;
+			k *= m;
+			h ^= k;
+			h *= m;
 		}
 
-		const uint8* data8 = (const uint8*)data64;
 		switch (bytes & 0x07)
 		{
 			case 7:  h ^= ((uint64)data8[6]) << 48;  [[fallthrough]];

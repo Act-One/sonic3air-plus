@@ -52,6 +52,18 @@ uniform float PaletteOffset;
 uniform ivec4 PlayfieldSize;
 uniform int PriorityFlag;		// 0 or 1
 
+#ifdef USE_RG_TEXTURE_FALLBACK
+	#define READ_U16_TEXEL(textureName, uv) texture(textureName, uv).rg
+#else
+	#define READ_U16_TEXEL(textureName, uv) texture(textureName, uv).ra
+#endif
+
+#ifdef USE_DATA_TEXTURE_Y_FLIP
+	#define DATA_TEXTURE_Y(row, height) (1.0 - ((float(row) + 0.5) / float(height)))
+#else
+	#define DATA_TEXTURE_Y(row, height) ((float(row) + 0.5) / float(height))
+#endif
+
 #ifdef HORIZONTAL_SCROLLING
 	#ifdef USE_BUFFER_TEXTURES
 		uniform isamplerBuffer HScrollOffsetsTexture;
@@ -83,7 +95,8 @@ vec4 getPaletteColor(int paletteIndex, float paletteOffsetY)
 	int paletteX = paletteIndex & 0xff;
 	int paletteY = paletteIndex >> 8;
 #endif
-	vec2 samplePosition = vec2((float(paletteX) + 0.5) / 256.0, (float(paletteY) + 0.5) / 4.0 + paletteOffsetY);
+	float paletteTexY = (float(paletteY) + 0.5) / 4.0 + paletteOffsetY;
+	vec2 samplePosition = vec2((float(paletteX) + 0.5) / 256.0, paletteTexY);
 	return texture(PaletteTexture, samplePosition);
 }
 
@@ -97,7 +110,7 @@ void main()
 	#ifdef USE_BUFFER_TEXTURES
 		int scrollOffsetLookupX = texelFetch(HScrollOffsetsTexture, iy).x;
 	#else
-		vec2 texelScrollX = texture(HScrollOffsetsTexture, vec2((float(iy) + 0.5) / 256.0, 0.5)).ra;
+		vec2 texelScrollX = READ_U16_TEXEL(HScrollOffsetsTexture, vec2((float(iy) + 0.5) / 256.0, 0.5));
 		int scrollOffsetLookupXH = int(mod(texelScrollX.y * 256.0, 16.0));
 		int scrollOffsetLookupXL = int(texelScrollX.x * 256.0);
 		int scrollOffsetLookupX = scrollOffsetLookupXL + scrollOffsetLookupXH * 256;
@@ -116,7 +129,7 @@ void main()
 	#ifdef USE_BUFFER_TEXTURES
 		int scrollOffsetLookupY = texelFetch(VScrollOffsetsTexture, vx).x;
 	#else
-		vec2 texelScrollY = texture(VScrollOffsetsTexture, vec2((float(vx) + 0.5) / 32.0, 0.5)).ra;
+		vec2 texelScrollY = READ_U16_TEXEL(VScrollOffsetsTexture, vec2((float(vx) + 0.5) / 32.0, 0.5));
 		int scrollOffsetLookupYH = int(mod(texelScrollY.y * 256.0, 16.0));
 		int scrollOffsetLookupYL = int(texelScrollY.x * 256.0);
 		int scrollOffsetLookupY = scrollOffsetLookupYL + scrollOffsetLookupYH * 256;
@@ -157,7 +170,7 @@ void main()
 		discard;
 	// No support for GL_ES here
 #else
-	vec2 texel = texture(IndexTexture, vec2((float(patternX + patternY * PlayfieldSize.z) + 0.5) / float(PlayfieldSize.z * PlayfieldSize.w), 0.5)).ra;
+	vec2 texel = READ_U16_TEXEL(IndexTexture, vec2((float(patternX + patternY * PlayfieldSize.z) + 0.5) / float(PlayfieldSize.z * PlayfieldSize.w), 0.5));
 	int patternIndexH = int(texel.y * 255.5);
 	int patternIndexL = int(texel.x * 255.5);
 	if ((patternIndexH >= 0x80) != (PriorityFlag >= 1))
@@ -186,7 +199,7 @@ void main()
 #ifdef USE_BUFFER_TEXTURES
 	int paletteIndex = texelFetch(PatternCacheTexture, patternCacheLookupIndexX + patternCacheLookupIndexY * 64).x;
 #else
-	int paletteIndex = int(texture(PatternCacheTexture, vec2((float(patternCacheLookupIndexX) + 0.5) / 64.0, (float(patternCacheLookupIndexY) + 0.5) / 2048.0)).x * 256.0);
+	int paletteIndex = int(texture(PatternCacheTexture, vec2((float(patternCacheLookupIndexX) + 0.5) / 64.0, DATA_TEXTURE_Y(patternCacheLookupIndexY, 2048))).x * 256.0);
 #endif
 	paletteIndex += atex;
 

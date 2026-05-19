@@ -164,7 +164,7 @@ bool FilePackage::loadPackageInternal(InputStream& inputStream, std::wstring_vie
 	{
 		if (showErrors)
 		{
-			if (header.mFormatVersion == PackageHeader::CURRENT_FORMAT_VERSION)
+			if (header.mFormatVersion != PackageHeader::CURRENT_FORMAT_VERSION)
 			{
 				RMX_ERROR("Unsupported format version " << header.mFormatVersion << " of file '" << WString(packageFilename).toStdString() << "'", );
 			}

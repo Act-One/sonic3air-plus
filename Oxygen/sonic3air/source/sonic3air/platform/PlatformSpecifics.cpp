@@ -8,11 +8,15 @@
 
 #include "sonic3air/pch.h"
 #include "sonic3air/platform/PlatformSpecifics.h"
+#include "oxygen/platform/PlatformFunctions.h"
 
 #if defined(PLATFORM_VITA)
 	#include <vitasdk.h>
 	#include <vitaGL.h>
 	#include "sonic3air/platform/vita/trophies.h"
+#endif
+#if defined(PLATFORM_WIIU)
+	#include <coreinit/debug.h>
 #endif
 
 
@@ -65,6 +69,10 @@ namespace
 
 void PlatformSpecifics::platformStartup()
 {
+#if defined(PLATFORM_WIIU)
+	OSReport("[S3AIR] Wii U startup\n");
+	PlatformFunctions::changeWorkingDirectory(L"/vol/external01/wiiu/apps/sonic3air/");
+#endif
 #if defined(PLATFORM_VITA)
 	scePowerSetArmClockFrequency(444);
 	scePowerSetBusClockFrequency(222);
@@ -87,6 +95,6 @@ void PlatformSpecifics::platformStartup()
 		warning("This game features unlockable trophies but NoTrpDrm is not installed. If you want to be able to unlock trophies, please install it.");
 	}
 
-	changeWorkingDirectory(L"ux0:/data/sonic3air");
+	PlatformFunctions::changeWorkingDirectory(L"ux0:/data/sonic3air");
 #endif
 }

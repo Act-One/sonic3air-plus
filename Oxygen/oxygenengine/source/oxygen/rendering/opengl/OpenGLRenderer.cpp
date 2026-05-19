@@ -191,7 +191,7 @@ void OpenGLRenderer::renderGameScreen(const std::vector<Geometry*>& geometries)
 	{
 		const Color color = mRenderParts.getPaletteManager().getBackdropColor();
 		glDepthMask(GL_TRUE);
-		glClearColor(color.r, color.g, color.b, 0.0f);
+		glClearColor(color.r, color.g, color.b, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		glDepthMask(GL_FALSE);
 		glDisable(GL_SCISSOR_TEST);
@@ -253,6 +253,7 @@ void OpenGLRenderer::renderGameScreen(const std::vector<Geometry*>& geometries)
 
 	// Unbind shader
 	glUseProgram(0);
+	OpenGLShader::resetLastUsedShader();
 	glActiveTexture(GL_TEXTURE0);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -289,6 +290,7 @@ void OpenGLRenderer::blurGameScreen()
 	mInternal.mPostFxBlurShader.draw(mProcessingTexture.getHandle(), texelOffset, kernel);
 
 	glUseProgram(0);	// Unbind shader again
+	OpenGLShader::resetLastUsedShader();
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
@@ -547,6 +549,7 @@ void OpenGLRenderer::copyGameScreenToProcessingBuffer()
 	mInternal.mSimpleCopyScreenShader.draw(mGameScreenTexture.getImplementation<OpenGLDrawerTexture>()->getTextureHandle());
 
 	glUseProgram(0);	// Unbind shader again
+	OpenGLShader::resetLastUsedShader();
 	glBindFramebuffer(GL_FRAMEBUFFER, oldFramebufferHandle);
 }
 

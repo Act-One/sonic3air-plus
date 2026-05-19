@@ -49,9 +49,10 @@ namespace
 	template<int USE_COLORS, bool BILINEAR_SAMPLING, bool ALPHA_BLENDING, bool SWAP_RED_BLUE>
 	FORCE_INLINE void processTexturedLineInternal(uint8* output, int numPixels, Color currentColor, Color diffColor, Vec2f currentUV, Vec2f diffUV, Vec2f scaleUV, const BitmapView<uint32>& texture)
 	{
-		constexpr int SAMPLE_INDEX_R = SWAP_RED_BLUE ? 2 : 0;
-		constexpr int SAMPLE_INDEX_G = 1;
-		constexpr int SAMPLE_INDEX_B = SWAP_RED_BLUE ? 0 : 2;
+		constexpr int SAMPLE_INDEX_R = SWAP_RED_BLUE ? ABGR32_BYTE_B : ABGR32_BYTE_R;
+		constexpr int SAMPLE_INDEX_G = ABGR32_BYTE_G;
+		constexpr int SAMPLE_INDEX_B = SWAP_RED_BLUE ? ABGR32_BYTE_R : ABGR32_BYTE_B;
+		constexpr int SAMPLE_INDEX_A = ABGR32_BYTE_A;
 
 		if constexpr (BILINEAR_SAMPLING)
 		{
@@ -93,7 +94,7 @@ namespace
 
 				if constexpr (ALPHA_BLENDING)
 				{
-					float a = ((float)sample00[3] * (1.0f - factorX) + (float)sample10[3] * factorX) * (1.0f - factorY) + ((float)sample01[3] * (1.0f - factorX) + (float)sample11[3] * factorX) * factorY;
+					float a = ((float)sample00[SAMPLE_INDEX_A] * (1.0f - factorX) + (float)sample10[SAMPLE_INDEX_A] * factorX) * (1.0f - factorY) + ((float)sample01[SAMPLE_INDEX_A] * (1.0f - factorX) + (float)sample11[SAMPLE_INDEX_A] * factorX) * factorY;
 
 					if constexpr (USE_COLORS)
 					{
@@ -101,18 +102,18 @@ namespace
 					}
 
 					// Alpha blending
-					output[0] = (uint8)((r * a + (float)output[0] * (255.0f - a)) / 255.0f);
-					output[1] = (uint8)((g * a + (float)output[1] * (255.0f - a)) / 255.0f);
-					output[2] = (uint8)((b * a + (float)output[2] * (255.0f - a)) / 255.0f);
-					output[3] = 0xff;
+					output[ABGR32_BYTE_R] = (uint8)((r * a + (float)output[ABGR32_BYTE_R] * (255.0f - a)) / 255.0f);
+					output[ABGR32_BYTE_G] = (uint8)((g * a + (float)output[ABGR32_BYTE_G] * (255.0f - a)) / 255.0f);
+					output[ABGR32_BYTE_B] = (uint8)((b * a + (float)output[ABGR32_BYTE_B] * (255.0f - a)) / 255.0f);
+					output[ABGR32_BYTE_A] = 0xff;
 				}
 				else
 				{
 					// No blending
-					output[0] = (uint8)(r / 255.0f);
-					output[1] = (uint8)(g / 255.0f);
-					output[2] = (uint8)(b / 255.0f);
-					output[3] = 0xff;
+					output[ABGR32_BYTE_R] = (uint8)clamp(roundToInt(r), 0, 0xff);
+					output[ABGR32_BYTE_G] = (uint8)clamp(roundToInt(g), 0, 0xff);
+					output[ABGR32_BYTE_B] = (uint8)clamp(roundToInt(b), 0, 0xff);
+					output[ABGR32_BYTE_A] = 0xff;
 				}
 			}
 			else
@@ -128,23 +129,23 @@ namespace
 
 					if constexpr (USE_COLORS)
 					{
-						const float multiplierA = (float)sample[3] / 255.0f * currentColor.a;
+						const float multiplierA = (float)sample[SAMPLE_INDEX_A] / 255.0f * currentColor.a;
 						const float multiplierB = 1.0f - multiplierA;
 
-						output[0] = (uint8)((float)sample[SAMPLE_INDEX_R] * currentColor.r * multiplierA + (float)output[0] * multiplierB);
-						output[1] = (uint8)((float)sample[SAMPLE_INDEX_G] * currentColor.g * multiplierA + (float)output[1] * multiplierB);
-						output[2] = (uint8)((float)sample[SAMPLE_INDEX_B] * currentColor.b * multiplierA + (float)output[2] * multiplierB);
-						output[3] = 0xff;
+						output[ABGR32_BYTE_R] = (uint8)((float)sample[SAMPLE_INDEX_R] * currentColor.r * multiplierA + (float)output[ABGR32_BYTE_R] * multiplierB);
+						output[ABGR32_BYTE_G] = (uint8)((float)sample[SAMPLE_INDEX_G] * currentColor.g * multiplierA + (float)output[ABGR32_BYTE_G] * multiplierB);
+						output[ABGR32_BYTE_B] = (uint8)((float)sample[SAMPLE_INDEX_B] * currentColor.b * multiplierA + (float)output[ABGR32_BYTE_B] * multiplierB);
+						output[ABGR32_BYTE_A] = 0xff;
 					}
 					else
 					{
-						const uint16 multiplierA = ((uint32)sample[3] << 8) / 255;
+						const uint16 multiplierA = ((uint32)sample[SAMPLE_INDEX_A] << 8) / 255;
 						const uint16 multiplierB = (256 - multiplierA);
 
-						output[0] = (sample[SAMPLE_INDEX_R] * multiplierA + output[0] * multiplierB) >> 8;
-						output[1] = (sample[SAMPLE_INDEX_G] * multiplierA + output[1] * multiplierB) >> 8;
-						output[2] = (sample[SAMPLE_INDEX_B] * multiplierA + output[2] * multiplierB) >> 8;
-						output[3] = 0xff;
+						output[ABGR32_BYTE_R] = (sample[SAMPLE_INDEX_R] * multiplierA + output[ABGR32_BYTE_R] * multiplierB) >> 8;
+						output[ABGR32_BYTE_G] = (sample[SAMPLE_INDEX_G] * multiplierA + output[ABGR32_BYTE_G] * multiplierB) >> 8;
+						output[ABGR32_BYTE_B] = (sample[SAMPLE_INDEX_B] * multiplierA + output[ABGR32_BYTE_B] * multiplierB) >> 8;
+						output[ABGR32_BYTE_A] = 0xff;
 					}
 				}
 				else
@@ -156,10 +157,10 @@ namespace
 					{
 						const uint8* sample = (const uint8*)texture.getPixelPointer(sampleX, sampleY);
 
-						output[0] = (uint8)((float)sample[SAMPLE_INDEX_R] * currentColor.r);
-						output[1] = (uint8)((float)sample[SAMPLE_INDEX_G] * currentColor.g);
-						output[2] = (uint8)((float)sample[SAMPLE_INDEX_B] * currentColor.b);
-						output[3] = 0xff;
+						output[ABGR32_BYTE_R] = (uint8)((float)sample[SAMPLE_INDEX_R] * currentColor.r);
+						output[ABGR32_BYTE_G] = (uint8)((float)sample[SAMPLE_INDEX_G] * currentColor.g);
+						output[ABGR32_BYTE_B] = (uint8)((float)sample[SAMPLE_INDEX_B] * currentColor.b);
+						output[ABGR32_BYTE_A] = 0xff;
 					}
 					else
 					{
@@ -240,10 +241,10 @@ namespace
 				const uint16 multiplierA = ((texColor >> 16) & 0xff00) / 255;
 				const uint16 multiplierB = 256 - multiplierA;
 
-				output[0] = (((texColor)       & 0xff) * multiplierA + output[0] * multiplierB) >> 8;
-				output[1] = (((texColor >> 8)  & 0xff) * multiplierA + output[1] * multiplierB) >> 8;
-				output[2] = (((texColor >> 16) & 0xff) * multiplierA + output[2] * multiplierB) >> 8;
-				output[3] = 0xff;
+				output[ABGR32_BYTE_R] = (((texColor)       & 0xff) * multiplierA + output[ABGR32_BYTE_R] * multiplierB) >> 8;
+				output[ABGR32_BYTE_G] = (((texColor >> 8)  & 0xff) * multiplierA + output[ABGR32_BYTE_G] * multiplierB) >> 8;
+				output[ABGR32_BYTE_B] = (((texColor >> 16) & 0xff) * multiplierA + output[ABGR32_BYTE_B] * multiplierB) >> 8;
+				output[ABGR32_BYTE_A] = 0xff;
 			}
 			else
 			{

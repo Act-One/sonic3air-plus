@@ -39,21 +39,26 @@ namespace
 			}
 			screenSize = Configuration::instance().mGameScreen;
 		}
+#if defined(PLATFORM_WIIU)
+		static int sLoggedWidth = -1;
+		static int sLoggedHeight = -1;
+		if (sLoggedWidth != screenSize.x || sLoggedHeight != screenSize.y)
+		{
+			sLoggedWidth = screenSize.x;
+			sLoggedHeight = screenSize.y;
+			RMX_LOG_INFO("RendererBindings: screen metrics width=" << screenSize.x
+				<< " height=" << screenSize.y
+				<< " extend=" << ((screenSize.x - 320) / 2));
+		}
+#endif
 		return screenSize;
 	}
 
 
 	uint16 getScreenWidth()
 	{
-		static bool sLoggedOnce = false;
 		const Vec2i screenSize = getSafeGameScreenSize();
-		const uint16 width = (uint16)screenSize.x;
-		if (!sLoggedOnce)
-		{
-			sLoggedOnce = true;
-			RMX_LOG_INFO("RendererBindings: first getScreenWidth/getScreenHeight = " << width << " x " << (uint16)screenSize.y);
-		}
-		return width;
+		return (uint16)screenSize.x;
 	}
 
 	uint16 getScreenHeight()
@@ -307,12 +312,6 @@ namespace
 	void VDP_Config_setActiveDisplay(uint8 enable)
 	{
 		const bool activeDisplay = (enable != 0);
-		static bool sLastLoggedState = true;
-		if (activeDisplay != sLastLoggedState)
-		{
-			sLastLoggedState = activeDisplay;
-			RMX_LOG_INFO("RendererBindings: active display -> " << (activeDisplay ? "on" : "off"));
-		}
 		RenderParts::instance().setActiveDisplay(activeDisplay);
 	}
 
@@ -484,6 +483,17 @@ namespace
 
 	void Renderer_drawVdpSprite(int16 px, int16 py, uint8 encodedSize, uint16 patternIndex, uint16 renderQueue)
 	{
+#if defined(S3AIR_WIIU_TRACE_RENDER_BINDINGS)
+		static int sVdpSpriteLogCount = 0;
+		if (sVdpSpriteLogCount < 96 && renderQueue >= 0x9000)
+		{
+			RMX_LOG_INFO("RendererBindings: drawVdpSprite px=" << px << " py=" << py
+				<< " size=0x" << rmx::hexString((uint32)encodedSize, 2)
+				<< " pattern=0x" << rmx::hexString((uint32)patternIndex, 4)
+				<< " queue=0x" << rmx::hexString((uint32)renderQueue, 4));
+			++sVdpSpriteLogCount;
+		}
+#endif
 		RenderParts::instance().getSpriteManager().drawVdpSprite(Vec2i(px, py), encodedSize, patternIndex, renderQueue);
 	}
 
@@ -554,6 +564,18 @@ namespace
 
 	void Renderer_drawSprite1(uint64 key, int16 px, int16 py, uint16 atex, uint8 flags, uint16 renderQueue)
 	{
+#if defined(S3AIR_WIIU_TRACE_RENDER_BINDINGS)
+		static int sCustomSpriteLogCount = 0;
+		if (sCustomSpriteLogCount < 64 && renderQueue >= 0x9000)
+		{
+			RMX_LOG_INFO("RendererBindings: drawCustomSprite key=0x" << rmx::hexString(key, 16)
+				<< " px=" << px << " py=" << py
+				<< " atex=0x" << rmx::hexString((uint32)atex, 4)
+				<< " flags=0x" << rmx::hexString((uint32)flags, 2)
+				<< " queue=0x" << rmx::hexString((uint32)renderQueue, 4));
+			++sCustomSpriteLogCount;
+		}
+#endif
 		RenderParts::instance().getSpriteManager().drawCustomSprite(key, Vec2i(px, py), atex, flags, renderQueue);
 	}
 

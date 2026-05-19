@@ -83,7 +83,7 @@ namespace lemon
 
 		static void exec_MOVE_STACK_positive(const RuntimeOpcodeContext context)
 		{
-			const int count = (int)context.getParameter<int16>();
+			const int count = (int)context.getParameter<int64>();
 			for (int i = 0; i < count; ++i)
 				context.writeValueStack(i, 0);
 			context.moveValueStack(count);
@@ -91,7 +91,7 @@ namespace lemon
 
 		static void exec_MOVE_STACK_negative(const RuntimeOpcodeContext context)
 		{
-			context.moveValueStack(context.getParameter<int16>());
+			context.moveValueStack((int)context.getParameter<int64>());
 		}
 
 		static void exec_MOVE_STACK_m1(const RuntimeOpcodeContext context)
@@ -101,7 +101,7 @@ namespace lemon
 
 		static void exec_MOVE_VAR_STACK_positive(const RuntimeOpcodeContext context)
 		{
-			const int count = (int)context.getParameter<int16>();
+			const int count = (int)context.getParameter<int64>();
 			int64* variables = &context.mControlFlow->mLocalVariablesBuffer[context.mControlFlow->mLocalVariablesSize];
 			memset(variables, 0, count * sizeof(int64));
 			context.mControlFlow->mLocalVariablesSize += count;
@@ -110,7 +110,7 @@ namespace lemon
 
 		static void exec_MOVE_VAR_STACK_negative(const RuntimeOpcodeContext context)
 		{
-			const int count = (int)context.getParameter<int16>();
+			const int count = (int)context.getParameter<int64>();
 			context.mControlFlow->mLocalVariablesSize += count;
 		}
 
@@ -473,6 +473,7 @@ namespace lemon
 
 					case Variable::Type::USER:
 					{
+						runtimeOpcode.setParameter(variableId);
 						runtimeOpcode.mExecFunc = &OpcodeExec::exec_GET_VARIABLE_VALUE_USER;
 						break;
 					}
@@ -527,6 +528,7 @@ namespace lemon
 
 					case Variable::Type::USER:
 					{
+						runtimeOpcode.setParameter(variableId);
 						runtimeOpcode.mExecFunc = &OpcodeExec::exec_SET_VARIABLE_VALUE_USER;
 						break;
 					}
@@ -710,7 +712,7 @@ namespace lemon
 					if (nullptr != function && function->isA<NativeFunction>() && function->hasFlag(Function::Flag::ALLOW_INLINE_EXECUTION))
 					{
 						runtimeOpcode.mExecFunc = &OpcodeExec::exec_INLINE_NATIVE_CALL;
-						runtimeOpcode.setParameter((uint64)function);
+						runtimeOpcode.setParameter(function);
 						return;
 					}
 				}

@@ -114,17 +114,16 @@ namespace lemon
 		static_assert((size_t)Opcode::Type::_NUM_TYPES == 37);	// Otherwise DEFAULT_OPCODE_BASETYPES needs to get updated
 
 		// Signature and version number
-		const uint32 SIGNATURE = *(uint32*)"LMD|";	// "Lemonscript Module"
+		const uint8 SIGNATURE[4] = { 'L', 'M', 'D', '|' };	// "Lemonscript Module"
 		const uint16 MINIMUM_VERSION = 0x16;
 		uint16 version = 0x16;
 
 		if (outerSerializer.isReading())
 		{
-			const uint32 signature = *(const uint32*)outerSerializer.peek();
-			if (signature != SIGNATURE)
+			if (outerSerializer.getRemaining() < sizeof(SIGNATURE) || memcmp(outerSerializer.peek(), SIGNATURE, sizeof(SIGNATURE)) != 0)
 				return false;
 
-			outerSerializer.skip(4);
+			outerSerializer.skip(sizeof(SIGNATURE));
 			version = outerSerializer.read<uint16>();
 			if (version < MINIMUM_VERSION)
 				return false;	// Loading older versions is not supported
@@ -139,7 +138,7 @@ namespace lemon
 		}
 		else
 		{
-			outerSerializer.write(SIGNATURE);
+			outerSerializer.write(SIGNATURE, sizeof(SIGNATURE));
 			outerSerializer.write(version);
 			outerSerializer.write(dependencyHash);
 			outerSerializer.write(appVersion);

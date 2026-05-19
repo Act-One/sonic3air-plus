@@ -70,14 +70,14 @@ namespace detail
 		{
 			// Same as above, but with hardcoded "pixels == 8"
 			const PatternManager::CacheItem::Pattern& pattern = mPatternCache[patternIndex & 0x07ff].mFlipVariation[(patternIndex >> 11) & 3];
+
+		#if !defined(PLATFORM_VITA) && !defined(PLATFORM_WIIU)
 			uint64* dst = (uint64*)&mContent[mPosition + x];
 			const uint64* srcPatternPixels = (uint64*)&pattern.mPixels[mPatternPixelOffset];
-
-		#if !defined(PLATFORM_VITA)
 			*dst = *srcPatternPixels;
 		#else
-			// This fixes a crash
-			sceClibMemcpy(dst, srcPatternPixels, sizeof(*dst));
+			// PPC/Vita can fault on unaligned 64-bit accesses here; x is not guaranteed to be 8-byte aligned.
+			memcpy(&mContent[mPosition + x], &pattern.mPixels[mPatternPixelOffset], 8);
 		#endif
 
 			const uint16 patternBits = (patternIndex & 0xe000);		// Includes priority bit and atex

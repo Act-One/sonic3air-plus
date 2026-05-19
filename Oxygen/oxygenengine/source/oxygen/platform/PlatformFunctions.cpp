@@ -19,7 +19,7 @@
 #elif defined(PLATFORM_UWP)
 	#include <winrt/Windows.ApplicationModel.h>
 	#include <winrt/Windows.Storage.h>
-#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MAC) || defined(PLATFORM_ANDROID) || defined(PLATFORM_SWITCH) || defined(PLATFORM_IOS) || defined(PLATFORM_VITA)
+#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MAC) || defined(PLATFORM_ANDROID) || defined(PLATFORM_WIIU) || defined(PLATFORM_SWITCH) || defined(PLATFORM_IOS) || defined(PLATFORM_VITA)
 	#include <stdlib.h>
 	#include <unistd.h>
 	#include <sys/types.h>
@@ -340,6 +340,9 @@ void PlatformFunctions::changeWorkingDirectory(std::wstring_view executableCallP
 		const std::wstring path = std::wstring(executableCallPath.substr(0, slashPos + 1));
 		rmx::FileSystem::setCurrentDirectory(path);
 	}
+#elif defined(PLATFORM_WIIU)
+	(void)executableCallPath;
+	rmx::FileSystem::setCurrentDirectory(L"/vol/external01/wiiu/apps/sonic3air/");
 #endif
 }
 
@@ -395,6 +398,8 @@ std::wstring PlatformFunctions::getAppDataPath()
 	}
 #elif defined(PLATFORM_MAC) || defined(PLATFORM_IOS)
 	return mExAppDataPath;
+#elif defined(PLATFORM_WIIU)
+	return L"/vol/external01/wiiu/apps/sonic3air";
 #endif
 	return L"";
 }

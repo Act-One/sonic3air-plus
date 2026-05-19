@@ -71,6 +71,12 @@ uniform sampler2D PaletteTexture;
 uniform vec4 TintColor;
 uniform vec4 AddedColor;
 
+#ifdef USE_DATA_TEXTURE_Y_FLIP
+	#define DATA_TEXTURE_Y(row, height) (1.0 - ((float(row) + 0.5) / float(height)))
+#else
+	#define DATA_TEXTURE_Y(row, height) ((float(row) + 0.5) / float(height))
+#endif
+
 
 vec4 getPaletteColor(int paletteIndex, float paletteOffsetY)
 {
@@ -112,7 +118,7 @@ void main()
 	int patternCacheLookupIndex = patternCacheLookupIndexX + patternCacheLookupIndexY * 64;
 	int paletteIndex = texelFetch(PatternCacheTexture, patternCacheLookupIndex).x;
 #else
-	int paletteIndex = int(texture(PatternCacheTexture, vec2((float(patternCacheLookupIndexX) + 0.5) / 64.0, (float(patternCacheLookupIndexY) + 0.5) / 2048.0)).x * 256.0);
+	int paletteIndex = int(texture(PatternCacheTexture, vec2((float(patternCacheLookupIndexX) + 0.5) / 64.0, DATA_TEXTURE_Y(patternCacheLookupIndexY, 2048))).x * 256.0);
 #endif
 	paletteIndex += atex;
 

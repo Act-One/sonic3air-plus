@@ -46,6 +46,12 @@ uniform sampler2D PaletteTexture;
 	uniform vec4 AddedColor;
 #endif
 
+#ifdef USE_DATA_TEXTURE_Y_FLIP
+	#define DATA_TEXTURE_Y(row, height) (1.0 - ((float(row) + 0.5) / float(height)))
+#else
+	#define DATA_TEXTURE_Y(row, height) ((float(row) + 0.5) / float(height))
+#endif
+
 
 vec4 getPaletteColor(int paletteIndex, float paletteOffsetY)
 {
@@ -68,7 +74,7 @@ void main()
 #ifdef USE_BUFFER_TEXTURES
 	int paletteIndex = texelFetch(MainTexture, ix + iy * Size.x).x;
 #else
-	int paletteIndex = int(texture(MainTexture, vec2(((float(ix) + 0.5) / float(Size.x)), (float(iy) + 0.5) / float(Size.y))).x * 256.0);
+	int paletteIndex = int(texture(MainTexture, vec2(((float(ix) + 0.5) / float(Size.x)), DATA_TEXTURE_Y(iy, Size.y))).x * 256.0);
 #endif
 
 	vec4 color = getPaletteColor(paletteIndex, 0.0);

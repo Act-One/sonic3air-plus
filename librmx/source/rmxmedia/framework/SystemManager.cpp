@@ -43,10 +43,20 @@ namespace rmx
 		if (mInitialized)
 			return true;
 
+		// On Wii U the GX2/WHB path owns video output directly. Initializing
+		// SDL's video backend creates a competing CafeOS scanbuffer owner.
+#if defined(PLATFORM_WIIU)
+		if (SDL_Init(0) < 0)
+#else
 		// Initialize SDL video
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
+#endif
 		{
+#if defined(PLATFORM_WIIU)
+			std::cout << "SDL_Init(0) failed with error: " << SDL_GetError() << "\n";
+#else
 			std::cout << "SDL_Init(SDL_INIT_VIDEO) failed with error: " << SDL_GetError() << "\n";
+#endif
 			return false;
 		}
 

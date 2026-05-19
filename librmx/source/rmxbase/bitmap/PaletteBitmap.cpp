@@ -37,6 +37,52 @@ namespace
 	{
 		return (color & 0xff00ff00) | ((color & 0x00ff0000) >> 16) | ((color & 0x000000ff) << 16);
 	}
+
+	inline bool isLittleEndianHost()
+	{
+		const uint16 value = 0x1234;
+		return (*(const uint8*)&value == 0x34);
+	}
+
+	inline uint16 swap16(uint16 value)
+	{
+		return (uint16)((value >> 8) | (value << 8));
+	}
+
+	inline uint32 swap32(uint32 value)
+	{
+		return ((value & 0x000000ffu) << 24) |
+			   ((value & 0x0000ff00u) << 8) |
+			   ((value & 0x00ff0000u) >> 8) |
+			   ((value & 0xff000000u) >> 24);
+	}
+
+	inline void convertBmpHeaderEndian(BmpHeader& header)
+	{
+		if (isLittleEndianHost())
+			return;
+
+		header.fileSize = swap32(header.fileSize);
+		header.creator1 = swap16(header.creator1);
+		header.creator2 = swap16(header.creator2);
+		header.headerSize = swap32(header.headerSize);
+		header.dibHeaderSize = swap32(header.dibHeaderSize);
+		header.width = (int32)swap32((uint32)header.width);
+		header.height = (int32)swap32((uint32)header.height);
+		header.numPlanes = swap16(header.numPlanes);
+		header.bpp = swap16(header.bpp);
+		header.compression = swap32(header.compression);
+		header.dataSize = swap32(header.dataSize);
+		header.resolutionX = (int32)swap32((uint32)header.resolutionX);
+		header.resolutionY = (int32)swap32((uint32)header.resolutionY);
+		header.numColors = swap32(header.numColors);
+		header.importantColors = swap32(header.importantColors);
+	}
+
+	inline uint32 makePixelABGR(uint8 r, uint8 g, uint8 b, uint8 a)
+	{
+		return ((uint32)a << 24) | ((uint32)b << 16) | ((uint32)g << 8) | (uint32)r;
+	}
 }
 
 
@@ -177,6 +223,7 @@ bool PaletteBitmap::loadBMP(const std::vector<uint8>& bmpContent, std::vector<ui
 	// Read header
 	BmpHeader header;
 	serializer.read(&header, sizeof(header));
+	convertBmpHeaderEndian(header);
 	if (memcmp(header.signature, "BM", 2) != 0)
 		return false;
 
@@ -208,10 +255,12 @@ bool PaletteBitmap::loadBMP(const std::vector<uint8>& bmpContent, std::vector<ui
 	{
 		std::vector<uint32>& palette = *outPalette;
 		palette.resize(palSize);
-		serializer.read(&palette[0], palSize * sizeof(uint32));
+		uint8 paletteBytes[256 * 4];
+		serializer.read(paletteBytes, palSize * 4);
 		for (int i = 0; i < palSize; ++i)
 		{
-			palette[i] = swapRedBlue(palette[i] | 0xff000000);
+			const uint8* entry = &paletteBytes[i * 4];
+			palette[i] = makePixelABGR(entry[2], entry[1], entry[0], 0xff);
 		}
 	}
 	else
@@ -241,7 +290,7 @@ bool PaletteBitmap::loadBMP(const std::vector<uint8>& bmpContent, std::vector<ui
 		{
 			case 1:
 				for (int x = 0; x < width; ++x)
-					dataPtr[x] = (buffer[x/8] >> (x & 0x07)) & 0x01;
+					dataPtr[x] = (buffer[x/8] >> (7 - (x & 0x07))) & 0x01;
 				break;
 
 			case 4:
@@ -283,11 +332,20 @@ bool PaletteBitmap::saveBMP(std::vector<uint8>& bmpContent, const uint32* palett
 	header.resolutionY = 3828;
 	header.numColors = 256;
 	header.importantColors = 256;
-	serializer.write(&header, sizeof(BmpHeader));
+	BmpHeader fileHeader = header;
+	convertBmpHeaderEndian(fileHeader);
+	serializer.write(&fileHeader, sizeof(BmpHeader));
 
 	for (int i = 0; i < 256; ++i)
 	{
-		serializer.write(swapRedBlue(palette[i]) & 0x00ffffff);
+		const uint8 entry[4] =
+		{
+			(uint8)((palette[i] >> 16) & 0xff),
+			(uint8)((palette[i] >> 8) & 0xff),
+			(uint8)(palette[i] & 0xff),
+			0
+		};
+		serializer.write(entry, sizeof(entry));
 	}
 
 	for (int line = 0; line < mHeight; ++line)

@@ -8,6 +8,15 @@
 
 #include "rmxmedia.h"
 
+#if defined(PLATFORM_WIIU)
+#ifndef AUDIO_S16MSB
+#define AUDIO_S16MSB 0x9010
+#endif
+#ifndef AUDIO_S16SYS
+#define AUDIO_S16SYS AUDIO_S16MSB
+#endif
+#endif
+
 
 namespace rmx
 {
@@ -58,7 +67,11 @@ namespace rmx
 
 		// Define format
 		mFormat.freq = sample_freq;
+#if defined(PLATFORM_WIIU)
+		mFormat.format = AUDIO_S16SYS;
+#else
 		mFormat.format = AUDIO_S16LSB;
+#endif
 		mFormat.channels = channels;
 		mFormat.samples = audioBufferSamples;
 		mFormat.callback = AudioManager::mixAudioStatic;
@@ -84,6 +97,14 @@ namespace rmx
 			return;
 		}
 
+#if defined(PLATFORM_WIIU)
+		RMX_LOG_INFO("AudioManager: opened Wii U audio device"
+			<< " requested={freq=" << requested.freq << ", format=0x" << rmx::hexString(requested.format, 4, "")
+			<< ", channels=" << (int)requested.channels << ", samples=" << requested.samples << "}"
+			<< " obtained={freq=" << mFormat.freq << ", format=0x" << rmx::hexString(mFormat.format, 4, "")
+			<< ", channels=" << (int)mFormat.channels << ", samples=" << mFormat.samples << "}");
+#endif
+
 		// Everything alright so far
 		mPlayedSamples = 0;
 		playAudio(true);
@@ -91,7 +112,11 @@ namespace rmx
 
 	void AudioManager::exit()
 	{
-		SDL_CloseAudioDevice(mAudioDeviceID);
+		if (mAudioDeviceID != 0)
+		{
+			SDL_CloseAudioDevice(mAudioDeviceID);
+			mAudioDeviceID = 0;
+		}
 	}
 
 	void AudioManager::clear()
@@ -112,19 +137,24 @@ namespace rmx
 
 	void AudioManager::playAudio(bool onoff)
 	{
+		if (mAudioDeviceID == 0)
+			return;
 		SDL_PauseAudioDevice(mAudioDeviceID, onoff ? 0 : 1);
 	}
 
 	bool AudioManager::getAudioState()
 	{
-		return (SDL_GetAudioStatus() == SDL_AUDIO_PLAYING);
+		return (mAudioDeviceID != 0 && SDL_GetAudioDeviceStatus(mAudioDeviceID) == SDL_AUDIO_PLAYING);
 	}
 
 	void AudioManager::lockAudio()
 	{
 		if (mAudioLocks == 0)
 		{
-			SDL_LockAudioDevice(mAudioDeviceID);
+			if (mAudioDeviceID != 0)
+			{
+				SDL_LockAudioDevice(mAudioDeviceID);
+			}
 		}
 		++mAudioLocks;
 	}
@@ -135,7 +165,10 @@ namespace rmx
 		--mAudioLocks;
 		if (mAudioLocks == 0)
 		{
-			SDL_UnlockAudioDevice(mAudioDeviceID);
+			if (mAudioDeviceID != 0)
+			{
+				SDL_UnlockAudioDevice(mAudioDeviceID);
+			}
 		}
 	}
 
@@ -386,13 +419,35 @@ namespace rmx
 
 	void AudioManager::mixAudioStatic(void* _userdata, uint8* outputStream, int outputBytes)
 	{
+		(void)_userdata;
 		FTX::Audio->mixAudio(outputStream, outputBytes);
 	}
 
 	void AudioManager::mixAudio(uint8* outputStream, int outputBytes)
 	{
-		const size_t outputSamples = outputBytes / (mFormat.channels * sizeof(short));
 		const constexpr size_t MAX_SAMPLES = 2048;
+		const int channels = (int)mFormat.channels;
+		if (nullptr == outputStream || outputBytes <= 0)
+			return;
+		if (channels <= 0 || channels > 2)
+		{
+			memset(outputStream, 0, (size_t)outputBytes);
+			return;
+		}
+
+		const int bytesPerFrame = channels * (int)sizeof(short);
+		if ((outputBytes % bytesPerFrame) != 0)
+		{
+			memset(outputStream, 0, (size_t)outputBytes);
+			return;
+		}
+
+		const size_t outputSamples = (size_t)outputBytes / (size_t)bytesPerFrame;
+		if (outputSamples > MAX_SAMPLES)
+		{
+			memset(outputStream, 0, (size_t)outputBytes);
+			return;
+		}
 
 		RMX_ASSERT(outputSamples <= MAX_SAMPLES, "Mixing more than " << MAX_SAMPLES << " samples at once is not supported");
 		RMX_ASSERT(mFormat.channels <= 2, "More than 2 channels is not supported");
@@ -410,7 +465,7 @@ namespace rmx
 		mRootMixer.performAudioMix(parameters);
 
 		// Copy results into the output stream
-		for (int channelIndex = 0; channelIndex < mFormat.channels; ++channelIndex)
+		for (int channelIndex = 0; channelIndex < channels; ++channelIndex)
 		{
 			const int32* RESTRICT src = parameters.mOutputBuffers[channelIndex];
 			short* dst = ((short*)outputStream) + channelIndex;
@@ -430,7 +485,7 @@ namespace rmx
 					*dst = (*src >> 8);
 				}
 				++src;
-				dst += 2;
+				dst += channels;
 			}
 		}
 
@@ -475,7 +530,11 @@ namespace rmx
 
 		// Convert format
 		SDL_AudioCVT cvt;
+#if defined(PLATFORM_WIIU)
+		SDL_BuildAudioCVT(&cvt, wave.format, wave.channels, wave.freq, AUDIO_S16SYS, channels, frequency);
+#else
 		SDL_BuildAudioCVT(&cvt, wave.format, wave.channels, wave.freq, AUDIO_S16LSB, channels, frequency);
+#endif
 		cvt.buf = new unsigned char[wave_length * cvt.len_mult];
 		memcpy(cvt.buf, wave_data, wave_length);
 		cvt.len = wave_length;

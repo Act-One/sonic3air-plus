@@ -16,12 +16,31 @@
 
 #include "oxygen/helper/Logging.h"
 
+#include <type_traits>
+
 
 namespace
 {
-	size_t hashValue(size_t value, size_t seed)
+	size_t hashValue(uint64_t value, size_t seed)
 	{
-		return seed ^ (value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2));
+	#if SIZE_MAX < UINT64_MAX
+		value ^= value >> 32;
+	#endif
+		const size_t foldedValue = (size_t)value;
+		return seed ^ (foldedValue + (size_t)0x9e3779b9u + (seed << 6) + (seed >> 2));
+	}
+
+	template<typename HandleType>
+	size_t hashHandle(HandleType handle, size_t seed)
+	{
+		if constexpr (std::is_pointer_v<HandleType>)
+		{
+			return hashValue((uint64_t)(uintptr_t)handle, seed);
+		}
+		else
+		{
+			return hashValue((uint64_t)handle, seed);
+		}
 	}
 }
 
@@ -31,8 +50,8 @@ size_t vulkan::Descriptors::MaterialKeyHasher::operator()(const MaterialKey& key
 	size_t seed = 0;
 	for (size_t index = 0; index < key.mImageViews.size(); ++index)
 	{
-		seed = hashValue(reinterpret_cast<size_t>(key.mImageViews[index]), seed);
-		seed = hashValue(reinterpret_cast<size_t>(key.mSamplers[index]), seed);
+		seed = hashHandle(key.mImageViews[index], seed);
+		seed = hashHandle(key.mSamplers[index], seed);
 		seed = hashValue((size_t)key.mVersions[index], seed);
 	}
 	return seed;

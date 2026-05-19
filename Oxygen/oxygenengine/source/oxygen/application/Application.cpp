@@ -216,6 +216,9 @@ void Application::sdlEvent(const SDL_Event& ev)
 	{
 		case SDL_WINDOWEVENT:
 		{
+#if defined(PLATFORM_WIIU)
+			break;
+#else
 			if (ev.window.windowID == SDL_GetWindowID(&EngineMain::instance().getSDLWindow()))
 			{
 				switch (ev.window.event)
@@ -228,6 +231,7 @@ void Application::sdlEvent(const SDL_Event& ev)
 				}
 			}
 			break;
+#endif
 		}
 
 		case SDL_APP_WILLENTERBACKGROUND:
@@ -685,7 +689,11 @@ void Application::render()
 	}
 
 	Drawer& drawer = EngineMain::instance().getDrawer();
+#if defined(PLATFORM_WIIU)
+	drawer.setupRenderWindow(nullptr);
+#else
 	drawer.setupRenderWindow(&EngineMain::instance().getSDLWindow());
+#endif
 
 	if (mImGuiIntegration.hasBlockingImGuiWindow())
 	{

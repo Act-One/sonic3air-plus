@@ -65,13 +65,9 @@ namespace
 
 	void copyPlanePatternsWithWrap(uint16* dst, uint16 planeBaseAddress, int numPatterns)
 	{
-		const uint8* vram = EmulatorInterface::instance().getVRam();
-		const size_t totalBytes = (size_t)numPatterns * sizeof(uint16);
-		const size_t firstChunkBytes = std::min<size_t>(totalBytes, 0x10000 - (size_t)planeBaseAddress);
-		memcpy(dst, vram + planeBaseAddress, firstChunkBytes);
-		if (firstChunkBytes < totalBytes)
+		for (int k = 0; k < numPatterns; ++k)
 		{
-			memcpy(((uint8*)dst) + firstChunkBytes, vram, totalBytes - firstChunkBytes);
+			dst[k] = readVRamWrapped16((uint16)(planeBaseAddress + k * 2));
 		}
 	}
 

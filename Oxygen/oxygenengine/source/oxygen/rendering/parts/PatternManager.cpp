@@ -33,9 +33,7 @@ void PatternManager::refresh()
 
 					// Check for actual changes
 					//  -> This code is slightly optimized compared to a memcmp
-					const uint64* cache = (uint64*)cacheItem.mOriginalDataBackup;
-					const uint64* source = (uint64*)src;
-					const bool changed = ((cache[0] != source[0]) | (cache[1] != source[1]) | (cache[2] != source[2]) | (cache[3] != source[3])) != 0;
+					const bool changed = (memcmp(cacheItem.mOriginalDataBackup, src, 0x20) != 0);
 
 					if (changed)
 					{

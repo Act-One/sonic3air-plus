@@ -48,6 +48,7 @@ namespace lemon
 	class TokenPtr : public genericmanager::ElementPtr<T, Token>
 	{
 	public:
+		using genericmanager::ElementPtr<T, Token>::ElementPtr;
 		using genericmanager::ElementPtr<T, Token>::operator=;
 	};
 

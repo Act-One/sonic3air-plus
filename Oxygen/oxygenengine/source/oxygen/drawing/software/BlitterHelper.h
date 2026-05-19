@@ -11,16 +11,21 @@
 
 struct BlitterHelper
 {
+	static constexpr int R = ABGR32_BYTE_R;
+	static constexpr int G = ABGR32_BYTE_G;
+	static constexpr int B = ABGR32_BYTE_B;
+	static constexpr int A = ABGR32_BYTE_A;
+
 	static inline uint32 multiplyColors(uint32 color1, uint32 color2)
 	{
 		uint32 result = 0;
 		const uint8* src1 = (uint8*)&color1;
 		const uint8* src2 = (uint8*)&color2;
 		uint8* dst = (uint8*)&result;
-		dst[0] = (uint8)((int)src1[0] * (int)src2[0] / 255);
-		dst[1] = (uint8)((int)src1[1] * (int)src2[1] / 255);
-		dst[2] = (uint8)((int)src1[2] * (int)src2[2] / 255);
-		dst[3] = (uint8)((int)src1[3] * (int)src2[3] / 255);
+		dst[R] = (uint8)((int)src1[R] * (int)src2[R] / 255);
+		dst[G] = (uint8)((int)src1[G] * (int)src2[G] / 255);
+		dst[B] = (uint8)((int)src1[B] * (int)src2[B] / 255);
+		dst[A] = (uint8)((int)src1[A] * (int)src2[A] / 255);
 		return result;
 	}
 
@@ -60,9 +65,9 @@ struct BlitterHelper
 			uint8* dst = (uint8*)view.getLinePointer(line);
 			for (int i = 0; i < view.getSize().x; ++i)
 			{
-				dst[0] = (uint8)(((dst[0] * multiplicator) >> 8) + additions[0]);
-				dst[1] = (uint8)(((dst[1] * multiplicator) >> 8) + additions[1]);
-				dst[2] = (uint8)(((dst[2] * multiplicator) >> 8) + additions[2]);
+				dst[R] = (uint8)(((dst[R] * multiplicator) >> 8) + additions[0]);
+				dst[G] = (uint8)(((dst[G] * multiplicator) >> 8) + additions[1]);
+				dst[B] = (uint8)(((dst[B] * multiplicator) >> 8) + additions[2]);
 				dst += 4;
 			}
 		}
@@ -87,13 +92,13 @@ struct BlitterHelper
 
 	static inline void blendPixelAlpha(uint8* dst, const uint8* src)
 	{
-		const int alpha = src[3];
+		const int alpha = src[A];
 		if (alpha > 0)
 		{
 			const int oneMinusAlpha = 255 - alpha;
-			dst[0] = (uint8)((src[0] * alpha + dst[0] * oneMinusAlpha) / 255);
-			dst[1] = (uint8)((src[1] * alpha + dst[1] * oneMinusAlpha) / 255);
-			dst[2] = (uint8)((src[2] * alpha + dst[2] * oneMinusAlpha) / 255);
+			dst[R] = (uint8)((src[R] * alpha + dst[R] * oneMinusAlpha) / 255);
+			dst[G] = (uint8)((src[G] * alpha + dst[G] * oneMinusAlpha) / 255);
+			dst[B] = (uint8)((src[B] * alpha + dst[B] * oneMinusAlpha) / 255);
 		}
 	}
 
@@ -149,12 +154,12 @@ struct BlitterHelper
 
 	static inline void blendPixelAlphaAdditive(uint8* dst, const uint8* src)
 	{
-		const int alpha = src[3];
+		const int alpha = src[A];
 		if (alpha > 0)
 		{
-			dst[0] = std::min(dst[0] + src[0] * alpha / 255, 0xff);
-			dst[1] = std::min(dst[1] + src[1] * alpha / 255, 0xff);
-			dst[2] = std::min(dst[2] + src[2] * alpha / 255, 0xff);
+			dst[R] = std::min(dst[R] + src[R] * alpha / 255, 0xff);
+			dst[G] = std::min(dst[G] + src[G] * alpha / 255, 0xff);
+			dst[B] = std::min(dst[B] + src[B] * alpha / 255, 0xff);
 		}
 	}
 
@@ -186,12 +191,12 @@ struct BlitterHelper
 
 	static inline void blendPixelAlphaSubtractive(uint8* dst, const uint8* src)
 	{
-		const int alpha = src[3];
+		const int alpha = src[A];
 		if (alpha > 0)
 		{
-			dst[0] = std::max(dst[0] - src[0] * alpha / 255, 0);
-			dst[1] = std::max(dst[1] - src[1] * alpha / 255, 0);
-			dst[2] = std::max(dst[2] - src[2] * alpha / 255, 0);
+			dst[R] = std::max(dst[R] - src[R] * alpha / 255, 0);
+			dst[G] = std::max(dst[G] - src[G] * alpha / 255, 0);
+			dst[B] = std::max(dst[B] - src[B] * alpha / 255, 0);
 		}
 	}
 
@@ -227,11 +232,11 @@ struct BlitterHelper
 		const uint8* src = (const uint8*)src_;
 		for (size_t x = 0; x < numPixels; ++x)
 		{
-			if (src[3] > 0)
+			if (src[A] > 0)
 			{
-				dst[0] = (src[0] * dst[0]) / 255;
-				dst[1] = (src[1] * dst[1]) / 255;
-				dst[2] = (src[2] * dst[2]) / 255;
+				dst[R] = (src[R] * dst[R]) / 255;
+				dst[G] = (src[G] * dst[G]) / 255;
+				dst[B] = (src[B] * dst[B]) / 255;
 			}
 			dst += 4;
 			src += 4;
@@ -244,11 +249,11 @@ struct BlitterHelper
 		const uint8* src = (const uint8*)src_;
 		for (size_t x = 0; x < numPixels; ++x)
 		{
-			if (src[3] > 0 && depthTestValue >= *depthBuffer)
+			if (src[A] > 0 && depthTestValue >= *depthBuffer)
 			{
-				dst[0] = (src[0] * dst[0]) / 255;
-				dst[1] = (src[1] * dst[1]) / 255;
-				dst[2] = (src[2] * dst[2]) / 255;
+				dst[R] = (src[R] * dst[R]) / 255;
+				dst[G] = (src[G] * dst[G]) / 255;
+				dst[B] = (src[B] * dst[B]) / 255;
 			}
 			dst += 4;
 			src += 4;
@@ -262,11 +267,11 @@ struct BlitterHelper
 		const uint8* src = (const uint8*)src_;
 		for (size_t x = 0; x < numPixels; ++x)
 		{
-			if (src[3] > 0)
+			if (src[A] > 0)
 			{
-				dst[0] = std::min(src[0], dst[0]);
-				dst[1] = std::min(src[1], dst[1]);
-				dst[2] = std::min(src[2], dst[2]);
+				dst[R] = std::min(src[R], dst[R]);
+				dst[G] = std::min(src[G], dst[G]);
+				dst[B] = std::min(src[B], dst[B]);
 			}
 			dst += 4;
 			src += 4;
@@ -279,11 +284,11 @@ struct BlitterHelper
 		const uint8* src = (const uint8*)src_;
 		for (size_t x = 0; x < numPixels; ++x)
 		{
-			if (src[3] > 0 && depthTestValue >= *depthBuffer)
+			if (src[A] > 0 && depthTestValue >= *depthBuffer)
 			{
-				dst[0] = std::min(src[0], dst[0]);
-				dst[1] = std::min(src[1], dst[1]);
-				dst[2] = std::min(src[2], dst[2]);
+				dst[R] = std::min(src[R], dst[R]);
+				dst[G] = std::min(src[G], dst[G]);
+				dst[B] = std::min(src[B], dst[B]);
 			}
 			dst += 4;
 			src += 4;
@@ -297,11 +302,11 @@ struct BlitterHelper
 		const uint8* src = (const uint8*)src_;
 		for (size_t x = 0; x < numPixels; ++x)
 		{
-			if (src[3] > 0)
+			if (src[A] > 0)
 			{
-				dst[0] = std::max(src[0], dst[0]);
-				dst[1] = std::max(src[1], dst[1]);
-				dst[2] = std::max(src[2], dst[2]);
+				dst[R] = std::max(src[R], dst[R]);
+				dst[G] = std::max(src[G], dst[G]);
+				dst[B] = std::max(src[B], dst[B]);
 			}
 			dst += 4;
 			src += 4;
@@ -314,11 +319,11 @@ struct BlitterHelper
 		const uint8* src = (const uint8*)src_;
 		for (size_t x = 0; x < numPixels; ++x)
 		{
-			if (src[3] > 0 && depthTestValue >= *depthBuffer)
+			if (src[A] > 0 && depthTestValue >= *depthBuffer)
 			{
-				dst[0] = std::max(src[0], dst[0]);
-				dst[1] = std::max(src[1], dst[1]);
-				dst[2] = std::max(src[2], dst[2]);
+				dst[R] = std::max(src[R], dst[R]);
+				dst[G] = std::max(src[G], dst[G]);
+				dst[B] = std::max(src[B], dst[B]);
 			}
 			dst += 4;
 			src += 4;
