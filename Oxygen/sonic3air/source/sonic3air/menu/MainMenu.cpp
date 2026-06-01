@@ -39,6 +39,13 @@ namespace mainmenu
 	};
 }
 
+namespace
+{
+#if defined(PLATFORM_WIIU)
+	static constexpr bool ENABLE_WIIU_MENU_STATE_TRACE = false;
+#endif
+}
+
 
 MainMenu::MainMenu(MenuBackground& menuBackground) :
 	mMenuBackground(&menuBackground)
@@ -92,6 +99,18 @@ void MainMenu::setBaseState(BaseState baseState)
 
 void MainMenu::onFadeIn()
 {
+#if defined(PLATFORM_WIIU)
+	if constexpr (ENABLE_WIIU_MENU_STATE_TRACE)
+	{
+		static int sFadeInLogCount = 0;
+		if (sFadeInLogCount < 16)
+		{
+			RMX_LOG_INFO("[WiiU Menu] MainMenu::onFadeIn stateBefore=" << (int)mState << " visibilityBefore=" << mVisibility << " parent=" << (nullptr != getParent()));
+			++sFadeInLogCount;
+		}
+	}
+#endif
+
 	mState = State::APPEAR;
 
 	mMenuBackground->showPreview(false);
@@ -131,6 +150,8 @@ void MainMenu::keyboard(const rmx::KeyboardEvent& ev)
 void MainMenu::update(float timeElapsed)
 {
 	GameMenuBase::update(timeElapsed);
+	const State stateBeforeFade = mState;
+	const float visibilityBeforeFade = mVisibility;
 
 	// Don't react to input during transitions
 	if (mState == State::SHOW)
@@ -234,6 +255,22 @@ void MainMenu::update(float timeElapsed)
 			mState = State::INACTIVE;
 		}
 	}
+
+#if defined(PLATFORM_WIIU)
+	if constexpr (ENABLE_WIIU_MENU_STATE_TRACE)
+	{
+		static int sUpdateLogCount = 0;
+		if (sUpdateLogCount < 180 && (sUpdateLogCount < 24 || (sUpdateLogCount % 30) == 0 || mState == State::SHOW))
+		{
+			RMX_LOG_INFO("[WiiU Menu] MainMenu::update n=" << sUpdateLogCount
+				<< " dt=" << timeElapsed
+				<< " state=" << (int)stateBeforeFade << "->" << (int)mState
+				<< " visibility=" << visibilityBeforeFade << "->" << mVisibility
+				<< " parent=" << (nullptr != getParent()));
+		}
+		++sUpdateLogCount;
+	}
+#endif
 }
 
 void MainMenu::render()

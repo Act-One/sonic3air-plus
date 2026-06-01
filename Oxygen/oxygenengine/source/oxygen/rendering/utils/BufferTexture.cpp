@@ -111,8 +111,12 @@ void BufferTexture::create(PixelFormat pixelFormat, int width, int height, const
 #else
 	const GLint internalFormat = getFallbackTextureFormat(mPixelFormat);
 	const void* uploadData = prepareUploadData(data, width, height);
+	GLint previousUnpackAlignment = 4;
+	glGetIntegerv(GL_UNPACK_ALIGNMENT, &previousUnpackAlignment);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 	glBindTexture(GL_TEXTURE_2D, mTextureHandle);
 	glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, internalFormat, GL_UNSIGNED_BYTE, uploadData);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, previousUnpackAlignment);
 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -164,8 +168,12 @@ void BufferTexture::bufferData(const void* data, int width, int height)
 #else
 	const GLint internalFormat = getFallbackTextureFormat(mPixelFormat);
 	const void* uploadData = prepareUploadData(data, width, height);
+	GLint previousUnpackAlignment = 4;
+	glGetIntegerv(GL_UNPACK_ALIGNMENT, &previousUnpackAlignment);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 	glBindTexture(GL_TEXTURE_2D, mTextureHandle);
 	glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, internalFormat, GL_UNSIGNED_BYTE, uploadData);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, previousUnpackAlignment);
 	glBindTexture(GL_TEXTURE_2D, 0);
 #endif
 }

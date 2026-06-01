@@ -27,6 +27,45 @@
 
 namespace
 {
+#if defined(PLATFORM_WIIU)
+	static constexpr bool ENABLE_WIIU_SCRIPT_TRACE = false;
+#define WIIU_SCRIPT_TRACE_LOG(expr) do { if constexpr (ENABLE_WIIU_SCRIPT_TRACE) { RMX_LOG_INFO(expr); } } while (false)
+
+	const char* getExecutionStateName(CodeExec::ExecutionState state)
+	{
+		switch (state)
+		{
+			case CodeExec::ExecutionState::INACTIVE:	return "inactive";
+			case CodeExec::ExecutionState::READY:		return "ready";
+			case CodeExec::ExecutionState::YIELDED:		return "yielded";
+			case CodeExec::ExecutionState::INTERRUPTED:	return "interrupted";
+			case CodeExec::ExecutionState::HALTED:		return "halted";
+			case CodeExec::ExecutionState::ERROR:		return "error";
+			default:									return "unknown";
+		}
+	}
+
+	void wiiuScriptTrace(const char* message, CodeExec::ExecutionState state, size_t callStackSize = size_t(-1))
+	{
+		if constexpr (!ENABLE_WIIU_SCRIPT_TRACE)
+			return;
+
+		static int sLogCount = 0;
+		if (sLogCount >= 512)
+			return;
+
+		if (callStackSize == size_t(-1))
+		{
+			RMX_LOG_INFO("[WiiU Script] " << message << " state=" << getExecutionStateName(state));
+		}
+		else
+		{
+			RMX_LOG_INFO("[WiiU Script] " << message << " state=" << getExecutionStateName(state) << " stack=" << callStackSize);
+		}
+		++sLogCount;
+	}
+#endif
+
 	const std::vector<GameProfile::LemonStackEntry>* getLemonStackByAsmStack(const std::vector<uint32>& asmStack, bool includesPC)
 	{
 		// Try to find the right stack
@@ -329,6 +368,10 @@ bool CodeExec::reloadScripts(bool enforceFullReload, bool retainRuntimeState)
 {
 	const Configuration& config = Configuration::instance();
 
+#if defined(PLATFORM_WIIU)
+	wiiuScriptTrace("reloadScripts: begin", mExecutionState);
+#endif
+
 	if (retainRuntimeState)
 	{
 		// If the runtime is already active, save its current state
@@ -356,13 +399,25 @@ bool CodeExec::reloadScripts(bool enforceFullReload, bool retainRuntimeState)
 	const std::wstring mainScriptPath = config.mScriptsDir + config.mMainScriptName;
 
 	const LemonScriptProgram::LoadScriptsResult result = mLemonScriptProgram.loadScripts(mainScriptPath, options);
+#if defined(PLATFORM_WIIU)
+	WIIU_SCRIPT_TRACE_LOG("[WiiU Script] reloadScripts: loadScripts result=" << (int)result);
+#endif
 	if (result == LemonScriptProgram::LoadScriptsResult::PROGRAM_CHANGED)
 	{
 		lemon::Runtime::setActiveEnvironment(&mRuntimeEnvironment);
+#if defined(PLATFORM_WIIU)
+		WIIU_SCRIPT_TRACE_LOG("[WiiU Script] reloadScripts: onProgramUpdated begin");
+#endif
 		mLemonScriptRuntime.onProgramUpdated();
+#if defined(PLATFORM_WIIU)
+		WIIU_SCRIPT_TRACE_LOG("[WiiU Script] reloadScripts: onProgramUpdated end");
+#endif
 	}
 	cleanScriptDebug();
 
+#if defined(PLATFORM_WIIU)
+	wiiuScriptTrace("reloadScripts: end", mExecutionState);
+#endif
 	return (result != LemonScriptProgram::LoadScriptsResult::FAILED);
 }
 
@@ -384,6 +439,10 @@ void CodeExec::restoreRuntimeState(bool hasSaveState)
 void CodeExec::reinitRuntime(const LemonScriptRuntime::CallStackWithLabels* enforcedCallStack, CallStackInitPolicy callStackInitPolicy, const std::vector<uint8>* serializedRuntimeState)
 {
 	cleanScriptDebug();
+
+#if defined(PLATFORM_WIIU)
+	WIIU_SCRIPT_TRACE_LOG("[WiiU Script] reinitRuntime: begin policy=" << (int)callStackInitPolicy << " serialized=" << (nullptr != serializedRuntimeState && !serializedRuntimeState->empty()));
+#endif
 
 	if (callStackInitPolicy == CallStackInitPolicy::USE_EXISTING)
 	{
@@ -466,17 +525,32 @@ void CodeExec::reinitRuntime(const LemonScriptRuntime::CallStackWithLabels* enfo
 		if (!success || mLemonScriptRuntime.getCallStackSize() == 0)
 		{
 			// Start from scratch
+#if defined(PLATFORM_WIIU)
+			WIIU_SCRIPT_TRACE_LOG("[WiiU Script] reinitRuntime: call Engine.scriptMainEntryPoint begin");
+#endif
 			mLemonScriptRuntime.callFunctionByName("Engine.scriptMainEntryPoint", true);
+#if defined(PLATFORM_WIIU)
+			WIIU_SCRIPT_TRACE_LOG("[WiiU Script] reinitRuntime: call Engine.scriptMainEntryPoint end stack=" << mLemonScriptRuntime.getCallStackSize());
+#endif
 		}
 	}
 
 	// Execute init once
+#if defined(PLATFORM_WIIU)
+	WIIU_SCRIPT_TRACE_LOG("[WiiU Script] reinitRuntime: call Engine.onScriptInitialization begin");
+#endif
 	mLemonScriptRuntime.callFunctionByName("Engine.onScriptInitialization", false);
+#if defined(PLATFORM_WIIU)
+	WIIU_SCRIPT_TRACE_LOG("[WiiU Script] reinitRuntime: call Engine.onScriptInitialization end stack=" << mLemonScriptRuntime.getCallStackSize());
+#endif
 
 	EngineMain::getDelegate().onRuntimeInit(*this);
 
 	mExecutionState = ExecutionState::READY;
 	mAccumulatedStepsOfCurrentFrame = 0;
+#if defined(PLATFORM_WIIU)
+	wiiuScriptTrace("reinitRuntime: ready", mExecutionState, mLemonScriptRuntime.getCallStackSize());
+#endif
 }
 
 bool CodeExec::performFrameUpdate()
@@ -487,6 +561,9 @@ bool CodeExec::performFrameUpdate()
 	lemon::Runtime::setActiveEnvironment(&mRuntimeEnvironment);
 
 	const bool beginningNewFrame = (mExecutionState != ExecutionState::INTERRUPTED);
+#if defined(PLATFORM_WIIU)
+	wiiuScriptTrace("performFrameUpdate: begin", mExecutionState, mLemonScriptRuntime.getCallStackSize());
+#endif
 	if (beginningNewFrame)
 	{
 		mAccumulatedStepsOfCurrentFrame = 0;
@@ -513,11 +590,23 @@ bool CodeExec::performFrameUpdate()
 
 		// Perform pre-update hook, if there is one
 		//  -> This acts like a call from wherever the last script execution stopped / yielded
+#if defined(PLATFORM_WIIU)
+		WIIU_SCRIPT_TRACE_LOG("[WiiU Script] performFrameUpdate: pre-update hook begin");
+#endif
 		tryCallUpdateHook(false, &mMainCallFrameTracking);
+#if defined(PLATFORM_WIIU)
+		WIIU_SCRIPT_TRACE_LOG("[WiiU Script] performFrameUpdate: pre-update hook end stack=" << mLemonScriptRuntime.getCallStackSize());
+#endif
 	}
 
 	// Run script
+#if defined(PLATFORM_WIIU)
+	WIIU_SCRIPT_TRACE_LOG("[WiiU Script] performFrameUpdate: run main begin stack=" << mLemonScriptRuntime.getCallStackSize());
+#endif
 	runScript(false, &mMainCallFrameTracking);
+#if defined(PLATFORM_WIIU)
+	WIIU_SCRIPT_TRACE_LOG("[WiiU Script] performFrameUpdate: run main end state=" << getExecutionStateName(mExecutionState) << " stack=" << mLemonScriptRuntime.getCallStackSize());
+#endif
 
 	const bool completedNewFrame = (mExecutionState == ExecutionState::YIELDED);
 	if (completedNewFrame)
@@ -526,12 +615,21 @@ bool CodeExec::performFrameUpdate()
 		//  -> Note that the hook must yield execution, otherwise parts of the next frame get executed
 		if (canExecute() && tryCallUpdateHook(true, &mMainCallFrameTracking))
 		{
+#if defined(PLATFORM_WIIU)
+			WIIU_SCRIPT_TRACE_LOG("[WiiU Script] performFrameUpdate: post-update hook run begin stack=" << mLemonScriptRuntime.getCallStackSize());
+#endif
 			runScript(true, &mMainCallFrameTracking);
+#if defined(PLATFORM_WIIU)
+			WIIU_SCRIPT_TRACE_LOG("[WiiU Script] performFrameUpdate: post-update hook run end state=" << getExecutionStateName(mExecutionState) << " stack=" << mLemonScriptRuntime.getCallStackSize());
+#endif
 		}
 		mAccumulatedStepsOfCurrentFrame = 0;
 	}
 
 	// Return whether the frame was completed in any way (halted counts as completed)
+#if defined(PLATFORM_WIIU)
+	wiiuScriptTrace("performFrameUpdate: end", mExecutionState, mLemonScriptRuntime.getCallStackSize());
+#endif
 	return (mExecutionState != ExecutionState::INTERRUPTED);
 }
 
@@ -653,6 +751,10 @@ void CodeExec::runScript(bool executeSingleFunction, CallFrameTracking* callFram
 	if (!canExecute())
 		return;
 
+#if defined(PLATFORM_WIIU)
+	WIIU_SCRIPT_TRACE_LOG("[WiiU Script] runScript: begin single=" << executeSingleFunction << " state=" << getExecutionStateName(mExecutionState) << " stack=" << mLemonScriptRuntime.getCallStackSize());
+#endif
+
 	mActiveInstance = this;
 	mCurrentlyRunningScript = true;
 	const size_t abortOnCallStackSize = executeSingleFunction ? (std::max<size_t>(mLemonScriptRuntime.getCallStackSize(), 1) - 1) : 0;
@@ -669,6 +771,17 @@ void CodeExec::runScript(bool executeSingleFunction, CallFrameTracking* callFram
 		try
 		{
 			const bool success = (nullptr != mActiveCallFrameTracking) ? executeRuntimeStepsDev(stepsExecutedThisCall, abortOnCallStackSize) : executeRuntimeSteps(stepsExecutedThisCall, abortOnCallStackSize);
+#if defined(PLATFORM_WIIU)
+			static int sRuntimeStepLogCount = 0;
+			if constexpr (ENABLE_WIIU_SCRIPT_TRACE)
+			{
+				if (sRuntimeStepLogCount < 256)
+				{
+					RMX_LOG_INFO("[WiiU Script] runScript: executeRuntimeSteps success=" << success << " steps=" << stepsExecutedThisCall << " stack=" << mLemonScriptRuntime.getCallStackSize());
+					++sRuntimeStepLogCount;
+				}
+			}
+#endif
 			if (!success)
 			{
 				if (executeSingleFunction)
@@ -832,6 +945,9 @@ void CodeExec::runScript(bool executeSingleFunction, CallFrameTracking* callFram
 	mAccumulatedStepsOfCurrentFrame += stepsCounter;
 	mCurrentlyRunningScript = false;
 	mActiveInstance = nullptr;
+#if defined(PLATFORM_WIIU)
+	WIIU_SCRIPT_TRACE_LOG("[WiiU Script] runScript: end single=" << executeSingleFunction << " state=" << getExecutionStateName(mExecutionState) << " steps=" << stepsCounter << " stack=" << mLemonScriptRuntime.getCallStackSize());
+#endif
 }
 
 bool CodeExec::executeRuntimeSteps(size_t& stepsExecuted, size_t minimumCallStackSize)
@@ -867,7 +983,28 @@ bool CodeExec::executeRuntimeStepsDev(size_t& stepsExecuted, size_t minimumCallS
 
 bool CodeExec::tryCallAddressHook(uint32 address)
 {
+#if defined(PLATFORM_WIIU)
+	static int sAddressHookLogCount = 0;
+	if constexpr (ENABLE_WIIU_SCRIPT_TRACE)
+	{
+		if (sAddressHookLogCount < 256)
+		{
+			RMX_LOG_INFO("[WiiU Script] tryCallAddressHook: begin address=0x" << rmx::hexString(address, 8));
+			++sAddressHookLogCount;
+		}
+	}
+#endif
 	const bool handled = mLemonScriptRuntime.callAddressHook(address);
+#if defined(PLATFORM_WIIU)
+	if constexpr (ENABLE_WIIU_SCRIPT_TRACE)
+	{
+		if (sAddressHookLogCount < 256)
+		{
+			RMX_LOG_INFO("[WiiU Script] tryCallAddressHook: end address=0x" << rmx::hexString(address, 8) << " handled=" << handled << " stack=" << mLemonScriptRuntime.getCallStackSize());
+			++sAddressHookLogCount;
+		}
+	}
+#endif
 	return handled;
 }
 
@@ -898,8 +1035,14 @@ bool CodeExec::tryCallAddressHookDev(uint32 address)
 
 bool CodeExec::tryCallUpdateHook(bool postUpdate, CallFrameTracking* callFrameTracking)
 {
+#if defined(PLATFORM_WIIU)
+	WIIU_SCRIPT_TRACE_LOG("[WiiU Script] tryCallUpdateHook: begin post=" << postUpdate << " stack=" << mLemonScriptRuntime.getCallStackSize());
+#endif
 	if (mLemonScriptRuntime.callUpdateHook(postUpdate))
 	{
+#if defined(PLATFORM_WIIU)
+		WIIU_SCRIPT_TRACE_LOG("[WiiU Script] tryCallUpdateHook: hooked post=" << postUpdate << " stack=" << mLemonScriptRuntime.getCallStackSize());
+#endif
 		if (nullptr != callFrameTracking)
 		{
 			CallFrame& callFrame = callFrameTracking->pushCallFrame(CallFrame::Type::SCRIPT_DIRECT);
@@ -907,6 +1050,9 @@ bool CodeExec::tryCallUpdateHook(bool postUpdate, CallFrameTracking* callFrameTr
 		}
 		return true;
 	}
+#if defined(PLATFORM_WIIU)
+	WIIU_SCRIPT_TRACE_LOG("[WiiU Script] tryCallUpdateHook: none post=" << postUpdate);
+#endif
 	return false;
 }
 

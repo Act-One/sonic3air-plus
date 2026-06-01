@@ -160,10 +160,22 @@ public:
 	}
 
 private:
-	ObjectPool<PlaneGeometry, 16>		 mPlaneGeometryBuffer;
-	ObjectPool<SpriteGeometry, 64>		 mSpriteGeometryBuffer;
-	ObjectPool<RectGeometry, 64>		 mRectGeometryBuffer;
-	ObjectPool<TexturedRectGeometry, 64> mTexturedRectGeometryBuffer;
-	ObjectPool<EffectBlurGeometry, 4>	 mEffectBlurGeometryBuffer;
-	ObjectPool<ViewportGeometry, 4>		 mViewportGeometryBuffer;
+#if defined(PLATFORM_WIIU)
+	static constexpr size_t PLANE_POOL_PAGE_SIZE = 32;
+	static constexpr size_t SPRITE_POOL_PAGE_SIZE = 256;
+	static constexpr size_t RECT_POOL_PAGE_SIZE = 128;
+	static constexpr size_t TEXTURED_RECT_POOL_PAGE_SIZE = 128;
+#else
+	static constexpr size_t PLANE_POOL_PAGE_SIZE = 16;
+	static constexpr size_t SPRITE_POOL_PAGE_SIZE = 64;
+	static constexpr size_t RECT_POOL_PAGE_SIZE = 64;
+	static constexpr size_t TEXTURED_RECT_POOL_PAGE_SIZE = 64;
+#endif
+
+	ObjectPool<PlaneGeometry, PLANE_POOL_PAGE_SIZE>				 mPlaneGeometryBuffer;
+	ObjectPool<SpriteGeometry, SPRITE_POOL_PAGE_SIZE>			 mSpriteGeometryBuffer;
+	ObjectPool<RectGeometry, RECT_POOL_PAGE_SIZE>				 mRectGeometryBuffer;
+	ObjectPool<TexturedRectGeometry, TEXTURED_RECT_POOL_PAGE_SIZE> mTexturedRectGeometryBuffer;
+	ObjectPool<EffectBlurGeometry, 4>							 mEffectBlurGeometryBuffer;
+	ObjectPool<ViewportGeometry, 4>								 mViewportGeometryBuffer;
 };

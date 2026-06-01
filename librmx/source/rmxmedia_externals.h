@@ -44,8 +44,9 @@
 
 
 // OpenGL
+#ifdef RMX_WITH_OPENGL_SUPPORT
 #if defined(PLATFORM_UWP)
-	// UWP/Xbox builds currently use the software renderer path only.
+// UWP/Xbox SHOULD be using d3d11, but i think we're still on software
 
 #elif defined(PLATFORM_WINDOWS)
 	#define ALLOW_LEGACY_OPENGL
@@ -153,6 +154,7 @@
 
 #else
 	#error Unsupported platform
+#endif
 #endif
 
 

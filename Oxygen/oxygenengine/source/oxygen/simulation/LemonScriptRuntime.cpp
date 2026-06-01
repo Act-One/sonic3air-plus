@@ -29,6 +29,28 @@
 
 namespace
 {
+#if defined(PLATFORM_WIIU)
+	static constexpr bool ENABLE_WIIU_LEMON_TRACE = false;
+	#define WIIU_LEMON_TRACE_LOG(expr) do { if constexpr (ENABLE_WIIU_LEMON_TRACE) { RMX_LOG_INFO(expr); } } while (false)
+
+	std::string getWiiUFunctionName(const lemon::Function* function)
+	{
+		return (nullptr != function) ? std::string(function->getName().getString()) : std::string("<null>");
+	}
+
+	void wiiuLemonTrace(const char* message)
+	{
+		if constexpr (!ENABLE_WIIU_LEMON_TRACE)
+			return;
+
+		static int sLogCount = 0;
+		if (sLogCount < 512)
+		{
+			RMX_LOG_INFO("[WiiU Lemon] " << message);
+			++sLogCount;
+		}
+	}
+#endif
 
 	class RuntimeDetailHandler final : public lemon::RuntimeDetailHandler
 	{
@@ -137,14 +159,26 @@ bool LemonScriptRuntime::hasValidProgram() const
 
 void LemonScriptRuntime::onProgramUpdated()
 {
+#if defined(PLATFORM_WIIU)
+	WIIU_LEMON_TRACE_LOG("[WiiU Lemon] onProgramUpdated: setProgram begin functions=" << mProgram.getInternalLemonProgram().getFunctions().size() << " opt=" << mProgram.getInternalLemonProgram().getOptimizationLevel() << " nativeProvider=" << (nullptr != mProgram.getInternalLemonProgram().mNativizedOpcodeProvider));
+#endif
 	// Assign lemon script program to runtime, implicitly resetting the runtime as well
 	mInternal.mRuntime.setProgram(mProgram.getInternalLemonProgram());
+#if defined(PLATFORM_WIIU)
+	wiiuLemonTrace("onProgramUpdated: setProgram end");
+#endif
 
 	// Reset the lookup table for address hook runtime functions
 	mInternal.mAddressHookLookup.clear();
 
 	// Build all runtime functions right away
+#if defined(PLATFORM_WIIU)
+	wiiuLemonTrace("onProgramUpdated: buildAllRuntimeFunctions begin");
+#endif
 	mInternal.mRuntime.buildAllRuntimeFunctions();
+#if defined(PLATFORM_WIIU)
+	WIIU_LEMON_TRACE_LOG("[WiiU Lemon] onProgramUpdated: buildAllRuntimeFunctions end canExecute=" << mInternal.mRuntime.canExecuteSteps());
+#endif
 }
 
 bool LemonScriptRuntime::serializeRuntime(VectorBinarySerializer& serializer)
@@ -158,14 +192,32 @@ bool LemonScriptRuntime::callUpdateHook(bool postUpdate)
 	if (nullptr != hook)
 	{
 		RMX_ASSERT(nullptr != hook->mFunction, "Invalid update hook function");
+#if defined(PLATFORM_WIIU)
+		WIIU_LEMON_TRACE_LOG("[WiiU Lemon] callUpdateHook: queue post=" << postUpdate << " function=" << getWiiUFunctionName(hook->mFunction));
+#endif
 		mInternal.mRuntime.callFunction(*hook->mFunction);
+#if defined(PLATFORM_WIIU)
+		WIIU_LEMON_TRACE_LOG("[WiiU Lemon] callUpdateHook: queued post=" << postUpdate << " function=" << getWiiUFunctionName(hook->mFunction));
+#endif
 		return true;
 	}
+#if defined(PLATFORM_WIIU)
+	WIIU_LEMON_TRACE_LOG("[WiiU Lemon] callUpdateHook: none post=" << postUpdate);
+#endif
 	return false;
 }
 
 bool LemonScriptRuntime::callAddressHook(uint32 address)
 {
+#if defined(PLATFORM_WIIU)
+	static int sAddressHookLogCount = 0;
+	const bool logAddressHook = ENABLE_WIIU_LEMON_TRACE && (sAddressHookLogCount < 384);
+	if (logAddressHook)
+	{
+		RMX_LOG_INFO("[WiiU Lemon] callAddressHook: begin address=0x" << rmx::hexString(address, 8));
+		++sAddressHookLogCount;
+	}
+#endif
 	switch (address >> 28)
 	{
 		case 0:
@@ -174,6 +226,12 @@ bool LemonScriptRuntime::callAddressHook(uint32 address)
 			const lemon::RuntimeFunction** runtimeFunctionPtr = mInternal.mAddressHookLookup.find(address);
 			if (nullptr != runtimeFunctionPtr)
 			{
+#if defined(PLATFORM_WIIU)
+				if (logAddressHook)
+				{
+					RMX_LOG_INFO("[WiiU Lemon] callAddressHook: cached runtime function=" << getWiiUFunctionName((*runtimeFunctionPtr)->mFunction));
+				}
+#endif
 				mInternal.mRuntime.callRuntimeFunction(**runtimeFunctionPtr);
 			}
 			else
@@ -181,10 +239,24 @@ bool LemonScriptRuntime::callAddressHook(uint32 address)
 				// Get the hook from the program first
 				const LemonScriptProgram::Hook* hook = mProgram.checkForAddressHook(address);
 				if (nullptr == hook)
+				{
+#if defined(PLATFORM_WIIU)
+					if (logAddressHook)
+					{
+						RMX_LOG_INFO("[WiiU Lemon] callAddressHook: no hook address=0x" << rmx::hexString(address, 8));
+					}
+#endif
 					return false;
+				}
 
 				if (nullptr != hook->mLabel)
 				{
+#if defined(PLATFORM_WIIU)
+					if (logAddressHook)
+					{
+						RMX_LOG_INFO("[WiiU Lemon] callAddressHook: label function=" << getWiiUFunctionName(hook->mFunction));
+					}
+#endif
 					mInternal.mRuntime.callFunctionAtLabel(*hook->mFunction, *hook->mLabel);
 				}
 				else
@@ -194,6 +266,12 @@ bool LemonScriptRuntime::callAddressHook(uint32 address)
 					const lemon::RuntimeFunction* runtimeFunction = mInternal.mRuntime.getRuntimeFunction(*hook->mFunction);
 					if (nullptr != runtimeFunction)
 					{
+#if defined(PLATFORM_WIIU)
+						if (logAddressHook)
+						{
+							RMX_LOG_INFO("[WiiU Lemon] callAddressHook: runtime function=" << getWiiUFunctionName(hook->mFunction));
+						}
+#endif
 						mInternal.mAddressHookLookup.add(address, runtimeFunction);
 						mInternal.mRuntime.callRuntimeFunction(*runtimeFunction);
 					}
@@ -213,7 +291,15 @@ bool LemonScriptRuntime::callAddressHook(uint32 address)
 			// TODO: Optimize this by using a direct lookup from address to RuntimeFunction
 			const lemon::Function* function = mInternal.mRuntime.getProgram().resolveCallableFunctionAddress(address);
 			if (nullptr == function)
+			{
+#if defined(PLATFORM_WIIU)
+				if (logAddressHook)
+				{
+					RMX_LOG_INFO("[WiiU Lemon] callAddressHook: unresolved callable address=0x" << rmx::hexString(address, 8));
+				}
+#endif
 				return false;
+			}
 
 			switch (function->getType())
 			{
@@ -222,6 +308,12 @@ bool LemonScriptRuntime::callAddressHook(uint32 address)
 					const lemon::RuntimeFunction* runtimeFunction = mInternal.mRuntime.getRuntimeFunction(function->as<lemon::ScriptFunction>());
 					if (nullptr != runtimeFunction)
 					{
+#if defined(PLATFORM_WIIU)
+						if (logAddressHook)
+						{
+							RMX_LOG_INFO("[WiiU Lemon] callAddressHook: callable script=" << getWiiUFunctionName(function));
+						}
+#endif
 						mInternal.mRuntime.callRuntimeFunction(*runtimeFunction);
 						return true;
 					}
@@ -235,6 +327,12 @@ bool LemonScriptRuntime::callAddressHook(uint32 address)
 
 				case lemon::Function::Type::NATIVE:
 				{
+#if defined(PLATFORM_WIIU)
+					if (logAddressHook)
+					{
+						RMX_LOG_INFO("[WiiU Lemon] callAddressHook: callable native=" << getWiiUFunctionName(function));
+					}
+#endif
 					mInternal.mRuntime.callFunction(*function);
 					return true;
 				}
@@ -254,6 +352,9 @@ bool LemonScriptRuntime::callAddressHook(uint32 address)
 
 void LemonScriptRuntime::callFunction(const lemon::ScriptFunction& function)
 {
+#if defined(PLATFORM_WIIU)
+	WIIU_LEMON_TRACE_LOG("[WiiU Lemon] callFunction direct script=" << function.getName().getString());
+#endif
 	mInternal.mRuntime.callFunction(function);
 }
 

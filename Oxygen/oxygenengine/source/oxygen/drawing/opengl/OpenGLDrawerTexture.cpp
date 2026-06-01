@@ -24,19 +24,25 @@ void OpenGLDrawerTexture::updateFromBitmap(const Bitmap& bitmap)
 
 void OpenGLDrawerTexture::setupAsRenderTarget(const Vec2i& size)
 {
+	if (mTexture.isValid() && mTexture.getSize() == size && mFrameBuffer.getHandle() != 0)
+	{
+		return;
+	}
+
 	mTexture.setup(size, rmx::OpenGLHelper::FORMAT_RGBA);
 
 	if (mFrameBuffer.getHandle() == 0)
 	{
 		mFrameBuffer.create();
-		mFrameBuffer.attachTexture(GL_COLOR_ATTACHMENT0, mTexture.getHandle(), GL_TEXTURE_2D);
-	#if defined(PLATFORM_WIIU) && (defined(USE_GX2GL) && USE_GX2GL)
-		glDrawBuffer(GL_COLOR_ATTACHMENT0);
-		glReadBuffer(GL_COLOR_ATTACHMENT0);
-	#endif
-		mFrameBuffer.finishCreation();
-		mFrameBuffer.unbind();
 	}
+
+	mFrameBuffer.attachTexture(GL_COLOR_ATTACHMENT0, mTexture.getHandle(), GL_TEXTURE_2D);
+	#if defined(PLATFORM_WIIU) && (defined(USE_GX2GL) && USE_GX2GL)
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	#endif
+	mFrameBuffer.finishCreation();
+	mFrameBuffer.unbind();
 }
 
 void OpenGLDrawerTexture::writeContentToBitmap(Bitmap& outBitmap)

@@ -16,9 +16,16 @@
 #include "lemon/runtime/provider/NativizedOpcodeProvider.h"
 #include "lemon/program/Program.h"
 
-
+// keep this disabled unless you want to pay the penalties of what comes with the insane logging
+// probably only useful for Cemu for now, slows hardware to a crawl
 namespace lemon
 {
+	namespace
+	{
+	#if defined(PLATFORM_WIIU)
+		static constexpr bool ENABLE_WIIU_LEMON_RUNTIME_FUNCTION_TRACE = false;
+	#endif
+	}
 
 	RuntimeOpcodeBuffer::~RuntimeOpcodeBuffer()
 	{
@@ -93,6 +100,16 @@ namespace lemon
 		// First check if it is built already
 		if (!mRuntimeOpcodeBuffer.empty() || mFunction->mOpcodes.empty())
 			return true;
+
+#if defined(PLATFORM_WIIU)
+		static int sBuildLogCount = 0;
+		const bool logBuild = ENABLE_WIIU_LEMON_RUNTIME_FUNCTION_TRACE && (sBuildLogCount < 256);
+		if (logBuild)
+		{
+			RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build begin function=" << mFunction->getName() << " opcodes=" << mFunction->mOpcodes.size() << " opt=" << runtime.getProgram().getOptimizationLevel() << " nativeProvider=" << (nullptr != runtime.getProgram().mNativizedOpcodeProvider));
+			++sBuildLogCount;
+		}
+#endif
 
 		// Create the runtime opcodes
 		{
@@ -203,6 +220,12 @@ namespace lemon
 			}
 		}
 
+#if defined(PLATFORM_WIIU)
+		if (logBuild)
+		{
+			RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build end function=" << mFunction->getName() << " bytes=" << mRuntimeOpcodeBuffer.size() << " first=" << (const void*)mRuntimeOpcodeBuffer.getStart());
+		}
+#endif
 		return true;
 	}
 

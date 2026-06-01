@@ -19,6 +19,11 @@ namespace lemon
 {
 	namespace
 	{
+	#if defined(PLATFORM_WIIU)
+		static constexpr bool ENABLE_WIIU_LEMON_RUNTIME_TRACE = false;
+		#define WIIU_LEMON_RUNTIME_TRACE_LOG(expr) do { if constexpr (ENABLE_WIIU_LEMON_RUNTIME_TRACE) { RMX_LOG_INFO(expr); } } while (false)
+	#endif
+
 		int matchCallerProgramCounter(const Program& program, const ControlFlow::State& parentState, const ControlFlow::State& childLocation)
 		{
 			const std::vector<Opcode>& opcodes = parentState.mRuntimeFunction->mFunction->mOpcodes;
@@ -124,6 +129,8 @@ namespace lemon
 	void Runtime::reset()
 	{
 		mEncounteredBuildError = false;
+		mIsBuildingAllRuntimeFunctions = false;
+		mCompletedInitialRuntimeFunctionBuild = false;
 
 		clearAllControlFlows();
 
@@ -168,6 +175,9 @@ namespace lemon
 
 	void Runtime::setProgram(const Program& program)
 	{
+#if defined(PLATFORM_WIIU)
+		WIIU_LEMON_RUNTIME_TRACE_LOG("[WiiU Lemon] Runtime::setProgram begin functions=" << program.getFunctions().size() << " opt=" << program.getOptimizationLevel() << " nativeProvider=" << (nullptr != program.mNativizedOpcodeProvider));
+#endif
 		mProgram = &program;
 		for (ControlFlow* controlFlow : mControlFlows)
 		{
@@ -176,6 +186,9 @@ namespace lemon
 
 		reset();
 		setupGlobalVariables();
+#if defined(PLATFORM_WIIU)
+		WIIU_LEMON_RUNTIME_TRACE_LOG("[WiiU Lemon] Runtime::setProgram end runtimeFunctions=" << mRuntimeFunctions.size() << " strings=" << mStrings.size());
+#endif
 	}
 
 	void Runtime::setMemoryAccessHandler(MemoryAccessHandler* handler)
@@ -200,6 +213,13 @@ namespace lemon
 
 	void Runtime::buildAllRuntimeFunctions()
 	{
+		if (nullptr == mProgram)
+			return;
+
+#if defined(PLATFORM_WIIU)
+		WIIU_LEMON_RUNTIME_TRACE_LOG("[WiiU Lemon] Runtime::buildAllRuntimeFunctions begin");
+#endif
+		mIsBuildingAllRuntimeFunctions = true;
 		for (Function* function : mProgram->getFunctions())
 		{
 			if (function->isA<ScriptFunction>())
@@ -207,6 +227,11 @@ namespace lemon
 				getRuntimeFunction(function->as<ScriptFunction>());
 			}
 		}
+		mIsBuildingAllRuntimeFunctions = false;
+		mCompletedInitialRuntimeFunctionBuild = true;
+#if defined(PLATFORM_WIIU)
+		WIIU_LEMON_RUNTIME_TRACE_LOG("[WiiU Lemon] Runtime::buildAllRuntimeFunctions end error=" << mEncounteredBuildError);
+#endif
 	}
 
 	RuntimeFunction* Runtime::getRuntimeFunction(const ScriptFunction& scriptFunction)
@@ -216,6 +241,10 @@ namespace lemon
 			return nullptr;
 
 		RuntimeFunction* runtimeFunction = it->second;
+		if (!runtimeFunction->isBuilt() && mCompletedInitialRuntimeFunctionBuild && !mIsBuildingAllRuntimeFunctions)
+		{
+			reportLateRuntimeFunctionBuild(*runtimeFunction);
+		}
 		if (!runtimeFunction->build(*this))
 		{
 			mEncounteredBuildError = true;
@@ -232,8 +261,35 @@ namespace lemon
 			return nullptr;
 
 		RuntimeFunction* runtimeFunction = it->second[index];
-		runtimeFunction->build(*this);
+		if (!runtimeFunction->isBuilt() && mCompletedInitialRuntimeFunctionBuild && !mIsBuildingAllRuntimeFunctions)
+		{
+			reportLateRuntimeFunctionBuild(*runtimeFunction);
+		}
+		if (!runtimeFunction->build(*this))
+		{
+			mEncounteredBuildError = true;
+			return nullptr;
+		}
 		return runtimeFunction;
+	}
+
+	void Runtime::reportLateRuntimeFunctionBuild(const RuntimeFunction& runtimeFunction) const
+	{
+	#if defined(PLATFORM_WIIU)
+		static int sLateBuildLogCount = 0;
+		if (sLateBuildLogCount < 32)
+		{
+			if (nullptr != runtimeFunction.mFunction)
+			{
+				RMX_LOG_WARNING("Late LemonScript RuntimeFunction build on Wii U: " << runtimeFunction.mFunction->getName());
+			}
+			else
+			{
+				RMX_LOG_WARNING("Late LemonScript RuntimeFunction build on Wii U: <unknown>");
+			}
+			++sLateBuildLogCount;
+		}
+	#endif
 	}
 
 	bool Runtime::hasStringWithKey(uint64 key) const
@@ -287,6 +343,18 @@ namespace lemon
 		{
 			throw std::runtime_error("Reached var stack limit, possibly due to recursive function calls");
 		}
+// lots of logging to trace the lemonscript shakiness 
+#if defined(PLATFORM_WIIU)
+		static int sCallLogCount = 0;
+		if constexpr (ENABLE_WIIU_LEMON_RUNTIME_TRACE)
+		{
+			if (sCallLogCount < 512)
+			{
+				RMX_LOG_INFO("[WiiU Lemon] Runtime::callRuntimeFunction function=" << runtimeFunction.mFunction->getName() << " base=" << baseCallIndex << " stackBefore=" << mSelectedControlFlow->mCallStack.count << " pc=" << (const void*)runtimeFunction.getFirstRuntimeOpcode());
+				++sCallLogCount;
+			}
+		}
+#endif
 
 		// Push new state to call stack
 		ControlFlow::State& state = *mSelectedControlFlow->mCallStack.add();
@@ -299,6 +367,17 @@ namespace lemon
 
 	void Runtime::callFunction(const Function& function, size_t baseCallIndex)
 	{
+#if defined(PLATFORM_WIIU)
+		static int sCallFunctionLogCount = 0;
+		if constexpr (ENABLE_WIIU_LEMON_RUNTIME_TRACE)
+		{
+			if (sCallFunctionLogCount < 512)
+			{
+				RMX_LOG_INFO("[WiiU Lemon] Runtime::callFunction type=" << (int)function.getType() << " function=" << function.getName() << " base=" << baseCallIndex << " stackBefore=" << mSelectedControlFlow->mCallStack.count);
+				++sCallFunctionLogCount;
+			}
+		}
+#endif
 		switch (function.getType())
 		{
 			case Function::Type::SCRIPT:
@@ -382,7 +461,7 @@ namespace lemon
 			return false;
 
 		const DataTypeDefinition& returnType = (nullptr != params.mReturnType) ? *params.mReturnType : PredefinedDataTypes::VOID;
-
+		// the function signature hash has notoriously been a wall of pain for wii u
 		// Build the function signature hash
 		uint32 signatureHash = Function::getVoidSignatureHash();
 		if (!returnType.isA<VoidDataType>() || !params.mParams.empty())
@@ -718,6 +797,14 @@ namespace lemon
 			}
 
 			// Failed
+#if defined(PLATFORM_WIIU)
+			static int sFailedCallLogCount = 0;
+			if (sFailedCallLogCount < 64)
+			{
+				RMX_LOG_WARNING("[WiiU Lemon] Runtime::handleResultCall failed target=0x" << rmx::hexString(callTarget, 16) << " base=" << baseCallIndex);
+				++sFailedCallLogCount;
+			}
+#endif
 			return nullptr;
 		}
 	}

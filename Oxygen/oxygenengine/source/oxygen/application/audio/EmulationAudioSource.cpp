@@ -143,7 +143,11 @@ bool EmulationAudioSource::jobFunc()
 	// Update in increments of around 2 ms per "jobFunc" call, but at least 25 ms for the first update
 	//  -> The worker threads should update all audio sources in parallel (using relatively small increments), instead of updating one completely, then the next, etc.
 	//  -> On the other hand, the very first update should at least cover one complete sample buffer size (usually 1024 samples, which is around 23 ms, at 44.1 kHz)
+#if defined(PLATFORM_WIIU)
+	const float targetTime = clamp(mPrecacheTime, 0.05f, mAudioBuffer.getLengthInSec() + 0.008f);
+#else
 	const float targetTime = clamp(mPrecacheTime, 0.025f, mAudioBuffer.getLengthInSec() + 0.002f);
+#endif
 	while (mAudioBuffer.getLengthInSec() < targetTime && shouldJobBeRunning())
 	{
 		const SoundDriver::UpdateResult updateResult = mSoundDriver.update();

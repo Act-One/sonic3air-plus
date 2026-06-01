@@ -13,9 +13,21 @@
 #include "lemon/runtime/OpcodeExecUtils.h"
 #include "lemon/program/Program.h"
 
-
+// endian safety for big endian (which is currently only relevant to Wii U)
 namespace lemon
 {
+	namespace
+	{
+		FORCE_INLINE uint8* getScriptSlotPointerForType(int64* slot, BaseType baseType)
+		{
+			const size_t bytes = BaseTypeHelper::getSizeOfBaseType(baseType);
+		#if defined(PLATFORM_WIIU) || defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+			if (bytes > 0 && bytes < sizeof(int64))
+				return reinterpret_cast<uint8*>(slot) + (sizeof(int64) - bytes);
+		#endif
+			return reinterpret_cast<uint8*>(slot);
+		}
+	}
 
 	#define SELECT_EXEC_FUNC_BY_DATATYPE(_function_, _datatype_) \
 	{ \
@@ -343,7 +355,7 @@ namespace lemon
 						{
 							const GlobalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<GlobalVariable>();
 							int64* value = const_cast<Runtime&>(runtime).accessGlobalVariableValue(variable);
-							runtimeOpcode.setParameter(value);
+							runtimeOpcode.setParameter(getScriptSlotPointerForType(value, opcodes[0].mDataType));
 
 							switch (BaseTypeHelper::getSizeOfBaseType(opcodes[0].mDataType))
 							{

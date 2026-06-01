@@ -8,6 +8,10 @@
 
 #include "oxygen/pch.h"
 #include "oxygen/simulation/bindings/RendererBindings.h"
+
+#if defined(PLATFORM_WIIU) && !defined(S3AIR_WIIU_TRACE_RENDER_BINDINGS)
+	#define S3AIR_WIIU_TRACE_RENDER_BINDINGS 0
+#endif
 #include "oxygen/simulation/bindings/LemonScriptBindings.h"
 #include "oxygen/application/Configuration.h"
 #include "oxygen/application/video/VideoOut.h"
@@ -29,6 +33,32 @@ namespace
 	Vec2i getSafeGameScreenSize()
 	{
 		Vec2i screenSize = VideoOut::instance().getScreenSize();
+#if defined(PLATFORM_WIIU)
+		const Vec2i configuredSize = Configuration::instance().mGameScreen;
+		if (configuredSize.x >= 128 && configuredSize.x <= 512 && configuredSize.y >= 128 && configuredSize.y <= 256
+			&& (screenSize.x > configuredSize.x || screenSize.y > configuredSize.y))
+		{
+			static bool sLoggedConfiguredFallback = false;
+			if (!sLoggedConfiguredFallback)
+			{
+				sLoggedConfiguredFallback = true;
+				RMX_LOG_INFO("RendererBindings: using configured Wii U game screen size "
+					<< configuredSize.x << " x " << configuredSize.y
+					<< " instead of VideoOut size " << screenSize.x << " x " << screenSize.y);
+			}
+			screenSize = configuredSize;
+		}
+		if (screenSize.x < 128 || screenSize.x > 512 || screenSize.y < 128 || screenSize.y > 256)
+		{
+			static bool sLoggedWiiUFallback = false;
+			if (!sLoggedWiiUFallback)
+			{
+				sLoggedWiiUFallback = true;
+				RMX_LOG_INFO("RendererBindings: using Wii U logical game screen size because the reported size was " << screenSize.x << " x " << screenSize.y);
+			}
+			screenSize.set(400, 224);
+		}
+#else
 		if (screenSize.x < 128 || screenSize.x > 1024 || screenSize.y < 128 || screenSize.y > 1024)
 		{
 			static bool sLoggedFallback = false;
@@ -39,6 +69,7 @@ namespace
 			}
 			screenSize = Configuration::instance().mGameScreen;
 		}
+#endif
 #if defined(PLATFORM_WIIU)
 		static int sLoggedWidth = -1;
 		static int sLoggedHeight = -1;
@@ -483,7 +514,7 @@ namespace
 
 	void Renderer_drawVdpSprite(int16 px, int16 py, uint8 encodedSize, uint16 patternIndex, uint16 renderQueue)
 	{
-#if defined(S3AIR_WIIU_TRACE_RENDER_BINDINGS)
+#if S3AIR_WIIU_TRACE_RENDER_BINDINGS
 		static int sVdpSpriteLogCount = 0;
 		if (sVdpSpriteLogCount < 96 && renderQueue >= 0x9000)
 		{
@@ -564,7 +595,7 @@ namespace
 
 	void Renderer_drawSprite1(uint64 key, int16 px, int16 py, uint16 atex, uint8 flags, uint16 renderQueue)
 	{
-#if defined(S3AIR_WIIU_TRACE_RENDER_BINDINGS)
+#if S3AIR_WIIU_TRACE_RENDER_BINDINGS
 		static int sCustomSpriteLogCount = 0;
 		if (sCustomSpriteLogCount < 64 && renderQueue >= 0x9000)
 		{

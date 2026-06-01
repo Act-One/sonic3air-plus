@@ -53,6 +53,7 @@ void RenderParts::refresh(const RefreshParameters& refreshParameters)
 		mPatternManager.refresh();
 		mPlaneManager.refresh();
 		mScrollOffsetsManager.refresh(refreshParameters);
+		EmulatorInterface::instance().getVRamChangeBits().clearAllBits();
 	}
 }
 

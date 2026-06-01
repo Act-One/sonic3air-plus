@@ -72,7 +72,7 @@ bin/
 /artifacts/
 /temp/
 /build-wiiu/
-/sonic3air/
+/sonic3air/*
 
 # Xcode
 /Oxygen/sonic3air/build/_xcode/sonic3air.xcodeproj/project.xcworkspace/xcuserdata/*

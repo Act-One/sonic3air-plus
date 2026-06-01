@@ -69,6 +69,9 @@ bool ConfigurationImpl::loadConfigurationInternal(JsonSerializer& serializer)
 	// Add special preprocessor define
 	//  -> Used to query whether it's the game build (i.e. not the Oxygen App), and to get its build number
 	mPreprocessorDefinitions.setDefinition("GAMEAPP", BUILD_NUMBER);
+#if defined(PLATFORM_WIIU)
+	mPreprocessorDefinitions.setDefinition("WIIU");
+#endif
 
 	// Setup the default game profile data accordingly
 	fillDefaultGameProfile(GameProfile::instance());
@@ -82,6 +85,19 @@ bool ConfigurationImpl::loadSettingsInternal(JsonSerializer& serializer, Setting
 		return true;
 
 	serializeSettingsInternal(serializer);
+
+#if defined(PLATFORM_WIIU)
+	if (mSimulationFrequency != 60)
+	{
+		RMX_LOG_INFO("Configuration: Wii U forcing simulation frequency " << mSimulationFrequency << " -> 60");
+		mSimulationFrequency = 60;
+	}
+	if (mFrameSync != Configuration::FrameSyncType::VSYNC_ON)
+	{
+		RMX_LOG_INFO("Configuration: Wii U forcing frame sync " << (int)mFrameSync << " -> VSync On");
+		mFrameSync = Configuration::FrameSyncType::VSYNC_ON;
+	}
+#endif
 
 	if (mGameServerBase.mServerHostName == "sonic3air.org")
 		mGameServerBase.mServerHostName = "gameserver.sonic3air.org";

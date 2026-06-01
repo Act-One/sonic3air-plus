@@ -13,6 +13,7 @@
 
 class DrawerTexture;
 class DrawCommandFactory;
+class GX2RenderResources;
 
 
 struct DrawerMeshVertex		// TODO: Rename to "DrawerMeshVertex_P2_T2" to be more specific here
@@ -55,7 +56,12 @@ public:
 		PRINT_TEXT,
 		PRINT_TEXT_W,
 		PUSH_SCISSOR,
-		POP_SCISSOR
+		POP_SCISSOR,
+#if defined(PLATFORM_WIIU)
+		GX2_PLANE,
+		GX2_VDP_SPRITE,
+		GX2_PALETTE_SPRITE
+#endif // please let this be the last wii u macro 
 	};
 
 public:
@@ -110,12 +116,15 @@ protected:
 	RectDrawCommand(const Recti& rect, const Color& color) : DrawCommand(Type::RECT), mRect(rect), mColor(color) {}
 	RectDrawCommand(const Recti& rect, DrawerTexture& texture) : DrawCommand(Type::RECT), mRect(rect), mTexture(&texture) {}
 	RectDrawCommand(const Recti& rect, DrawerTexture& texture, const Color& tintColor) : DrawCommand(Type::RECT), mRect(rect), mTexture(&texture), mColor(tintColor) {}
+	RectDrawCommand(const Recti& rect, DrawerTexture& texture, const Color& tintColor, const Color& addedColor) : DrawCommand(Type::RECT), mRect(rect), mTexture(&texture), mColor(tintColor), mAddedColor(addedColor) {}
 	RectDrawCommand(const Recti& rect, DrawerTexture& texture, const Vec2f& uv0, const Vec2f& uv1, const Color& tintColor) : DrawCommand(Type::RECT), mRect(rect), mTexture(&texture), mColor(tintColor), mUV0(uv0), mUV1(uv1) {}
+	RectDrawCommand(const Recti& rect, DrawerTexture& texture, const Vec2f& uv0, const Vec2f& uv1, const Color& tintColor, const Color& addedColor) : DrawCommand(Type::RECT), mRect(rect), mTexture(&texture), mColor(tintColor), mAddedColor(addedColor), mUV0(uv0), mUV1(uv1) {}
 
 public:
 	Recti mRect;
 	DrawerTexture* mTexture = nullptr;
 	Color mColor = Color::WHITE;
+	Color mAddedColor = Color::TRANSPARENT;
 	Vec2f mUV0 = Vec2f(0.0f, 0.0f);
 	Vec2f mUV1 = Vec2f(1.0f, 1.0f);
 };
@@ -169,12 +178,16 @@ class MeshDrawCommand final : public DrawCommand
 friend class ObjectPoolBase<MeshDrawCommand>;
 
 protected:
-	MeshDrawCommand(const std::vector<DrawerMeshVertex>& triangles, DrawerTexture& texture) : DrawCommand(Type::MESH), mTriangles(triangles), mTexture(&texture) {}
-	MeshDrawCommand(std::vector<DrawerMeshVertex>&& triangles, DrawerTexture& texture) : DrawCommand(Type::MESH), mTriangles(triangles), mTexture(&texture) {}
+	MeshDrawCommand(const std::vector<DrawerMeshVertex>& triangles, DrawerTexture& texture, const Color& tintColor = Color::WHITE, const Color& addedColor = Color::TRANSPARENT) :
+		DrawCommand(Type::MESH), mTriangles(triangles), mTexture(&texture), mTintColor(tintColor), mAddedColor(addedColor) {}
+	MeshDrawCommand(std::vector<DrawerMeshVertex>&& triangles, DrawerTexture& texture, const Color& tintColor = Color::WHITE, const Color& addedColor = Color::TRANSPARENT) :
+		DrawCommand(Type::MESH), mTriangles(triangles), mTexture(&texture), mTintColor(tintColor), mAddedColor(addedColor) {}
 
 public:
 	std::vector<DrawerMeshVertex> mTriangles;
 	DrawerTexture* mTexture = nullptr;
+	Color mTintColor = Color::WHITE;
+	Color mAddedColor = Color::TRANSPARENT;
 };
 
 
@@ -295,6 +308,82 @@ protected:
 	PopScissorDrawCommand() : DrawCommand(Type::POP_SCISSOR) {}
 };
 
+#if defined(PLATFORM_WIIU)
+class GX2PlaneDrawCommand final : public DrawCommand
+{
+friend class ObjectPoolBase<GX2PlaneDrawCommand>;
+
+protected:
+	GX2PlaneDrawCommand(GX2RenderResources& resources, const Recti& activeRect, int planeIndex, bool priorityFlag, uint8 scrollOffsets, const Vec2i& gameResolution) :
+		DrawCommand(Type::GX2_PLANE),
+		mResources(&resources),
+		mActiveRect(activeRect),
+		mPlaneIndex(planeIndex),
+		mPriorityFlag(priorityFlag),
+		mScrollOffsets(scrollOffsets),
+		mGameResolution(gameResolution)
+	{}
+
+public:
+	GX2RenderResources* mResources = nullptr;
+	Recti mActiveRect;
+	int mPlaneIndex = 0;
+	bool mPriorityFlag = false;
+	uint8 mScrollOffsets = 0;
+	Vec2i mGameResolution;
+};
+
+class GX2VdpSpriteDrawCommand final : public DrawCommand
+{
+friend class ObjectPoolBase<GX2VdpSpriteDrawCommand>;
+
+protected:
+	GX2VdpSpriteDrawCommand(GX2RenderResources& resources, const Recti& rect, const Vec2i& sizeInPatterns, const Vec2i& patternAndSplit, const Color& tintColor, const Color& addedColor) :
+		DrawCommand(Type::GX2_VDP_SPRITE),
+		mResources(&resources),
+		mRect(rect),
+		mSizeInPatterns(sizeInPatterns),
+		mFirstPattern((uint16)patternAndSplit.x),
+		mSplitY(patternAndSplit.y),
+		mTintColor(tintColor),
+		mAddedColor(addedColor)
+	{}
+
+public:
+	GX2RenderResources* mResources = nullptr;
+	Recti mRect;
+	Vec2i mSizeInPatterns;
+	uint16 mFirstPattern = 0;
+	int mSplitY = 0;
+	Color mTintColor = Color::WHITE;
+	Color mAddedColor = Color::TRANSPARENT;
+};
+
+class GX2PaletteSpriteDrawCommand final : public DrawCommand
+{
+friend class ObjectPoolBase<GX2PaletteSpriteDrawCommand>;
+
+protected:
+	GX2PaletteSpriteDrawCommand(const Recti& rect, DrawerTexture& dataTexture, const Vec2i& splitAndAtex, const Color& tintColor, const Color& addedColor) :
+		DrawCommand(Type::GX2_PALETTE_SPRITE),
+		mRect(rect),
+		mDataTexture(&dataTexture),
+		mSplitY(splitAndAtex.x),
+		mAtex((uint16)splitAndAtex.y),
+		mTintColor(tintColor),
+		mAddedColor(addedColor)
+	{}
+
+public:
+	Recti mRect;
+	DrawerTexture* mDataTexture = nullptr;
+	int mSplitY = 0;
+	uint16 mAtex = 0;
+	Color mTintColor = Color::WHITE;
+	Color mAddedColor = Color::TRANSPARENT;
+};
+#endif
+
 
 class DrawCommandFactory
 {
@@ -314,6 +403,11 @@ public:
 	ObjectPool<PrintTextWDrawCommand>			 mPrintTextWDrawCommands;
 	ObjectPool<PushScissorDrawCommand>			 mPushScissorDrawCommands;
 	ObjectPool<PopScissorDrawCommand>			 mPopScissorDrawCommands;
+#if defined(PLATFORM_WIIU)
+	ObjectPool<GX2PlaneDrawCommand>				 mGX2PlaneDrawCommands;
+	ObjectPool<GX2VdpSpriteDrawCommand>			 mGX2VdpSpriteDrawCommands;
+	ObjectPool<GX2PaletteSpriteDrawCommand>		 mGX2PaletteSpriteDrawCommands;
+#endif
 
 public:
 	void destroy(DrawCommand& drawCommand)
@@ -335,6 +429,11 @@ public:
 			case DrawCommand::Type::PRINT_TEXT_W:				mPrintTextWDrawCommands.destroyObject(drawCommand.as<PrintTextWDrawCommand>());  break;
 			case DrawCommand::Type::PUSH_SCISSOR:				mPushScissorDrawCommands.destroyObject(drawCommand.as<PushScissorDrawCommand>());  break;
 			case DrawCommand::Type::POP_SCISSOR:				mPopScissorDrawCommands.destroyObject(drawCommand.as<PopScissorDrawCommand>());  break;
+#if defined(PLATFORM_WIIU)
+			case DrawCommand::Type::GX2_PLANE:					mGX2PlaneDrawCommands.destroyObject(drawCommand.as<GX2PlaneDrawCommand>());  break;
+			case DrawCommand::Type::GX2_VDP_SPRITE:				mGX2VdpSpriteDrawCommands.destroyObject(drawCommand.as<GX2VdpSpriteDrawCommand>());  break;
+			case DrawCommand::Type::GX2_PALETTE_SPRITE:			mGX2PaletteSpriteDrawCommands.destroyObject(drawCommand.as<GX2PaletteSpriteDrawCommand>());  break;
+#endif
 			default:
 				break;	// This should never happen anyways
 		}

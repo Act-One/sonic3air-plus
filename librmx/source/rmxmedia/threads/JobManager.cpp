@@ -7,6 +7,10 @@
 */
 
 #include "rmxmedia.h"
+// the pain begins.
+#if defined(PLATFORM_WIIU)
+	#include <coreinit/thread.h>
+#endif
 
 
 namespace rmx
@@ -302,9 +306,14 @@ namespace rmx
 
 
 	JobWorkerThread::JobWorkerThread(JobManager& jobManager, int index) :
+		ThreadBase("rmx Job Worker " + std::to_string(index)),
 		mJobManager(jobManager)
 	{
-		// Index goes unused at the moment
+#if defined(PLATFORM_WIIU)
+		setWiiUThreadAffinity(OS_THREAD_ATTRIB_AFFINITY_CPU2);
+#else
+		(void)index;
+#endif
 	}
 
 	void JobWorkerThread::threadFunc()

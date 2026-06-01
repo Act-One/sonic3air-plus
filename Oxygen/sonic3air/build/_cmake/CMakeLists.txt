@@ -61,10 +61,73 @@ message(STATUS "PLATFORM_WIIU_BUILD = ${PLATFORM_WIIU_BUILD}")
 
 
 set(CMAKE_CXX_STANDARD 17)
-
+# used to stage the sd layout i think
 get_filename_component(WORKSPACE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../.." ABSOLUTE)
-get_filename_component(DEFAULT_GX2GL_DIR "${WORKSPACE_DIR}/../gx2gl" ABSOLUTE)
-set(GX2GL_DIR "${DEFAULT_GX2GL_DIR}" CACHE PATH "Path to the gx2gl checkout used by the Wii U build")
+
+if (PLATFORM_WIIU_BUILD)
+	set(S3AIR_WIIU_ASSET_DIR "${WORKSPACE_DIR}/assets/wiiu")
+	set(S3AIR_WIIU_WUHB_CONTENT_DIR "${CMAKE_CURRENT_BINARY_DIR}/wuhb-content")
+	set(S3AIR_WIIU_SD_APP_DIR "${CMAKE_CURRENT_BINARY_DIR}/sd/wiiu/apps/sonic3air")
+	set(S3AIR_WIIU_SD_LIB_DIR "${CMAKE_CURRENT_BINARY_DIR}/sd/wiiu/libs")
+	set(S3AIR_WIIU_BARE_CODE_DIR "${CMAKE_CURRENT_BINARY_DIR}/tiramisu/sonic3air" CACHE PATH "Bare RPX/Tiramisu code directory" FORCE)
+	set(S3AIR_WIIU_GLSLCOMPILER_RPL "${WORKSPACE_DIR}/../../../Documents/gx2gl/build/glslcompiler.rpl" CACHE FILEPATH "CafeGLSL glslcompiler.rpl")
+	set(S3AIR_WIIU_WUHB_ICON "${S3AIR_WIIU_ASSET_DIR}/wuhb_icon.png")
+	set(S3AIR_WIIU_WUHB_TV_SPLASH "${S3AIR_WIIU_ASSET_DIR}/wuhb_tv.png")
+	set(S3AIR_WIIU_WUHB_DRC_SPLASH "${S3AIR_WIIU_ASSET_DIR}/wuhb_drc.png")
+
+	if (NOT EXISTS "${S3AIR_WIIU_GLSLCOMPILER_RPL}")
+		message(FATAL_ERROR "Missing CafeGLSL glslcompiler.rpl: ${S3AIR_WIIU_GLSLCOMPILER_RPL}")
+	endif()
+	foreach(required_asset "${S3AIR_WIIU_WUHB_ICON}" "${S3AIR_WIIU_WUHB_TV_SPLASH}" "${S3AIR_WIIU_WUHB_DRC_SPLASH}")
+		if (NOT EXISTS "${required_asset}")
+			message(FATAL_ERROR "Missing Wii U WUHB asset: ${required_asset}")
+		endif()
+	endforeach()
+
+	add_custom_target(wiiu_layout ALL
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${S3AIR_WIIU_WUHB_CONTENT_DIR}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${S3AIR_WIIU_SD_APP_DIR}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${S3AIR_WIIU_SD_LIB_DIR}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${S3AIR_WIIU_BARE_CODE_DIR}"
+		COMMAND ${CMAKE_COMMAND} -E rm -f "${S3AIR_WIIU_WUHB_CONTENT_DIR}/glslcompiler.rpl"
+		COMMAND ${CMAKE_COMMAND} -E rm -rf "${S3AIR_WIIU_WUHB_CONTENT_DIR}/shaders"
+		COMMAND ${CMAKE_COMMAND} -E rm -f "${S3AIR_WIIU_SD_APP_DIR}/glslcompiler.rpl"
+		COMMAND ${CMAKE_COMMAND} -E rm -rf "${S3AIR_WIIU_SD_APP_DIR}/content"
+		COMMAND ${CMAKE_COMMAND} -E rm -rf "${S3AIR_WIIU_SD_APP_DIR}/scripts"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory "${WORKSPACE_DIR}/Oxygen/sonic3air/scripts" "${S3AIR_WIIU_SD_APP_DIR}/scripts"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${S3AIR_WIIU_GLSLCOMPILER_RPL}" "${S3AIR_WIIU_SD_LIB_DIR}/glslcompiler.rpl"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${S3AIR_WIIU_GLSLCOMPILER_RPL}" "${S3AIR_WIIU_BARE_CODE_DIR}/glslcompiler.rpl"
+		DEPENDS "${S3AIR_WIIU_GLSLCOMPILER_RPL}"
+		COMMENT "Staging glslcompiler.rpl for CafeGLSL"
+		VERBATIM
+	)
+endif()
+
+option(S3AIR_WIIU_ENABLE_LTO "Enable link-time optimization for Wii U release builds" ON)
+option(S3AIR_WIIU_BUILD_GX2GL_COMPAT "Build the legacy gx2gl/OpenGL compatibility renderer on Wii U" OFF)
+option(S3AIR_WIIU_BUILD_GX2VK "Build gx2vk alongside native GX2 for Wii U renderer experiments" OFF)
+option(S3AIR_WIIU_ENABLE_GX2VK_RENDERER "Enable Sonic 3 A.I.R.'s Vulkan renderer on Wii U through gx2vk" OFF)
+set(S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL "3" CACHE STRING "Forced LemonScript optimization level for Wii U builds")
+option(S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT "Disable Wii U LemonScript nativized provider for crash isolation" OFF)
+if (PLATFORM_WIIU_BUILD AND (S3AIR_WIIU_BUILD_GX2GL_COMPAT OR S3AIR_WIIU_BUILD_GX2VK OR S3AIR_WIIU_ENABLE_GX2VK_RENDERER))
+	message(FATAL_ERROR "Wii U build is native GX2 only; gx2gl/gx2vk are off.")
+endif()
+if (PLATFORM_WIIU_BUILD)
+	add_compile_definitions(WIIU_CPU_FASTPATH)
+	add_compile_definitions(S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL=${S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL})
+	if (S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT)
+		add_compile_definitions(S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT)
+	endif()
+	add_compile_options("$<$<CONFIG:Release>:-O3>")
+	if (S3AIR_WIIU_ENABLE_LTO)
+		add_compile_options("$<$<CONFIG:Release>:-flto>")
+		add_link_options("$<$<CONFIG:Release>:-flto>")
+	endif()
+endif()
+if (PLATFORM_WIIU_BUILD)
+	message(STATUS "S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL = ${S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL}")
+	message(STATUS "S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT = ${S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT}")
+endif()
 
 #add_definitions(-DDEBUG)
 if (USE_IMGUI)
@@ -154,19 +217,14 @@ if (USE_IMGUI)
 	include_directories(${WORKSPACE_DIR}/framework/external/imgui/imgui)
 endif()
 include_directories(${WORKSPACE_DIR}/librmx/source)
-include_directories(${WORKSPACE_DIR}/librmx/source/rmxmedia/_glew)
+if (NOT PLATFORM_WIIU_BUILD)
+	include_directories(${WORKSPACE_DIR}/librmx/source/rmxmedia/_glew)
+endif()
 include_directories(${WORKSPACE_DIR}/Oxygen/lemonscript/source)
 include_directories(${WORKSPACE_DIR}/Oxygen/oxygenengine/source)
 include_directories(${WORKSPACE_DIR}/Oxygen/oxygenserver/source)
 include_directories(${WORKSPACE_DIR}/Oxygen/sonic3air/source)
 include_directories(${WORKSPACE_DIR}/Oxygen/sonic3air/source/external)
-if (PLATFORM_WIIU_BUILD)
-	include_directories(${GX2GL_DIR}/include)
-	include_directories(${GX2GL_DIR}/src)
-endif()
-
-
-
 # ogg vorbis
 
 # TODO: I tried creating config_types.h by calling "./configure" by a add_custom_command,
@@ -195,47 +253,6 @@ endif()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 	target_compile_options(minizip PRIVATE -Wno-implicit-function-declaration -Wno-int-conversion)	# Silence these warnings in minizip build
-endif()
-
-
-
-# gx2gl
-if (PLATFORM_WIIU_BUILD)
-	set(GX2GL_SOURCES
-		${GX2GL_DIR}/src/core/gl_context.cpp
-		${GX2GL_DIR}/src/core/gl_buffer.cpp
-		${GX2GL_DIR}/src/core/gl_texture.cpp
-		${GX2GL_DIR}/src/core/gl_shader.cpp
-		${GX2GL_DIR}/src/core/gx2gl_cafeglsl.cpp
-		${GX2GL_DIR}/src/core/gx2gl_shader_compat.cpp
-		${GX2GL_DIR}/src/core/gx2gl_proc.cpp
-		${GX2GL_DIR}/src/core/gx2gl_sdl_bridge.cpp
-		${GX2GL_DIR}/src/core/gl_vao.cpp
-		${GX2GL_DIR}/src/core/gl_framebuffer.cpp
-		${GX2GL_DIR}/src/core/gl_draw.cpp
-		${GX2GL_DIR}/src/core/gl_get.cpp
-		${GX2GL_DIR}/src/state/gl_state.cpp
-		${GX2GL_DIR}/src/mem/gl_mem.cpp)
-
-	add_library(gx2gl STATIC ${GX2GL_SOURCES})
-	target_include_directories(gx2gl PUBLIC ${GX2GL_DIR}/include ${GX2GL_DIR}/src)
-	target_link_libraries(gx2gl PUBLIC wut)
-
-	option(S3AIR_WIIU_BUILD_GX2VK "Build gx2vk alongside gx2gl for Wii U renderer experiments" ON)
-	option(S3AIR_WIIU_ENABLE_GX2VK_RENDERER "Enable Sonic 3 A.I.R.'s Vulkan renderer on Wii U through gx2vk" OFF)
-	if (S3AIR_WIIU_BUILD_GX2VK)
-		set(GX2VK_SOURCES
-			${GX2GL_DIR}/src/vk/gx2vk_core.cpp
-			${GX2GL_DIR}/src/vk/gx2vk_memory.cpp
-			${GX2GL_DIR}/src/vk/gx2vk_cmd.cpp
-			${GX2GL_DIR}/src/vk/gx2vk_shader.cpp
-			${GX2GL_DIR}/src/vk/gx2vk_descriptor.cpp
-			${GX2GL_DIR}/src/vk/gx2vk_pipeline.cpp)
-
-		add_library(gx2vk STATIC ${GX2VK_SOURCES})
-		target_include_directories(gx2vk PUBLIC ${GX2GL_DIR}/include ${GX2GL_DIR}/src)
-		target_link_libraries(gx2vk PUBLIC wut)
-	endif()
 endif()
 
 
@@ -287,6 +304,13 @@ file(GLOB_RECURSE RMXMEDIA_SOURCES ${WORKSPACE_DIR}/librmx/source/rmxmedia/*.cpp
 								   ${WORKSPACE_DIR}/librmx/source/rmxmedia/_glew/*.c)
 if (PLATFORM_WIIU_BUILD)
 	list(FILTER RMXMEDIA_SOURCES EXCLUDE REGEX ".*/_glew/.*")
+	list(FILTER RMXMEDIA_SOURCES EXCLUDE REGEX ".*/opengl/.*")
+	list(FILTER RMXMEDIA_SOURCES EXCLUDE REGEX ".*/vulkan/.*")
+	foreach(src IN LISTS RMXMEDIA_SOURCES)
+		if (src MATCHES ".*/(_glew|opengl|vulkan)/.*")
+			message(FATAL_ERROR "Wii U rmxmedia picked up GL/Vulkan source: ${src}")
+		endif()
+	endforeach()
 endif()
 
 add_library(rmxmedia ${RMXMEDIA_SOURCES})
@@ -294,7 +318,6 @@ add_library(rmxmedia ${RMXMEDIA_SOURCES})
 target_link_libraries(rmxmedia rmxbase)
 if (PLATFORM_WIIU_BUILD)
 	target_link_libraries(rmxmedia wiiu_sdl2)
-	target_link_libraries(rmxmedia gx2gl)
 elseif (BUILD_SDL_STATIC)
 	target_link_libraries(rmxmedia SDL2-static)
 	target_link_libraries(rmxmedia ${SDL2_STATIC_LIBRARIES})
@@ -304,7 +327,6 @@ else()
 	target_link_libraries(rmxmedia SDL2)
 endif()
 if (PLATFORM_WIIU_BUILD)
-	# gx2gl provides the OpenGL entry points on top of GX2.
 elseif (USE_GLES)
 	target_link_libraries(rmxmedia GLESv2)
 else()
@@ -355,8 +377,23 @@ target_link_libraries(oxygen_netcore rmxbase)
 # oxygenengine
 
 file(GLOB_RECURSE OXYGEN_SOURCES ${WORKSPACE_DIR}/Oxygen/oxygenengine/source/oxygen/*.cpp)
+if (PLATFORM_WIIU_BUILD)
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/drawing/opengl/.*")
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/drawing/vulkan/.*")
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/rendering/opengl/.*")
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/rendering/vulkan/.*")
+	foreach(src IN LISTS OXYGEN_SOURCES)
+		if (src MATCHES ".*/(opengl|vulkan)/.*")
+			message(FATAL_ERROR "Wii U oxygen picked up GL/Vulkan source: ${src}")
+		endif()
+	endforeach()
+endif()
 
 add_library(oxygen ${OXYGEN_SOURCES})
+
+if (PLATFORM_WIIU_BUILD)
+	add_dependencies(oxygen wiiu_layout)
+endif()
 
 if (NOT CMAKE_VERSION VERSION_LESS "3.16.0")
 	# TODO: Precompiled headers lead to build errors with ImGui, there's a conflict between GLEW and ImGui's OpenGL headers
@@ -370,10 +407,6 @@ target_link_libraries(oxygen rmxext_oggvorbis)
 target_link_libraries(oxygen lemonscript)
 if (USE_IMGUI)
 	target_link_libraries(oxygen imgui)
-endif()
-if (PLATFORM_WIIU_BUILD AND S3AIR_WIIU_ENABLE_GX2VK_RENDERER AND TARGET gx2vk)
-	target_compile_definitions(oxygen PUBLIC OXYGEN_ENABLE_VULKAN_RENDERER S3AIR_WIIU_ENABLE_GX2VK_RENDERER)
-	target_link_libraries(oxygen gx2vk)
 endif()
 target_link_libraries(oxygen oxygen_netcore)
 
@@ -476,38 +509,36 @@ if (USE_DISCORD)
 endif()
 if (PLATFORM_WIIU_BUILD)
 	target_link_libraries(Sonic3AIR wut)
-	if (TARGET gx2vk)
-		target_link_libraries(Sonic3AIR gx2vk)
-	endif()
 	set_target_properties(Sonic3AIR PROPERTIES OUTPUT_NAME "sonic3air")
 	wut_create_rpx(Sonic3AIR)
-
-	set(S3AIR_WIIU_GLSLCOMPILER_RPL "${GX2GL_DIR}/build/glslcompiler.rpl" CACHE FILEPATH "Cafe GLSL compiler RPL copied into the Wii U WUHB content directory")
-	set(S3AIR_WIIU_WUHB_CONTENT_DIR "${CMAKE_CURRENT_BINARY_DIR}/wuhb-content")
-	file(MAKE_DIRECTORY "${S3AIR_WIIU_WUHB_CONTENT_DIR}")
-
-	if (EXISTS "${S3AIR_WIIU_GLSLCOMPILER_RPL}")
-		set(S3AIR_WIIU_WUHB_GLSLCOMPILER "${S3AIR_WIIU_WUHB_CONTENT_DIR}/glslcompiler.rpl")
-		add_custom_command(
-			OUTPUT "${S3AIR_WIIU_WUHB_GLSLCOMPILER}"
-			COMMAND ${CMAKE_COMMAND} -E make_directory "${S3AIR_WIIU_WUHB_CONTENT_DIR}"
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different "${S3AIR_WIIU_GLSLCOMPILER_RPL}" "${S3AIR_WIIU_WUHB_GLSLCOMPILER}"
-			DEPENDS "${S3AIR_WIIU_GLSLCOMPILER_RPL}"
-			COMMENT "Copying Cafe GLSL compiler into Wii U WUHB content"
-			VERBATIM
-		)
-		add_custom_target(Sonic3AIRWuhbContent ALL DEPENDS "${S3AIR_WIIU_WUHB_GLSLCOMPILER}")
-		wut_create_wuhb(Sonic3AIR_WUHB
-			TARGET Sonic3AIR
-			OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/sonic3air.wuhb"
-			CONTENT "${S3AIR_WIIU_WUHB_CONTENT_DIR}"
-			NAME "Sonic 3 A.I.R."
-			SHORTNAME "Sonic3AIR"
-			AUTHOR "Eukaryot / Act-One / gx2gl"
-		)
-		add_dependencies(Sonic3AIR_WUHB Sonic3AIRWuhbContent)
-	else()
-		message(WARNING "S3AIR_WIIU_GLSLCOMPILER_RPL was not found; WUHB creation is disabled until glslcompiler.rpl is available")
-	endif()
+	add_dependencies(Sonic3AIR wiiu_layout)
+	wut_create_wuhb(Sonic3AIR_WUHB
+		TARGET Sonic3AIR
+		OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/sonic3air.wuhb"
+		CONTENT "${S3AIR_WIIU_WUHB_CONTENT_DIR}"
+		NAME "Sonic 3 A.I.R."
+		SHORTNAME "Sonic 3 A.I.R."
+		AUTHOR "Eukaryot / Act-One"
+		ICON "${S3AIR_WIIU_WUHB_ICON}"
+		TVSPLASH "${S3AIR_WIIU_WUHB_TV_SPLASH}"
+		DRCSPLASH "${S3AIR_WIIU_WUHB_DRC_SPLASH}"
+	)
+	add_custom_command(TARGET Sonic3AIR POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:Sonic3AIR>" "${S3AIR_WIIU_BARE_CODE_DIR}/sonic3air.elf"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/sonic3air.rpx" "${S3AIR_WIIU_SD_APP_DIR}/sonic3air.rpx"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/sonic3air.rpx" "${S3AIR_WIIU_BARE_CODE_DIR}/sonic3air.rpx"
+		VERBATIM
+	)
+	add_custom_command(TARGET Sonic3AIR_WUHB POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/sonic3air.wuhb" "${S3AIR_WIIU_SD_APP_DIR}/sonic3air.wuhb"
+		VERBATIM
+	)
+	add_dependencies(Sonic3AIR_WUHB wiiu_layout)
+	foreach(tgt rmxmedia oxygen Sonic3AIR)
+		get_target_property(libs ${tgt} LINK_LIBRARIES)
+		if (libs MATCHES "gx2gl|gx2vk|OpenGL|GLES|Vulkan")
+			message(FATAL_ERROR "Wii U ${tgt} is linked to a GL/Vulkan wrapper: ${libs}")
+		endif()
+	endforeach()
 endif()
 

@@ -15,6 +15,21 @@
 
 namespace lemon
 {
+	namespace
+	{
+		FORCE_INLINE uint8* getScriptSlotPointerForType(int64* slot, BaseType baseType)
+		{
+			const size_t bytes = BaseTypeHelper::getSizeOfBaseType(baseType);
+		#if defined(PLATFORM_WIIU) || defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+			// LemonScript scalar globals live in 64-bit slots. Nativized code may bind
+			// narrower typed pointers directly, so big-endian hosts need the low bytes.
+			// Still not sure if this patch is correct.
+			if (bytes > 0 && bytes < sizeof(int64))
+				return reinterpret_cast<uint8*>(slot) + (sizeof(int64) - bytes);
+		#endif
+			return reinterpret_cast<uint8*>(slot);
+		}
+	}
 
 	void NativizedOpcodeProvider::buildLookup(BuildFunction buildFunction)
 	{
@@ -102,7 +117,7 @@ namespace lemon
 							const uint32 variableId = (uint32)opcode.mParameter;
 							const GlobalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<GlobalVariable>();
 							int64* valuePointer = const_cast<Runtime&>(runtime).accessGlobalVariableValue(variable);
-							runtimeOpcode.setParameter(valuePointer, parameter.mOffset);
+							runtimeOpcode.setParameter(getScriptSlotPointerForType(valuePointer, opcode.mDataType), parameter.mOffset);
 							break;
 						}
 

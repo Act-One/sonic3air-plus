@@ -183,6 +183,7 @@ namespace lemon
 
 	private:
 		void setupGlobalVariables();
+		void reportLateRuntimeFunctionBuild(const RuntimeFunction& runtimeFunction) const;
 
 	private:
 		inline static ControlFlow* mActiveControlFlow = nullptr;
@@ -209,6 +210,8 @@ namespace lemon
 
 		bool mEncounteredBuildError = false;			// Set if there was a fatal error in runtime function building
 		bool mReceivedStopSignal = false;
+		bool mIsBuildingAllRuntimeFunctions = false;
+		bool mCompletedInitialRuntimeFunctionBuild = false;
 		const RuntimeOpcode*const* mCurrentOpcodePtr = nullptr;
 	};
 

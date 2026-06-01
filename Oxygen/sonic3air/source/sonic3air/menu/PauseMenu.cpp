@@ -62,6 +62,10 @@ void PauseMenu::onFadeIn()
 	mVisibility = 0.0f;
 	mDialogVisibility = 0.0f;
 	mTimeShown = 0.0f;
+#if defined(PLATFORM_WIIU)
+	mState = State::SHOW;
+	mVisibility = 1.0f;
+#endif
 
 	// Really pause game simulation
 	Application::instance().getSimulation().setSpeed(0.0f);
@@ -283,8 +287,13 @@ void PauseMenu::render()
 
 	if (!mScreenshotMode)
 	{
-		const int screenWidth = (int)mRect.width;
-		const int screenHeight = (int)mRect.height;
+		int screenWidth = (int)mRect.width;
+		int screenHeight = (int)mRect.height;
+#if defined(PLATFORM_WIIU)
+		const Recti gameScreenRect = VideoOut::instance().getScreenRect();
+		screenWidth = clamp(gameScreenRect.width, 320, 400);
+		screenHeight = clamp(gameScreenRect.height, 200, 224);
+#endif
 
 		// Dialog box
 		if (mDialogVisibility > 0.0f)
@@ -324,8 +333,23 @@ void PauseMenu::render()
 		// Actual pause menu (upper & lower part)
 		{
 			const constexpr int LINE_HEIGHT = 26;
-			const int rightAnchor = screenWidth + roundToInt((1.0f - mVisibility) * 160.0f);
+			float menuVisibility = mVisibility;
+#if defined(PLATFORM_WIIU)
+			menuVisibility = 1.0f;
+#endif
+			const int rightAnchor = screenWidth + roundToInt((1.0f - menuVisibility) * 160.0f);
 			int py = screenHeight - (int)mMenuEntries.size() * LINE_HEIGHT;
+#if defined(PLATFORM_WIIU)
+			static uint32 sPauseLayoutLogCount = 0;
+			if (sPauseLayoutLogCount < 8)
+			{
+				RMX_LOG_INFO("PauseMenu: Wii U layout rect=" << gameScreenRect.width << "x" << gameScreenRect.height
+					<< " clamped=" << screenWidth << "x" << screenHeight
+					<< " rightAnchor=" << rightAnchor
+					<< " entries=" << mMenuEntries.size());
+				++sPauseLayoutLogCount;
+			}
+#endif
 
 			constexpr uint64 upperBGKey = rmx::constMurmur2_64("pause_screen_upper");
 			constexpr uint64 lowerBGKey = rmx::constMurmur2_64("pause_screen_lower");
@@ -370,6 +394,10 @@ void PauseMenu::render()
 void PauseMenu::onReturnFromOptions()
 {
 	mState = State::APPEAR;
+#if defined(PLATFORM_WIIU)
+	mState = State::SHOW;
+	mVisibility = 1.0f;
+#endif
 }
 
 void PauseMenu::resumeGame()

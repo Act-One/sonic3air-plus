@@ -56,6 +56,7 @@ namespace lemon
 	public:
 		bool build(Runtime& runtime);
 
+		inline bool isBuilt() const  { return (!mRuntimeOpcodeBuffer.empty() || nullptr == mFunction || mFunction->mOpcodes.empty()); }
 		const uint8* getFirstRuntimeOpcode() const	{ return mRuntimeOpcodeBuffer.getStart(); }
 
 		size_t translateFromRuntimeProgramCounter(const uint8* runtimeProgramCounter) const;

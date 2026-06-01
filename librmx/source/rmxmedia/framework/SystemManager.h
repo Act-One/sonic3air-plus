@@ -74,6 +74,10 @@ namespace rmx
 
 		bool   mInitialized = false;
 		bool   mRunning = false;
+		// you can probably guess what this does
+#if defined(PLATFORM_WIIU)
+		bool   mProcUIInitialized = false;
+#endif
 		uint32 mTicks = 0;
 		float  mTotalTime = 0.0f;
 		float  mTimeDifference = 0.0f;

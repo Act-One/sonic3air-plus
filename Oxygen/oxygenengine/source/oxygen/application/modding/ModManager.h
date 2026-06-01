@@ -52,7 +52,9 @@ private:
 	};
 
 private:
+	Mod* findModForActiveEntry(const std::string& activeEntry) const;
 	bool scanMods();
+	void rebuildModIdLookup();
 	void scanDirectoryRecursive(std::vector<FoundMod>& outFoundMods, const std::wstring& localPath);
 	void findZipsRecursively(std::vector<std::wstring>& outZipPaths, const std::wstring& localPath, int maxDepth);
 	void onActiveModsChanged(bool duringStartup = false);

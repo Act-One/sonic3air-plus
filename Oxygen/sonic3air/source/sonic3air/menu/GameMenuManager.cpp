@@ -41,13 +41,29 @@ void GameMenuManager::updateMenus()
 
 void GameMenuManager::addMenu(GameMenuBase& menu)
 {
+	const bool wasActive = (mActiveMenus.find(&menu) != mActiveMenus.end());
+#if defined(PLATFORM_WIIU)
+	static constexpr bool ENABLE_WIIU_MENU_MANAGER_TRACE = false;
+	if constexpr (ENABLE_WIIU_MENU_MANAGER_TRACE)
+	{
+		static int sWiiUAddMenuLogCount = 0;
+		if (sWiiUAddMenuLogCount < 32)
+		{
+			RMX_LOG_INFO("[WiiU Menu] addMenu menu=" << (uintptr_t)&menu << " wasActive=" << wasActive << " hadParent=" << (nullptr != menu.getParent()) << " baseState=" << (int)menu.getBaseState());
+			++sWiiUAddMenuLogCount;
+		}
+	}
+#endif
 	if (nullptr == menu.getParent())
 	{
 		mRoot->addChild(menu);
 	}
 	mActiveMenus.insert(&menu);
 
-	menu.onFadeIn();
+	if (!wasActive || menu.getBaseState() == GameMenuBase::BaseState::INACTIVE)
+	{
+		menu.onFadeIn();
+	}
 }
 
 void GameMenuManager::forceRemoveAll()

@@ -16,6 +16,8 @@
 class DrawerInterface;
 class DrawCollection;
 class DrawerTexture;
+class GX2RenderResources;
+class PlaneGeometry;
 struct SDL_Window;
 
 class Drawer
@@ -28,7 +30,8 @@ public:
 		SOFTWARE,
 		OPENGL,
 		DIRECT3D11,
-		VULKAN
+		VULKAN,
+		GX2
 	};
 
 public:
@@ -67,15 +70,22 @@ public:
 	void drawRect(const Rectf& rect, const Color& color);
 	void drawRect(const Rectf& rect, DrawerTexture& texture);
 	void drawRect(const Rectf& rect, DrawerTexture& texture, const Color& tintColor);
+	void drawRect(const Rectf& rect, DrawerTexture& texture, const Color& tintColor, const Color& addedColor);
 	void drawRect(const Rectf& rect, DrawerTexture& texture, const Vec2f& uv0, const Vec2f& uv1, const Color& tintColor);
+	void drawRect(const Rectf& rect, DrawerTexture& texture, const Vec2f& uv0, const Vec2f& uv1, const Color& tintColor, const Color& addedColor);
 	void drawRect(const Rectf& rect, DrawerTexture& texture, const Recti& textureInnerRect, const Color& tintColor = Color::WHITE);
 	void drawUpscaledRect(const Rectf& rect, DrawerTexture& texture);
 	void drawSprite(Vec2i position, uint64 spriteKey, const Color& tintColor = Color::WHITE, Vec2f scale = Vec2f(1.0f, 1.0f));
 	void drawSprite(Vec2i position, uint64 spriteKey, uint64 paletteKey, const Color& tintColor = Color::WHITE, Vec2f scale = Vec2f(1.0f, 1.0f));
 	void drawSpriteRect(const Recti& rect, uint64 spriteKey, const Color& tintColor = Color::WHITE);
-	void drawMesh(const std::vector<DrawerMeshVertex>& triangles, DrawerTexture& texture);
+	void drawMesh(const std::vector<DrawerMeshVertex>& triangles, DrawerTexture& texture, const Color& tintColor = Color::WHITE, const Color& addedColor = Color::TRANSPARENT);
 	void drawMesh(const std::vector<DrawerMeshVertex_P2_C4>& triangles);
 	void drawQuad(const DrawerMeshVertex* quad, DrawerTexture& texture);
+#if defined(PLATFORM_WIIU)
+	void drawGX2Plane(const PlaneGeometry& geometry, const Vec2i& gameResolution, GX2RenderResources& resources);
+	void drawGX2VdpSprite(const Recti& rect, const Vec2i& sizeInPatterns, uint16 firstPattern, int splitY, const Color& tintColor, const Color& addedColor, GX2RenderResources& resources);
+	void drawGX2PaletteSprite(const Recti& rect, DrawerTexture& dataTexture, int splitY, uint16 atex, const Color& tintColor, const Color& addedColor);
+#endif
 
 	void printText(Font& font, const Recti& rect, const String& text, int alignment = 1, Color color = Color::WHITE);
 	void printText(Font& font, const Vec2i& position, const String& text, int alignment = 1, Color color = Color::WHITE);

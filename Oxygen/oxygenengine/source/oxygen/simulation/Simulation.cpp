@@ -26,9 +26,115 @@
 #include "oxygen/platform/PlatformFunctions.h"
 #include "oxygen/rendering/parts/RenderParts.h"
 
+#if defined(PLATFORM_WIIU)
+	#include <coreinit/thread.h>
+#endif
+
+
+#if defined(PLATFORM_WIIU)
+namespace detail
+{
+	class CodeExecFrameUpdateThread final : public rmx::ThreadBase
+	{
+	public:
+		CodeExecFrameUpdateThread() :
+			ThreadBase("CodeExec Frame Worker")
+		{
+			setWiiUThreadAffinity(OS_THREAD_ATTRIB_AFFINITY_CPU2);
+			mConditionVariable = SDL_CreateCond();
+			mConditionLock = SDL_CreateMutex();
+			startThread();
+		}
+
+		~CodeExecFrameUpdateThread()
+		{
+			signalStopThread(false);
+			SDL_LockMutex(mConditionLock);
+			SDL_CondBroadcast(mConditionVariable);
+			SDL_UnlockMutex(mConditionLock);
+			joinThread();
+			SDL_DestroyCond(mConditionVariable);
+			SDL_DestroyMutex(mConditionLock);
+		}
+
+		bool performFrameUpdate(CodeExec& codeExec)
+		{
+			SDL_LockMutex(mConditionLock);
+			RMX_CHECK(nullptr == mActiveCodeExec, "CodeExec frame worker already has an active task", SDL_UnlockMutex(mConditionLock); return codeExec.performFrameUpdate());
+			mActiveCodeExec = &codeExec;
+			mComplete = false;
+			mResult = false;
+			SDL_CondBroadcast(mConditionVariable);
+			while (!mComplete)
+			{
+				SDL_CondWait(mConditionVariable, mConditionLock);
+			}
+			const bool result = mResult;
+			SDL_UnlockMutex(mConditionLock);
+			return result;
+		}
+
+	protected:
+		void threadFunc() override
+		{
+			while (mShouldBeRunning)
+			{
+				SDL_LockMutex(mConditionLock);
+				while (nullptr == mActiveCodeExec && mShouldBeRunning)
+				{
+					SDL_CondWait(mConditionVariable, mConditionLock);
+				}
+				CodeExec* codeExec = mActiveCodeExec;
+				SDL_UnlockMutex(mConditionLock);
+
+				if (nullptr != codeExec)
+				{
+					const bool result = codeExec->performFrameUpdate();
+					SDL_LockMutex(mConditionLock);
+					if (mActiveCodeExec == codeExec)
+					{
+						mResult = result;
+						mComplete = true;
+						mActiveCodeExec = nullptr;
+					}
+					SDL_CondBroadcast(mConditionVariable);
+					SDL_UnlockMutex(mConditionLock);
+				}
+			}
+		}
+
+	private:
+		SDL_cond* mConditionVariable = nullptr;
+		SDL_mutex* mConditionLock = nullptr;
+		CodeExec* mActiveCodeExec = nullptr;
+		bool mComplete = false;
+		bool mResult = false;
+	};
+}
+#endif
+
 
 namespace
 {
+#if defined(PLATFORM_WIIU)
+	static constexpr bool ENABLE_WIIU_SIM_FRAME_TRACE = false;
+
+	bool performFrameUpdateOnWiiU(CodeExec& codeExec, detail::CodeExecFrameUpdateThread* worker)
+	{
+		if (nullptr == worker)
+			return codeExec.performFrameUpdate();
+
+		static bool sLoggedCpu2CodeExec = false;
+		if (!sLoggedCpu2CodeExec)
+		{
+			sLoggedCpu2CodeExec = true;
+			RMX_LOG_INFO("Simulation: LemonScript frame updates scheduled on CPU2");
+		}
+
+		return worker->performFrameUpdate(codeExec);
+	}
+#endif
+
 	void recordKeyFrame(uint32 frameNumber, Simulation& simulation, GameRecorder& gameRecorder, const GameRecorder::InputData& inputData)
 	{
 		static std::vector<uint8> data;
@@ -57,6 +163,9 @@ Simulation::Simulation() :
 
 Simulation::~Simulation()
 {
+#if defined(PLATFORM_WIIU)
+	mWiiUCodeExecThread.reset();
+#endif
 	delete &mCodeExec;
 	delete &mSimulationState;
 	delete &mGameRecorder;
@@ -67,6 +176,13 @@ Simulation::~Simulation()
 bool Simulation::startup()
 {
 	Configuration& config = Configuration::instance();
+
+#if defined(PLATFORM_WIIU)
+	if (!mWiiUCodeExecThread)
+	{
+		mWiiUCodeExecThread.reset(new detail::CodeExecFrameUpdateThread());
+	}
+#endif
 
 	RMX_LOG_INFO("Setup of EmulatorInterface");
 	mCodeExec.startup();
@@ -121,9 +237,17 @@ bool Simulation::startup()
 void Simulation::shutdown()
 {
 	RMX_LOG_INFO("Simulation shutdown");
+#if defined(PLATFORM_WIIU)
+	mIsRunning = false;
+	RMX_LOG_INFO("Simulation shutdown complete");
+	return;
+#else
 	mInputRecorder.shutdown();
+	RMX_LOG_INFO("Simulation input recorder shutdown complete");
 
 	mIsRunning = false;
+	RMX_LOG_INFO("Simulation shutdown complete");
+#endif
 }
 
 void Simulation::reloadScriptsAfterModsChange()
@@ -359,6 +483,16 @@ bool Simulation::generateFrame()
 
 	bool completedCurrentFrame = false;
 
+#if defined(PLATFORM_WIIU)
+	static int sWiiUFrameLogCount = 0;
+	const bool logWiiUFrame = ENABLE_WIIU_SIM_FRAME_TRACE && (sWiiUFrameLogCount < 180);
+	if (logWiiUFrame)
+	{
+		RMX_LOG_INFO("[WiiU Sim] generateFrame begin frame=" << mFrameNumber << " beginNew=" << beginningNewFrame << " codeState=" << (int)mCodeExec.getExecutionState());
+		++sWiiUFrameLogCount;
+	}
+#endif
+
 	// Steps to do when beginning a new frame
 	if (beginningNewFrame)
 	{
@@ -435,7 +569,23 @@ bool Simulation::generateFrame()
 	if (!completedCurrentFrame)		// Can be true already if game recorder playback just loaded a state
 	{
 		// Perform game simulation
+#if defined(PLATFORM_WIIU)
+		if (logWiiUFrame)
+		{
+			RMX_LOG_INFO("[WiiU Sim] generateFrame performFrameUpdate begin frame=" << mFrameNumber);
+		}
+#endif
+#if defined(PLATFORM_WIIU)
+		completedCurrentFrame = performFrameUpdateOnWiiU(mCodeExec, mWiiUCodeExecThread.get());
+#else
 		completedCurrentFrame = mCodeExec.performFrameUpdate();
+#endif
+#if defined(PLATFORM_WIIU)
+		if (logWiiUFrame)
+		{
+			RMX_LOG_INFO("[WiiU Sim] generateFrame performFrameUpdate end frame=" << mFrameNumber << " completed=" << completedCurrentFrame << " codeState=" << (int)mCodeExec.getExecutionState());
+		}
+#endif
 	}
 
 	// Steps to do when a frame got completed
@@ -503,6 +653,12 @@ bool Simulation::generateFrame()
 	// Return false if frame got interrupted
 	//  -> In this case, the outer loop should break
 	//  -> Same if code execution is not possible any more
+#if defined(PLATFORM_WIIU)
+	if (logWiiUFrame)
+	{
+		RMX_LOG_INFO("[WiiU Sim] generateFrame end frame=" << mFrameNumber << " completed=" << completedCurrentFrame << " canContinue=" << mCodeExec.isCodeExecutionPossible());
+	}
+#endif
 	return (completedCurrentFrame && mCodeExec.isCodeExecutionPossible());
 }
 

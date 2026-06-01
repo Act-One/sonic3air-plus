@@ -15,6 +15,9 @@
 	#include <android/log.h>
 #elif defined(PLATFORM_VITA)
 	#include <psp2/kernel/clib.h>
+	// i wish logging was easier on wii u
+#elif defined(PLATFORM_WIIU)
+	#include <whb/log.h>
 #endif
 
 #include <chrono>
@@ -99,6 +102,10 @@ namespace rmx
 	#elif defined(PLATFORM_VITA)
 		{
 			sceClibPrintf("[rmx] %s\n", string.c_str());
+		}
+	#elif defined(PLATFORM_WIIU)
+		{
+			WHBLogPrintf("[rmx] %s", string.c_str());
 		}
 	#endif
 	}

@@ -79,6 +79,12 @@ void AudioPlayer::SoundIterator::removeCurrent()
 
 void AudioPlayer::startup()
 {
+#if defined(PLATFORM_WIIU)
+	mPlayingSounds.reserve(48);
+	mAutoStreamers.reserve(8);
+	mChannelOverrides.reserve(16);
+	mActiveAudioModifiers.reserve(8);
+#endif
 	mLastAudioTime = FTX::Audio->getGlobalPlayedSamples();
 }
 
@@ -702,7 +708,11 @@ AudioPlayer::PlayingSound* AudioPlayer::startPlaybackInternal(SourceRegistration
 	// Start playing audio
 	rmx::AudioManager::PlaybackOptions options;
 	options.mAudioBuffer = audioBuffer;
+#if defined(PLATFORM_WIIU)
+	options.mStreaming = audioSource.isStreaming();
+#else
 	options.mStreaming = true;
+#endif
 	options.mVolume = volume;
 	options.mAudioMixerId = contextId + 0x11;	// Translate "AudioOutBase::Context" to "AudioOutBase::AudioMixerId"
 	options.mStartPaused = true;

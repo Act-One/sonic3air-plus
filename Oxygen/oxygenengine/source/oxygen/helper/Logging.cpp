@@ -11,6 +11,13 @@
 #include "oxygen/platform/PlatformFunctions.h"
 #include "oxygen/simulation/LemonScriptRuntime.h"
 
+#if defined(PLATFORM_WIIU)
+	#include <cstdio>
+	#include <ctime>
+	#include <whb/log_cafe.h>
+	#include <whb/log_udp.h>
+#endif
+
 
 namespace
 {
@@ -81,6 +88,74 @@ namespace
 	};
 
 	static ErrorLogger mErrorLogger;
+
+#if defined(PLATFORM_WIIU)
+	class WiiULogFileLogger final : public rmx::LoggerBase
+	{
+	public:
+		WiiULogFileLogger()
+		{
+			static const char* paths[] =
+			{
+				"/vol/external01/wiiu/apps/sonic3air/logfile.txt",
+				"/vol/external01/wiiu/apps/sonic3air/savedata/logfile.txt",
+				"logfile.txt",
+			};
+
+			for (const char* path : paths)
+			{
+				std::FILE* file = std::fopen(path, "wb");
+				if (nullptr != file)
+				{
+					std::fclose(file);
+					mPath = path;
+					writeLine("Wii U direct file logger opened");
+					break;
+				}
+			}
+		}
+
+		const char* getPath() const
+		{
+			return (nullptr != mPath) ? mPath : "<failed>";
+		}
+
+	protected:
+		void log(rmx::LogLevel logLevel, const std::string& string) override
+		{
+			(void)logLevel;
+			writeLine(string.c_str());
+		}
+
+	private:
+		void writeLine(const char* text)
+		{
+			if (nullptr == mPath)
+				return;
+
+			std::FILE* file = std::fopen(mPath, "ab");
+			if (nullptr == file)
+				return;
+
+			char timestamp[48] = {};
+			const std::time_t now = std::time(nullptr);
+			const std::tm* tm = std::localtime(&now);
+			if (nullptr != tm)
+			{
+				std::strftime(timestamp, sizeof(timestamp), "[%Y-%m-%d %H:%M:%S] ", tm);
+			}
+
+			std::fputs(timestamp, file);
+			std::fputs(text, file);
+			std::fputs("\r\n", file);
+			std::fflush(file);
+			std::fclose(file);
+		}
+
+	private:
+		const char* mPath = nullptr;
+	};
+#endif
 }
 
 
@@ -89,8 +164,18 @@ namespace oxygen
 {
 	void Logging::startup(const std::wstring& filename)
 	{
+#if defined(PLATFORM_WIIU)
+		WHBLogCafeInit();
+		WHBLogUdpInit();
+		WiiULogFileLogger* fileLogger = new WiiULogFileLogger();
+		rmx::Logging::addLogger(*fileLogger);
+		rmx::Logging::addLogger(*new rmx::StdCoutLogger());
+		(void)filename;
+		rmx::Logging::log(rmx::LogLevel::INFO, std::string("Wii U logging to ") + fileLogger->getPath());
+#else
 		rmx::Logging::addLogger(*new rmx::StdCoutLogger());
 		rmx::Logging::addLogger(*new rmx::FileLogger(filename, true));
+#endif
 
 		// Register as logger and message box callback for rmx error handling
 		rmx::ErrorHandling::mLogger = &mErrorLogger;
@@ -100,6 +185,10 @@ namespace oxygen
 	void Logging::shutdown()
 	{
 		rmx::Logging::clear();
+#if defined(PLATFORM_WIIU)
+		WHBLogUdpDeinit();
+		WHBLogCafeDeinit();
+#endif
 	}
 
 	void Logging::setAssertBreakCaption(const std::string& caption)

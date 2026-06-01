@@ -75,6 +75,7 @@ private:
 
 	DrawerTexture mDisclaimerTexture;
 	float mDisclaimerVisibility = 0.0f;
+	float mDisclaimerSkipDelay = 0.0f;
 
 	GameView* mGameView = nullptr;
 	GameMenuManager* mGameMenuManager = nullptr;

@@ -68,6 +68,7 @@ public:
 	void setPlayfieldSizeInPixels(const Vec2i& size);
 
 	const uint16* getPlanePatternsBuffer(uint8 index) const;
+	uint32 getPlanePatternsChangeCounter(uint8 index) const;
 
 	uint16 getPlaneBaseVRAMAddress(int planeIndex) const;
 	const uint16* getPlaneDataInVRAM(int planeIndex) const;
@@ -96,6 +97,7 @@ public:
 
 private:
 	const uint16* getPlaneContent(int planeIndex, uint16 patternIndex = 0) const;
+	void invalidatePlaneBuffers();
 
 private:
 	PatternManager& mPatternManager;
@@ -106,6 +108,8 @@ private:
 
 	Vec2i mPlayfieldSize;		// In patterns (8x8 pixels)
 	uint16 mPlanePatternsBuffer[4][MAX_PLANE_PATTERNS] = { 0 };
+	bool mPlanePatternsBufferInitialized[4] = { false, false, false, false };
+	uint32 mPlanePatternsChangeCounter[4] = { 1, 1, 1, 1 };
 
 	bool mIsPlaneWRightOfSplitX = false;	// If true, plane W is right of plane A, otherwise it's left of plane A
 	bool mIsPlaneWBelowSplitY = false;		// If true, plane W is below plane A, otherwise it's above plane A

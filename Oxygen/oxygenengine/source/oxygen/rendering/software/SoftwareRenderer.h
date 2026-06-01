@@ -16,6 +16,9 @@ class SpriteGeometry;
 namespace detail
 {
 	class PixelBlockWriter;
+#if defined(PLATFORM_WIIU)
+	class SoftwareRendererWorkerThread;
+#endif
 }
 
 
@@ -28,6 +31,7 @@ public:
 
 public:
 	SoftwareRenderer(RenderParts& renderParts, DrawerTexture& outputTexture);
+	~SoftwareRenderer();
 
 	virtual void initialize() override;
 	virtual void reset() override;
@@ -60,6 +64,7 @@ private:
 			int mNumPixels = 0;			// Pixels of horizontal line
 			uint8 mAtex = 0;
 			uint8 mPaletteIndex = 0;
+			bool mHasTransparentPixels = false;
 		};
 
 		bool mValid = false;
@@ -72,7 +77,12 @@ private:
 		std::vector<PixelBlock> mNonPrioBlocks;
 	};
 	static const constexpr int MAX_BUFFER_PLANE_DATA = 8;
+	void buildBufferedPlaneDataRange(BufferedPlaneData& bufferedPlaneData, const PlaneGeometry& geometry, const Recti& rect, int beginY, int endY, std::vector<BufferedPlaneData::PixelBlock>& prioBlocks, std::vector<BufferedPlaneData::PixelBlock>& nonPrioBlocks);
+	void writePlaneBlockRange(const std::vector<BufferedPlaneData::PixelBlock>& blocks, const uint8* planeContent, size_t beginIndex, size_t endIndex, bool priorityFlag, const uint32* const* palettes, Bitmap& gameScreenBitmap);
 	BufferedPlaneData mBufferedPlaneData[MAX_BUFFER_PLANE_DATA];
 
 	Blitter mBlitter;
+#if defined(PLATFORM_WIIU)
+	std::unique_ptr<detail::SoftwareRendererWorkerThread> mWiiURenderWorker;
+#endif
 };

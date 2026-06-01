@@ -23,6 +23,10 @@
 #include <lemon/runtime/StandardLibrary.h>
 #include <lemon/utility/PragmaSplitter.h>
 
+#if defined(PLATFORM_WIIU) && !defined(S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL)
+#define S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL 3
+#endif
+
 
 struct ModuleAppendedInfo : public lemon::Module::AppendedInfo
 {
@@ -177,6 +181,16 @@ LemonScriptProgram::LoadScriptsResult LemonScriptProgram::loadScripts(std::wstri
 			scriptOptimizationLevel = 3;
 		#endif
 		}
+	#if defined(PLATFORM_WIIU)
+		// Wii U needs the nativized/optimized LemonScript path; default opcode dispatch is too expensive for gameplay.
+		scriptOptimizationLevel = clamp(S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL, 0, 3);
+		static bool sLoggedWiiUOptimizationLevel = false;
+		if (!sLoggedWiiUOptimizationLevel)
+		{
+			RMX_LOG_INFO("LemonScript: Wii U forced optimization level " << scriptOptimizationLevel);
+			sLoggedWiiUOptimizationLevel = true;
+		}
+	#endif
 		mInternal.mProgram.setOptimizationLevel(scriptOptimizationLevel);
 	}
 

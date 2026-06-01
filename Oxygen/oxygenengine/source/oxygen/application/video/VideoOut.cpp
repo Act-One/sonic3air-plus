@@ -21,6 +21,9 @@
 #endif
 #include "oxygen/rendering/RenderResources.h"
 #include "oxygen/rendering/opengl/OpenGLRenderer.h"
+#if defined(PLATFORM_WIIU)
+#include "oxygen/rendering/gx2/GX2Renderer.h"
+#endif
 #include "oxygen/rendering/software/SoftwareRenderer.h"
 #include "oxygen/rendering/parts/RenderParts.h"
 #include "oxygen/resources/FontCollection.h"
@@ -32,7 +35,11 @@
 VideoOut::VideoOut() :
 	mRenderResources(*new RenderResources())
 {
+#if defined(PLATFORM_WIIU)
+	mGeometries.reserve(0x300);
+#else
 	mGeometries.reserve(0x100);
+#endif
 }
 
 VideoOut::~VideoOut()
@@ -55,6 +62,18 @@ namespace
 {
 	Vec2i sanitizeGameResolution(const Vec2i& screenSize)
 	{
+#if defined(PLATFORM_WIIU)
+		if (screenSize.x >= 128 && screenSize.x <= 512 && screenSize.y >= 128 && screenSize.y <= 256)
+			return screenSize;
+
+		static bool sLoggedWiiUFallback = false;
+		if (!sLoggedWiiUFallback)
+		{
+			sLoggedWiiUFallback = true;
+			RMX_LOG_INFO("VideoOut: using Wii U logical game resolution 400 x 224 because the live size was " << screenSize.x << " x " << screenSize.y);
+		}
+		return Vec2i(400, 224);
+#else
 		if (screenSize.x >= 128 && screenSize.x <= 1024 && screenSize.y >= 128 && screenSize.y <= 1024)
 			return screenSize;
 
@@ -65,6 +84,7 @@ namespace
 			RMX_LOG_INFO("VideoOut: falling back to configured game resolution because the live size became invalid: " << screenSize.x << " x " << screenSize.y);
 		}
 		return Configuration::instance().mGameScreen;
+#endif
 	}
 }
 
@@ -91,7 +111,10 @@ Recti VideoOut::getScreenRect() const
 
 void VideoOut::startup()
 {
-	mGameResolution = Configuration::instance().mGameScreen;
+	mGameResolution = sanitizeGameResolution(Configuration::instance().mGameScreen);
+#if defined(PLATFORM_WIIU)
+	Configuration::instance().mGameScreen = mGameResolution;
+#endif
 
 	RMX_LOG_INFO("VideoOut: Setup of game screen");
 	RMX_LOG_INFO("VideoOut: Initial game resolution = " << mGameResolution.x << " x " << mGameResolution.y);
@@ -147,6 +170,12 @@ void VideoOut::destroyRenderer()
 #ifdef RMX_WITH_OPENGL_SUPPORT
 	SAFE_DELETE(mOpenGLRenderer);
 #endif
+#if defined(PLATFORM_WIIU)
+	if (nullptr != mGX2Renderer)
+	{
+		RMX_LOG_INFO("VideoOut: leaving GX2 renderer for process teardown");
+	}
+#endif
 	mActiveRenderer = nullptr;
 }
 
@@ -154,8 +183,23 @@ void VideoOut::setActiveRenderer(Configuration::RenderMethod renderMethod, bool 
 {
 	Renderer* selectedRenderer = nullptr;
 
+#if defined(PLATFORM_WIIU)
+	if (renderMethod == Configuration::RenderMethod::GX2_FULL)
+	{
+		if (nullptr == mGX2Renderer)
+		{
+			RMX_LOG_INFO("VideoOut: Creating GX2 renderer");
+			mGX2Renderer = new GX2Renderer(*mRenderParts, mGameScreenTexture);
+
+			RMX_LOG_INFO("VideoOut: Renderer initialization");
+			mGX2Renderer->initialize();
+		}
+		selectedRenderer = mGX2Renderer;
+	}
+#endif
+
 #ifdef RMX_WITH_OPENGL_SUPPORT
-	if (renderMethod == Configuration::RenderMethod::OPENGL_FULL)
+	if (nullptr == selectedRenderer && renderMethod == Configuration::RenderMethod::OPENGL_FULL)
 	{
 		if (nullptr == mOpenGLRenderer)
 		{
@@ -226,9 +270,14 @@ void VideoOut::setActiveRenderer(Configuration::RenderMethod renderMethod, bool 
 
 void VideoOut::setScreenSize(uint32 width, uint32 height)
 {
-	RMX_LOG_INFO("VideoOut: setScreenSize " << mGameResolution.x << " x " << mGameResolution.y << " -> " << width << " x " << height);
-	mGameResolution.x = width;
-	mGameResolution.y = height;
+	const Vec2i requestedSize((int)width, (int)height);
+	const Vec2i sanitizedSize = sanitizeGameResolution(requestedSize);
+	RMX_LOG_INFO("VideoOut: setScreenSize " << mGameResolution.x << " x " << mGameResolution.y << " -> " << requestedSize.x << " x " << requestedSize.y
+		<< " effective " << sanitizedSize.x << " x " << sanitizedSize.y);
+	mGameResolution = sanitizedSize;
+#if defined(PLATFORM_WIIU)
+	Configuration::instance().mGameScreen = mGameResolution;
+#endif
 
 	mGameScreenTexture.setupAsRenderTarget(mGameResolution);
 
@@ -310,12 +359,36 @@ void VideoOut::setInterFramePosition(float position)
 
 bool VideoOut::updateGameScreen()
 {
+	return updateGameScreenInternal(false);
+}
+
+#if defined(PLATFORM_WIIU)
+bool VideoOut::updateGameScreenOnCurrentTarget(const Recti& targetRect)
+{
+	mCurrentTargetRect = targetRect;
+	const bool result = updateGameScreenInternal(true);
+	mCurrentTargetRect = Recti(0, 0, mGameResolution.x, mGameResolution.y);
+	return result;
+}
+
+void VideoOut::drawGameScreenOnCurrentTarget(const Recti& targetRect)
+{
+	if (mActiveRenderer == mGX2Renderer && nullptr != mGX2Renderer)
+	{
+		mGX2Renderer->drawPresentedGameScreenToCurrentTarget(targetRect);
+	}
+}
+#endif
+
+bool VideoOut::updateGameScreenInternal(bool renderToCurrentTarget)
+{
 	mFrameInterpolation.mCurrentlyInterpolating = (Configuration::useFrameInterpolation(Configuration::instance().mFrameSync) && mFrameInterpolation.mUseInterpolationLastUpdate && mFrameInterpolation.mUseInterpolationThisUpdate);
 
 	// Only render something if a frame simulation was completed in the meantime
 	const bool hasNewSimulationFrame = (mFrameState == FrameState::FRAME_READY);
 	if (!hasNewSimulationFrame && !mFrameInterpolation.mCurrentlyInterpolating && !mDebugDrawRenderingRequested && !mRequireGameScreenUpdate)
 	{
+		(void)renderToCurrentTarget;
 		// No update
 		return false;
 	}
@@ -359,7 +432,18 @@ bool VideoOut::updateGameScreen()
 		hadRenderException = true;
 	}
 #else
-	renderGameScreen();
+	if (renderToCurrentTarget)
+	{
+#if defined(PLATFORM_WIIU)
+		renderGameScreenToCurrentTarget(mCurrentTargetRect);
+#else
+		renderGameScreen();
+#endif
+	}
+	else
+	{
+		renderGameScreen();
+	}
 #endif
 	if (hadRenderException)
 	{
@@ -422,6 +506,10 @@ void VideoOut::collectGeometries(std::vector<Geometry*>& geometries)
 		const Recti fullscreenRect = getScreenRect();
 
 		static std::vector<PlaneManager::PlaneRect> planeRects;
+#if defined(PLATFORM_WIIU)
+		if (planeRects.capacity() < 16)
+			planeRects.reserve(16);
+#endif
 		pm.getPlaneRects(planeRects, fullscreenRect);
 
 		// Render default planes
@@ -620,12 +708,19 @@ void VideoOut::collectGeometries(std::vector<Geometry*>& geometries)
 	}
 
 	// Insert blur effect geometry at the right position
-	if (Configuration::instance().mBackgroundBlur > 0)
+	const bool allowBackgroundBlur =
+#if defined(PLATFORM_WIIU) // i hope this compiles (update, it does)
+		false;
+#else
+		true;
+#endif
+	if (allowBackgroundBlur && Configuration::instance().mBackgroundBlur > 0)
 	{
 		constexpr uint16 BLUR_RENDER_QUEUE = 0x1800;
 
 		// Anything there to blur at all?
 		//  -> There might be no blurred background at all (e.g. in S3K Sky Sanctuary upper levels)
+		// not sure if this works on Wii U yet though
 		bool blurNeeded = false;
 		for (const Geometry* geometry : geometries)
 		{
@@ -661,6 +756,26 @@ void VideoOut::renderGameScreen()
 	// Render them
 	mActiveRenderer->renderGameScreen(mGeometries);
 }
+// fuck you wii u
+#if defined(PLATFORM_WIIU)
+void VideoOut::renderGameScreenToCurrentTarget(const Recti& targetRect)
+{
+	clearGeometries();
+	if (mRenderParts->getActiveDisplay())
+	{
+		collectGeometries(mGeometries);
+	}
+
+	if (mActiveRenderer == mGX2Renderer && nullptr != mGX2Renderer)
+	{
+		mGX2Renderer->renderGameScreenToCurrentTarget(mGeometries, targetRect);
+	}
+	else
+	{
+		mActiveRenderer->renderGameScreen(mGeometries);
+	}
+}
+#endif
 
 void VideoOut::recoverFromRenderStateException(const char* stage)
 {

@@ -21,6 +21,7 @@ public:
 	virtual ~DrawerTextureImplementation() {}
 
 	virtual void updateFromBitmap(const Bitmap& bitmap) = 0;
+	virtual void updateFromBitmapRegion(const Bitmap& bitmap, const Recti& rect);
 	virtual void setupAsRenderTarget(const Vec2i& size) = 0;
 	virtual void writeContentToBitmap(Bitmap& outBitmap) = 0;
 	virtual void refreshImplementation(bool setupRenderTarget, const Vec2i& size) = 0;
@@ -57,6 +58,7 @@ public:
 	const Bitmap& getBitmap() const;
 	Bitmap& accessBitmap();
 	void bitmapUpdated();
+	void bitmapRegionUpdated(const Recti& rect);
 
 	void setupAsRenderTarget(const Vec2i& size);
 	void writeContentToBitmap(Bitmap& outBitmap);

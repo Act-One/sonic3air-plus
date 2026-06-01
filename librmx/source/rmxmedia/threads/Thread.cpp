@@ -8,6 +8,10 @@
 
 #include "rmxmedia.h"
 
+#if defined(PLATFORM_WIIU)
+	#include <coreinit/thread.h>
+#endif
+
 
 namespace rmx
 {
@@ -58,6 +62,13 @@ namespace rmx
 	{
 		mIsThreadRunning = true;
 		mShouldBeRunning = true;
+// we should probably switch to SDL for threading but OS functions are working for now
+#if defined(PLATFORM_WIIU)
+		if (mWiiUThreadAffinity != 0)
+		{
+			OSSetThreadAffinity(OSGetCurrentThread(), (OSThreadAttributes)mWiiUThreadAffinity);
+		}
+#endif
 		threadFunc();
 		mShouldBeRunning = false;
 		mIsThreadRunning = false;
@@ -92,5 +103,12 @@ namespace rmx
 			SDL_WaitThread(mSDLThread, nullptr);
 		}
 	}
+
+#if defined(PLATFORM_WIIU)
+	void ThreadBase::setWiiUThreadAffinity(uint32 affinity)
+	{
+		mWiiUThreadAffinity = affinity;
+	}
+#endif
 
 }

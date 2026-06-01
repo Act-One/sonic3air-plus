@@ -118,6 +118,10 @@ function void GamePause.Menu()
 	s8 lastPressedInput = -1
 
 	GamePause.visibility = 0.0f
+	// try to fix the pause bug here
+#if WIIU
+	GamePause.visibility = 1.0f
+#endif
 	GamePause.screenshotHint = 0.0f
 	GamePause.selectedEntry = 0
 	GamePause.dialogEntry = 0
@@ -373,7 +377,10 @@ function void GamePause.DrawMenu(float time)
 
 	u8 numEntries = 2 + u8(GamePause.hasRestart) + u8(GamePause.hasOptions)
 
-	u16 rightAnchor = getScreenWidth() + Math.roundToInt((1.0f - GamePause.visibility) * 160)
+	u16 rightAnchor = getScreenWidth()
+#if !WIIU
+	rightAnchor += Math.roundToInt((1.0f - GamePause.visibility) * 160)
+#endif
 	u16 py = getScreenHeight() - numEntries * LINE_HEIGHT
 
 	// Ensure that the game pause menu always renders onto the full screen, #contributed by nabbup / Ramona

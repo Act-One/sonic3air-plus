@@ -13,6 +13,7 @@
 #include "oxygen/resources/SpriteCollection.h"
 #include "oxygen/application/Configuration.h"
 #include "oxygen/helper/Logging.h"
+#include "oxygen/rendering/Geometry.h"
 
 
 namespace
@@ -34,6 +35,11 @@ namespace
 	template<> ObjectPool<PrintTextWDrawCommand>&			 getPool<PrintTextWDrawCommand>			  ()	{ return DrawCommand::mFactory.mPrintTextWDrawCommands; }
 	template<> ObjectPool<PushScissorDrawCommand>&			 getPool<PushScissorDrawCommand>		  ()	{ return DrawCommand::mFactory.mPushScissorDrawCommands; }
 	template<> ObjectPool<PopScissorDrawCommand>&			 getPool<PopScissorDrawCommand>			  ()	{ return DrawCommand::mFactory.mPopScissorDrawCommands; }
+#if defined(PLATFORM_WIIU)
+	template<> ObjectPool<GX2PlaneDrawCommand>&				 getPool<GX2PlaneDrawCommand>			  ()	{ return DrawCommand::mFactory.mGX2PlaneDrawCommands; }
+	template<> ObjectPool<GX2VdpSpriteDrawCommand>&			 getPool<GX2VdpSpriteDrawCommand>		  ()	{ return DrawCommand::mFactory.mGX2VdpSpriteDrawCommands; }
+	template<> ObjectPool<GX2PaletteSpriteDrawCommand>&		 getPool<GX2PaletteSpriteDrawCommand>	  ()	{ return DrawCommand::mFactory.mGX2PaletteSpriteDrawCommands; }
+#endif
 }
 
 
@@ -59,6 +65,22 @@ Drawer::Type Drawer::getType() const
 
 void Drawer::destroyDrawer()
 {
+#if defined(PLATFORM_WIIU)
+// if we try to delete every texture one-by-one before GX2 is done with them
+// the whole thing just locks up. not our problem anymore though CafeOS will clean
+// up the mess. we're going home.
+	for (DrawerTexture* texture : mDrawerTextures)
+	{
+		texture->mImplementation = nullptr;
+		texture->mRegisteredOwner = nullptr;
+	}
+	mDrawerTextures.clear();
+	mTexturesByID.clear();
+
+	SAFE_DELETE(mActiveDrawer);
+	return;
+#endif
+
 	// Invalidate drawer textures
 	for (DrawerTexture* texture : mDrawerTextures)
 	{
@@ -158,12 +180,30 @@ void Drawer::drawRect(const Rectf& rect, DrawerTexture& texture, const Color& ti
 		addDrawCommand(getPool<RectDrawCommand>().createObject(rect, texture, tintColor));
 	}
 }
+// draws a textured, tinted rectangle
+// skips the draw call entirely if the rect is empty
+void Drawer::drawRect(const Rectf& rect, DrawerTexture& texture, const Color& tintColor, const Color& addedColor)
+{
+	if (!rect.isEmpty())
+	{
+		addDrawCommand(getPool<RectDrawCommand>().createObject(rect, texture, tintColor, addedColor));
+	}
+}
 
 void Drawer::drawRect(const Rectf& rect, DrawerTexture& texture, const Vec2f& uv0, const Vec2f& uv1, const Color& tintColor)
 {
 	if (!rect.isEmpty())
 	{
 		addDrawCommand(getPool<RectDrawCommand>().createObject(rect, texture, uv0, uv1, tintColor));
+	}
+}
+// same as above but with explicit UV coordinates 
+// you can now draw a sub-region of the texture
+void Drawer::drawRect(const Rectf& rect, DrawerTexture& texture, const Vec2f& uv0, const Vec2f& uv1, const Color& tintColor, const Color& addedColor)
+{
+	if (!rect.isEmpty())
+	{
+		addDrawCommand(getPool<RectDrawCommand>().createObject(rect, texture, uv0, uv1, tintColor, addedColor));
 	}
 }
 
@@ -201,9 +241,9 @@ void Drawer::drawSpriteRect(const Recti& rect, uint64 spriteKey, const Color& ti
 	}
 }
 
-void Drawer::drawMesh(const std::vector<DrawerMeshVertex>& triangles, DrawerTexture& texture)
+void Drawer::drawMesh(const std::vector<DrawerMeshVertex>& triangles, DrawerTexture& texture, const Color& tintColor, const Color& addedColor)
 {
-	addDrawCommand(getPool<MeshDrawCommand>().createObject(triangles, texture));
+	addDrawCommand(getPool<MeshDrawCommand>().createObject(triangles, texture, tintColor, addedColor));
 }
 
 void Drawer::drawMesh(const std::vector<DrawerMeshVertex_P2_C4>& triangles)
@@ -223,6 +263,26 @@ void Drawer::drawQuad(const DrawerMeshVertex* quad, DrawerTexture& texture)
 	triangles[5] = quad[3];
 	addDrawCommand(getPool<MeshDrawCommand>().createObject(std::move(triangles), texture));
 }
+// i am never gonna finish this gx2 renderer but we still got drawing commands
+#if defined(PLATFORM_WIIU)
+void Drawer::drawGX2Plane(const PlaneGeometry& geometry, const Vec2i& gameResolution, GX2RenderResources& resources)
+{
+	addDrawCommand(getPool<GX2PlaneDrawCommand>().createObject(resources, geometry.mActiveRect, geometry.mPlaneIndex, geometry.mPriorityFlag, geometry.mScrollOffsets, gameResolution));
+}
+
+void Drawer::drawGX2VdpSprite(const Recti& rect, const Vec2i& sizeInPatterns, uint16 firstPattern, int splitY, const Color& tintColor, const Color& addedColor, GX2RenderResources& resources)
+{
+	addDrawCommand(getPool<GX2VdpSpriteDrawCommand>().createObject(resources, rect, sizeInPatterns, Vec2i((int)firstPattern, splitY), tintColor, addedColor));
+}
+
+void Drawer::drawGX2PaletteSprite(const Recti& rect, DrawerTexture& dataTexture, int splitY, uint16 atex, const Color& tintColor, const Color& addedColor)
+{
+	if (!rect.isEmpty())
+	{
+		addDrawCommand(getPool<GX2PaletteSpriteDrawCommand>().createObject(rect, dataTexture, Vec2i(splitY, (int)atex), tintColor, addedColor));
+	}
+}
+#endif
 
 void Drawer::printText(Font& font, const Recti& rect, const String& text, int alignment, Color color)
 {

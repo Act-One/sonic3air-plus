@@ -15,6 +15,9 @@ class GameRecorder;
 class InputRecorder;
 class ROMDataAnalyser;
 class SimulationState;
+#if defined(PLATFORM_WIIU)
+namespace detail { class CodeExecFrameUpdateThread; }
+#endif
 
 
 class Simulation
@@ -92,6 +95,9 @@ private:
 	GameRecorder& mGameRecorder;
 	InputRecorder& mInputRecorder;
 	ROMDataAnalyser* mROMDataAnalyser = nullptr;
+#if defined(PLATFORM_WIIU)
+	std::unique_ptr<detail::CodeExecFrameUpdateThread> mWiiUCodeExecThread;
+#endif
 
 	bool	mIsRunning = false;
 	float	mSimulationFrequencyOverride = 0.0f;

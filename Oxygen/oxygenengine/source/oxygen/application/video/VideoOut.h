@@ -20,6 +20,9 @@ class D3D11Renderer;
 class VulkanRenderer;
 #endif
 class OpenGLRenderer;
+#if defined(PLATFORM_WIIU)
+class GX2Renderer;
+#endif
 class SoftwareRenderer;
 class RenderParts;
 class RenderResources;
@@ -59,6 +62,10 @@ public:
 	void setInterFramePosition(float position);
 
 	bool updateGameScreen();
+#if defined(PLATFORM_WIIU)
+	bool updateGameScreenOnCurrentTarget(const Recti& targetRect);
+	void drawGameScreenOnCurrentTarget(const Recti& targetRect);
+#endif
 	void blurGameScreen();
 
 	void preRefreshDebugging();
@@ -81,7 +88,11 @@ private:
 	void clearGeometries();
 	void collectGeometries(std::vector<Geometry*>& geometries);
 
+	bool updateGameScreenInternal(bool renderToCurrentTarget);
 	void renderGameScreen();
+#if defined(PLATFORM_WIIU)
+	void renderGameScreenToCurrentTarget(const Recti& targetRect);
+#endif
 	void recoverFromRenderStateException(const char* stage);
 
 private:
@@ -112,12 +123,18 @@ private:
 #ifdef RMX_WITH_OPENGL_SUPPORT
 	OpenGLRenderer* mOpenGLRenderer = nullptr;
 #endif
+#if defined(PLATFORM_WIIU)
+	GX2Renderer* mGX2Renderer = nullptr;
+#endif
 
 	RenderParts* mRenderParts = nullptr;
 	DrawerTexture mGameScreenTexture;
 	RenderResources& mRenderResources;
 
 	Vec2i mGameResolution;
+#if defined(PLATFORM_WIIU)
+	Recti mCurrentTargetRect;
+#endif
 	FrameState mFrameState = FrameState::OUTSIDE_FRAME;
 	uint32 mLastFrameTicks = 0;
 

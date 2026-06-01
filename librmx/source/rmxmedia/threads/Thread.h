@@ -59,6 +59,11 @@ namespace rmx
 		void joinThread();
 
 		bool isThreadRunning() const  { return mIsThreadRunning; }
+// uh oh on this one, we probably need to sync ppc2 with teardown so that the app
+// exits properly in multithreaded mode. currently a gamble whether the game will exit or not
+#if defined(PLATFORM_WIIU)
+		void setWiiUThreadAffinity(uint32 affinity);
+#endif
 
 	protected:
 		// This is the method to override
@@ -75,6 +80,9 @@ namespace rmx
 		SDL_Thread* mSDLThread = nullptr;
 		std::string mName;
 		bool mIsThreadRunning = false;		// Set as long as the actual thread is running
+#if defined(PLATFORM_WIIU)
+		uint32 mWiiUThreadAffinity = 0;
+#endif
 		SinglePtr<ThreadManager> mManager;
 	};
 

@@ -27,7 +27,8 @@ public:
 		D3D11_SOFT	= 0x30,
 		D3D11_FULL	= 0x31,
 		VULKAN_SOFT	= 0x40,
-		VULKAN_FULL	= 0x41
+		VULKAN_FULL	= 0x41,
+		GX2_FULL	= 0x51
 	};
 
 	enum class WindowMode
@@ -141,6 +142,7 @@ public:
 	static bool isOpenGLRenderMethod(RenderMethod renderMethod);
 	static bool isDirect3D11RenderMethod(RenderMethod renderMethod);
 	static bool isVulkanRenderMethod(RenderMethod renderMethod);
+	static bool isGX2RenderMethod(RenderMethod renderMethod);
 	static bool renderMethodSupportsNativeVSync(RenderMethod renderMethod);
 	static bool useVSync(FrameSyncType frameSyncType);
 	static bool useFrameCap(FrameSyncType frameSyncType);

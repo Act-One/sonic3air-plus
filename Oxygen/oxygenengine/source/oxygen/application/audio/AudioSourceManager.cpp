@@ -103,7 +103,11 @@ void AudioSourceManager::updateStreaming(float currentTime)
 			// Otherwise update streaming
 			if (audioSource->isStreaming())
 			{
+#if defined(PLATFORM_WIIU) // Wii U might need more precaching time especially when the main thread gets heated
+				const float precacheTime = audioSource->needsMinimalLag() ? 0.12f : 0.75f;
+#else
 				const float precacheTime = audioSource->needsMinimalLag() ? 0.1f : 0.25f;
+#endif
 				audioSource->progress(audioSource->getReadTime() + precacheTime);
 			}
 		}

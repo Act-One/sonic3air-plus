@@ -161,7 +161,9 @@ namespace s3air
 	{
 		EmulatorInterface& emulatorInterface = getEmulatorInterface();
 
-		uint16 remainingLongs = (uint16)(emulatorInterface.readMemory16(sourceAddress) * 8);
+		const uint16 header = emulatorInterface.readMemory16(sourceAddress);
+		const bool xorOutput = (header & 0x8000) != 0;
+		uint16 remainingLongs = (uint16)((header & 0x7fff) * 8);
 		sourceAddress += 2;
 
 		uint16 decodeTable[256];
@@ -171,6 +173,7 @@ namespace s3air
 		sourceAddress += 2;
 		uint16 bitsAvailable = 0x10;
 		uint32 pendingPixels = 0;
+		uint32 xorAccumulator = 0;
 		uint16 pendingNibbles = 8;
 		int16 runLength = -1;
 		uint8 nibble = 0;
@@ -192,7 +195,9 @@ namespace s3air
 			}
 			else
 			{
-				nemesisWriteLongToVRAM(emulatorInterface, targetInVRAM, pendingPixels);
+				const uint32 outputPixels = xorOutput ? (xorAccumulator ^ pendingPixels) : pendingPixels;
+				xorAccumulator = outputPixels;
+				nemesisWriteLongToVRAM(emulatorInterface, targetInVRAM, outputPixels);
 				pendingPixels = 0;
 				--remainingLongs;
 				if (remainingLongs == 0)

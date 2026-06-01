@@ -20,6 +20,47 @@
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
 #define VMA_VULKAN_VERSION 1003000
+#if defined(PLATFORM_WIIU)
+namespace wiiu_vma
+{
+	template<typename T>
+	class SingleThreadAtomic
+	{
+	public:
+		SingleThreadAtomic() = default;
+		SingleThreadAtomic(T value) : mValue(value) {}
+
+		T load() const { return mValue; }
+		void store(T value) { mValue = value; }
+		T fetch_add(T value) { const T oldValue = mValue; mValue += value; return oldValue; }
+		T fetch_sub(T value) { const T oldValue = mValue; mValue -= value; return oldValue; }
+		bool compare_exchange_strong(T& expected, T desired)
+		{
+			if (mValue == expected)
+			{
+				mValue = desired;
+				return true;
+			}
+			expected = mValue;
+			return false;
+		}
+
+		operator T() const { return mValue; }
+		T operator++() { return mValue += 1; }
+		T operator--() { return mValue -= 1; }
+		T operator+=(T value) { return mValue += value; }
+		T operator-=(T value) { return mValue -= value; }
+
+	private:
+		T mValue = 0;
+	};
+}
+
+// devkitPPC does not ship libatomic; VMA only uses these counters for allocator bookkeeping here.
+#define VMA_ATOMIC_UINT32 wiiu_vma::SingleThreadAtomic<uint32_t>
+#define VMA_ATOMIC_UINT64 wiiu_vma::SingleThreadAtomic<uint64_t>
+#define VMA_MEMORY_BUDGET 0
+#endif
 #include "oxygen/rendering/vulkan/external/vk_mem_alloc.h"
 
 

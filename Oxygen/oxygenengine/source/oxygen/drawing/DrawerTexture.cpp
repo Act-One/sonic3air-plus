@@ -11,6 +11,11 @@
 #include "oxygen/drawing/Drawer.h"
 
 
+void DrawerTextureImplementation::updateFromBitmapRegion(const Bitmap& bitmap, const Recti& rect)
+{
+	updateFromBitmap(bitmap);
+}
+
 DrawerTexture::~DrawerTexture()
 {
 	invalidate();
@@ -66,11 +71,27 @@ Bitmap& DrawerTexture::accessBitmap()
 void DrawerTexture::bitmapUpdated()
 {
 	mSize.set(mBitmap.getWidth(), mBitmap.getHeight());
+	mSetupAsRenderTarget = false;
 
 	ensureValidity();
 	if (nullptr != mImplementation)
 	{
 		mImplementation->updateFromBitmap(mBitmap);
+	}
+}
+
+void DrawerTexture::bitmapRegionUpdated(const Recti& rect)
+{
+	mSize.set(mBitmap.getWidth(), mBitmap.getHeight());
+	mSetupAsRenderTarget = false;
+
+	if (rect.empty())
+		return;
+
+	ensureValidity();
+	if (nullptr != mImplementation)
+	{
+		mImplementation->updateFromBitmapRegion(mBitmap, rect);
 	}
 }
 

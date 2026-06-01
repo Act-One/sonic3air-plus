@@ -19,6 +19,7 @@ public:
 		struct Pattern
 		{
 			uint8 mPixels[64] = { 0 };
+			uint8 mOpaqueMaskByRow[8] = { 0 };
 		};
 		Pattern mFlipVariation[4];
 		uint8 mOriginalDataBackup[32];

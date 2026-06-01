@@ -156,6 +156,11 @@ namespace
 				const bool requestHardware = (renderMethodString.endsWith("full") || renderMethodString.endsWith("hardware"));
 				outRenderMethod = (requestHardware && Configuration::isSupportedRenderMethod(Configuration::RenderMethod::VULKAN_FULL)) ? Configuration::RenderMethod::VULKAN_FULL : Configuration::RenderMethod::VULKAN_SOFT;
 			}
+			// add gx2 render method for Wii U since it's the literal only API it has for graphics
+			else if (renderMethodString.startsWith("gx2"))
+			{
+				outRenderMethod = Configuration::RenderMethod::GX2_FULL;
+			}
 			else if (renderMethodString == "software")
 			{
 				outRenderMethod = Configuration::RenderMethod::SOFTWARE;
@@ -240,7 +245,9 @@ namespace
 
 Configuration::RenderMethod Configuration::getHighestSupportedRenderMethod()
 {
-#if defined(PLATFORM_UWP)
+#if defined(PLATFORM_WIIU)
+	return RenderMethod::GX2_FULL;
+#elif defined(PLATFORM_UWP)
 	return RenderMethod::D3D11_SOFT;
 #elif defined(PLATFORM_WEB) || (defined(PLATFORM_MAC) && defined(__arm64__)) || defined(PLATFORM_VITA)
 	return RenderMethod::OPENGL_SOFT;
@@ -258,19 +265,19 @@ bool Configuration::isSupportedRenderMethod(RenderMethod renderMethod)
 			return true;
 
 		case RenderMethod::OPENGL_SOFT:
-#if defined(PLATFORM_UWP)
+#if defined(PLATFORM_UWP) || defined(PLATFORM_WIIU)
 			return false;
 #else
 			return true;
 #endif
 
 		case RenderMethod::OPENGL_FULL:
-#if defined(PLATFORM_WEB) || (defined(PLATFORM_MAC) && defined(__arm64__)) || defined(PLATFORM_VITA) || defined(PLATFORM_UWP)
+#if defined(PLATFORM_WEB) || (defined(PLATFORM_MAC) && defined(__arm64__)) || defined(PLATFORM_VITA) || defined(PLATFORM_UWP) || defined(PLATFORM_WIIU)
 			return false;
 #else
 			return true;
 #endif
-
+// wii u probably shouldn't be trying to use OpenGL at all but just in case we want to use gx2gl in the future i guess
 		case RenderMethod::D3D11_SOFT:
 #if defined(PLATFORM_WINDOWS)
 			return true;
@@ -299,6 +306,13 @@ bool Configuration::isSupportedRenderMethod(RenderMethod renderMethod)
 			return false;
 #endif
 
+		case RenderMethod::GX2_FULL:
+#if defined(PLATFORM_WIIU)
+			return true;
+#else
+			return false;
+#endif
+
 		default:
 			return false;
 	}
@@ -318,6 +332,11 @@ bool Configuration::isVulkanRenderMethod(RenderMethod renderMethod)
 {
 	return (renderMethod == RenderMethod::VULKAN_SOFT || renderMethod == RenderMethod::VULKAN_FULL);
 }
+// hi my name is GX2 and I'm the only render method available on Wii U, so I guess I'll just be my own category
+bool Configuration::isGX2RenderMethod(RenderMethod renderMethod)
+{
+	return (renderMethod == RenderMethod::GX2_FULL);
+}
 
 bool Configuration::renderMethodSupportsNativeVSync(RenderMethod renderMethod)
 {
@@ -330,6 +349,7 @@ bool Configuration::useVSync(FrameSyncType frameSyncType)
 	{
 		case FrameSyncType::VSYNC_ON:
 		case FrameSyncType::VSYNC_FRAMECAP:
+		// TODO: make frame interpolation also use vsync otherwise there's much higher screen tearing risk
 		case FrameSyncType::FRAME_INTERPOLATION:
 			return true;
 
@@ -372,6 +392,9 @@ const char* Configuration::getRenderMethodConfigString(RenderMethod renderMethod
 		case RenderMethod::D3D11_FULL:	return "d3d11-full";
 		case RenderMethod::VULKAN_SOFT:	return "vulkan-soft";
 		case RenderMethod::VULKAN_FULL:	return "vulkan-full";
+		// GX2 doesn't get gx2-soft because the only feasible option is gx2-full
+		// also we still use software for SOME stuff
+		case RenderMethod::GX2_FULL:	return "gx2-full";
 		default:						return "undefined";
 	}
 }
@@ -389,8 +412,7 @@ Configuration::Configuration()
 #endif
 
 #if defined(PLATFORM_WIIU)
-	// Streaming audio needs its worker path on Cafe; synchronous decode in the
-	// audio callback can underrun badly on real hardware.
+// we kinda need the audio worker thread on wii u otherwise alot of stuttering happens
 	mAudio.mUseAudioThreading = true;
 #endif
 
@@ -495,6 +517,7 @@ bool Configuration::loadSettings(const std::wstring& filename, SettingsType sett
 	const bool success = loadSettingsInternal(serializer, settingsType);
 
 	// Cleanup?
+	// no eukaryot, not cleanup. :(
 	{
 		bool retainOldEntries = true;
 		switch (settingsType)
@@ -754,6 +777,10 @@ void Configuration::serializeStandardSettings(JsonSerializer& serializer)
 
 	// Script
 	serializer.serialize("ScriptOptimizationLevel", mScriptOptimizationLevel);
+	// crank this shit up to the maximum and don't let it change, lower optimization levels do bad things
+#if defined(PLATFORM_WIIU)
+	mScriptOptimizationLevel = 3;
+#endif
 
 	// Game server
 	if (serializer.beginObject("GameServer"))

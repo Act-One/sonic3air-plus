@@ -840,7 +840,8 @@ inline void Bitmap::memcpyRect(uint32* dst, int dwid, const uint32* src, int swi
 	for (int y = 0; y < hgt; ++y)
 		memcpy(&dst[y*dwid], &src[y*swid], wid);
 }
-
+// use memcpy here and then blend the alpha channel separately
+// to avoid doing a lot of unnecessary blending when the source is fully opaque anyway
 inline void Bitmap::memcpyBlend(uint32* dst, int dwid, const uint32* src, int swid, int wid, int hgt)
 {
 	for (int y = 0; y < hgt; ++y)
@@ -849,16 +850,20 @@ inline void Bitmap::memcpyBlend(uint32* dst, int dwid, const uint32* src, int sw
 		{
 			uint8* dstPtr = (uint8*)(&dst[x+y*dwid]);
 			const uint8* srcPtr = (const uint8*)(&src[x+y*swid]);
-			float alpha = (float)srcPtr[3] / 255.0f;
-			float alpha_dst = (float)dstPtr[3] / 255.0f;
+			float alpha = (float)srcPtr[ABGR32_BYTE_A] / 255.0f;
+			float alpha_dst = (float)dstPtr[ABGR32_BYTE_A] / 255.0f;
 			float A = 1.0f - (1.0f - alpha) * (1.0f - alpha_dst);
-			for (int c = 0; c < 3; ++c)
-				dstPtr[c] = (uint8)(((float)srcPtr[c] * alpha + (float)dstPtr[c] * alpha_dst * (1.0f - alpha)) / A);
-			dstPtr[3] = (uint8)(A * 255.0f);
+			if (A > 0.0f)
+			{
+				dstPtr[ABGR32_BYTE_R] = (uint8)(((float)srcPtr[ABGR32_BYTE_R] * alpha + (float)dstPtr[ABGR32_BYTE_R] * alpha_dst * (1.0f - alpha)) / A);
+				dstPtr[ABGR32_BYTE_G] = (uint8)(((float)srcPtr[ABGR32_BYTE_G] * alpha + (float)dstPtr[ABGR32_BYTE_G] * alpha_dst * (1.0f - alpha)) / A);
+				dstPtr[ABGR32_BYTE_B] = (uint8)(((float)srcPtr[ABGR32_BYTE_B] * alpha + (float)dstPtr[ABGR32_BYTE_B] * alpha_dst * (1.0f - alpha)) / A);
+			}
+			dstPtr[ABGR32_BYTE_A] = (uint8)(A * 255.0f);
 		}
 	}
 }
-
+// optimization above might not work well on PC but I haven't tried it yet and I don't care that much yet
 void Bitmap::convert2palette(uint8* output, int colors, uint32* palette)
 {
 	// Convert into a palette-based image

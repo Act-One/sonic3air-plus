@@ -84,3 +84,4 @@ technique Standard_AlphaTest : Standard
 {
 	define = ALPHA_TEST;
 }
+// oh man this shader stinks

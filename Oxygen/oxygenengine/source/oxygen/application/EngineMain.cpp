@@ -22,11 +22,15 @@
 #include "oxygen/menu/devmode/DevModeMainWindow.h"
 #include "oxygen/drawing/opengl/OpenGLDrawer.h"
 #include "oxygen/drawing/software/SoftwareDrawer.h"
+// shit, there's alot of rendering options here to manage
+#if defined(PLATFORM_WIIU)
+#include "oxygen/drawing/gx2/GX2Drawer.h"
+#endif
 #if defined(PLATFORM_WINDOWS)
 #include "oxygen/drawing/d3d11/D3D11Drawer.h"
+#endif
 #if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
 #include "oxygen/drawing/vulkan/VulkanDrawer.h"
-#endif
 #endif
 #include "oxygen/file/PackedFileProvider.h"
 #include "oxygen/helper/FileHelper.h"
@@ -45,8 +49,10 @@
 	#include "oxygen/platform/android/AndroidJavaInterface.h"
 #endif
 #if defined(PLATFORM_WIIU)
-	#include "gx2gl/sdl_bridge.h"
 	#include <whb/gfx.h>
+#if defined(RMX_WITH_OPENGL_SUPPORT)
+	#include "gx2gl/sdl_bridge.h"
+#endif
 #endif
 
 #include <filesystem>
@@ -126,6 +132,10 @@ void EngineMain::earlySetup()
 
 	INIT_RMX;
 	INIT_RMXEXT_OGGVORBIS;
+#if defined(PLATFORM_WIIU)
+	FTX::JobManager->setMaxThreads(2);
+	RMX_LOG_INFO("Wii U job workers capped at 2 on CPU2");
+#endif
 }
 
 EngineMain::EngineMain(EngineDelegateInterface& delegate_, ArgumentsReader& arguments) :
@@ -261,26 +271,23 @@ void EngineMain::applyPendingRenderMethodSwitch()
 
 void EngineMain::setVSyncMode(Configuration::FrameSyncType frameSyncMode)
 {
+#if defined(PLATFORM_WIIU)
+	// The Wii U port uses the native GX2 drawer, not gx2gl/OpenGL.
+	(void)frameSyncMode;
+#else
 	Configuration& config = Configuration::instance();
 	if (Configuration::isOpenGLRenderMethod(config.mRenderMethod))
 	{
 		if (Configuration::useVSync(frameSyncMode))
 		{
-		#if defined(PLATFORM_WIIU)
-			GX2GL_SetSwapInterval(1);
-		#else
 			SDL_GL_SetSwapInterval(1);
-		#endif
 		}
 		else
 		{
-		#if defined(PLATFORM_WIIU)
-			GX2GL_SetSwapInterval(0);
-		#else
 			SDL_GL_SetSwapInterval(0);
-		#endif
 		}
 	}
+#endif
 }
 
 Vec2i EngineMain::getDisplaySize(int displayIndex) const
@@ -403,33 +410,58 @@ void EngineMain::run()
 	RMX_LOG_INFO("--- MAIN LOOP ---");
 	RMX_LOG_INFO("Starting main application loop");
 
+#if defined(PLATFORM_WIIU)
+	Application* application = new Application();
+	FTX::System->run(*application);
+	RMX_LOG_INFO("Main application loop returned");
+	RMX_LOG_INFO("Wii U: deferring Application destruction to process teardown");
+#else
 	Application application;
 	FTX::System->run(application);
+#endif
 }
 
 void EngineMain::shutdown()
 {
+	RMX_LOG_INFO("Engine shutdown: destroyWindow begin");
 	destroyWindow();
+	RMX_LOG_INFO("Engine shutdown: destroyWindow complete");
 
 	// Shutdown subsystems
+	RMX_LOG_INFO("Engine shutdown: VideoOut shutdown begin");
 	mInternal.mVideoOut.shutdown();
+	RMX_LOG_INFO("Engine shutdown: VideoOut shutdown complete");
 	if (nullptr != mAudioOut)
 	{
+		RMX_LOG_INFO("Engine shutdown: AudioOut shutdown begin");
 		mAudioOut->shutdown();
+		RMX_LOG_INFO("Engine shutdown: AudioOut shutdown complete");
 		SAFE_DELETE(mAudioOut);
+		RMX_LOG_INFO("Engine shutdown: AudioOut deleted");
 	}
 
 	// Shutdown drawer
+	RMX_LOG_INFO("Engine shutdown: drawer shutdown begin");
 	mDrawer.shutdown();
+	RMX_LOG_INFO("Engine shutdown: drawer shutdown complete");
 
 	// Cleanup system
 	RMX_LOG_INFO("System shutdown");
+	RMX_LOG_INFO("Engine shutdown: FTX audio exit begin");
 	FTX::Audio->exit();
+	RMX_LOG_INFO("Engine shutdown: FTX audio exit complete");
+	RMX_LOG_INFO("Engine shutdown: FTX system exit begin");
 	FTX::System->exit();
+	RMX_LOG_INFO("Engine shutdown: FTX system exit complete");
+	RMX_LOG_INFO("Engine shutdown: job manager shutdown begin");
 	FTX::JobManager->~JobManager();
+	RMX_LOG_INFO("Engine shutdown: job manager shutdown complete");
 
+	RMX_LOG_INFO("Engine shutdown: copy mod settings");
 	mInternal.mModManager.copyModSettingsToConfig();
+	RMX_LOG_INFO("Engine shutdown: save settings begin");
 	Configuration::instance().saveSettings();
+	RMX_LOG_INFO("Engine shutdown: save settings complete");
 	oxygen::Logging::shutdown();
 }
 
@@ -577,6 +609,20 @@ bool EngineMain::initConfigAndSettings()
 	// Respect the platform's settings for supported render methods
 	if (!Configuration::isSupportedRenderMethod(config.mRenderMethod))
 		config.mRenderMethod = Configuration::getHighestSupportedRenderMethod();
+
+#if defined(PLATFORM_WIIU)
+	if (!config.mFailSafeMode && config.mRenderMethod != Configuration::RenderMethod::GX2_FULL)
+	{
+		RMX_LOG_INFO("Wii U: forcing native GX2 renderer over saved '" << Configuration::getRenderMethodConfigString(config.mRenderMethod) << "' setting");
+		config.mRenderMethod = Configuration::RenderMethod::GX2_FULL;
+		config.mAutoDetectRenderMethod = false;
+	}
+	if (config.mBackgroundBlur > 0)
+	{
+		RMX_LOG_INFO("Wii U: disabling background blur for native GX2 renderer");
+		config.mBackgroundBlur = 0;
+	}
+#endif
 
 #if defined(PLATFORM_ANDROID) || defined(PLATFORM_IOS) || defined(PLATFORM_VITA) || defined(PLATFORM_UWP)
 	// Use fullscreen, with no borders please
@@ -780,15 +826,19 @@ bool EngineMain::createWindow()
 	const EngineDelegateInterface::AppMetaData& appMetaData = mDelegate.getAppMetaData();
 
 	const bool useOpenGL = Configuration::isOpenGLRenderMethod(config.mRenderMethod);
+#if defined(PLATFORM_WIIU)
+	const bool useGX2 = Configuration::isGX2RenderMethod(config.mRenderMethod);
+#else
+	const bool useGX2 = false;
+#endif
 #if defined(PLATFORM_WINDOWS)
 	const bool useDirect3D11 = (config.mRenderMethod == Configuration::RenderMethod::D3D11_FULL);
+#else
+	const bool useDirect3D11 = false;
+#endif
 #if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
 	const bool useVulkan = Configuration::isVulkanRenderMethod(config.mRenderMethod);
 #else
-	const bool useVulkan = false;
-#endif
-#else
-	const bool useDirect3D11 = false;
 	const bool useVulkan = false;
 #endif
 
@@ -796,7 +846,7 @@ bool EngineMain::createWindow()
 	rmx::VideoConfig videoConfig(config.mWindowMode != Configuration::WindowMode::WINDOWED, config.mWindowSize.x, config.mWindowSize.y, appMetaData.mTitle.c_str());
 	videoConfig.mRenderer = useOpenGL ? rmx::VideoConfig::Renderer::OPENGL : rmx::VideoConfig::Renderer::SOFTWARE;
 #if defined(PLATFORM_WIIU)
-	// Fallback until GX2GL has initialized WHB/GX2 and can report the real TV surface.
+	// Native GX2 presents directly to the TV surface without an SDL GL drawable.
 	setVideoConfigToTVDrawableSize(videoConfig);
 #endif
 #if defined(PLATFORM_UWP)
@@ -825,7 +875,7 @@ bool EngineMain::createWindow()
 		// Set SDL OpenGL attributes
 		RMX_LOG_INFO("Setup of OpenGL attributes...");
 	#if defined(PLATFORM_WIIU)
-		RMX_LOG_INFO("Using gx2gl over GX2");
+		RMX_LOG_INFO("OpenGL was requested on Wii U, but this build only exposes native GX2");
 	#else
 	#if !defined(RMX_USE_GLES2)
 		{
@@ -920,10 +970,11 @@ bool EngineMain::createWindow()
 
 		RMX_LOG_INFO("Creating window...");
 #if defined(PLATFORM_WIIU)
-		if (useOpenGL)
+		if (useGX2)
 		{
-			RMX_LOG_INFO("Using direct WHB/GX2 presentation without an SDL video window");
+			RMX_LOG_INFO("Using native GX2 presentation without an SDL video window");
 			mSDLWindow = nullptr;
+			setVideoConfigToTVDrawableSize(videoConfig);
 		}
 		else
 #endif
@@ -950,18 +1001,11 @@ bool EngineMain::createWindow()
 
 		if (useOpenGL)
 		{
-			RMX_LOG_INFO("Creating OpenGL context...");
 		#if defined(PLATFORM_WIIU)
-			mSDLGLContext = GX2GL_CreateContext();
-			if (nullptr != mSDLGLContext)
-			{
-				GX2GL_MakeCurrent(mSDLGLContext);
-				GX2GL_SetAutomaticDRCEnabled(1);
-				setVideoConfigToTVDrawableSize(videoConfig);
-				RMX_LOG_INFO("Vsync setup...");
-				setVSyncMode(config.mFrameSync);
-			}
+			RMX_LOG_WARNING("OpenGL context creation skipped on Wii U native GX2 build");
+			config.mRenderMethod = Configuration::RenderMethod::GX2_FULL;
 		#else
+			RMX_LOG_INFO("Creating OpenGL context...");
 			mSDLGLContext = SDL_GL_CreateContext(mSDLWindow);
 			if (nullptr != mSDLGLContext)
 			{
@@ -969,13 +1013,13 @@ bool EngineMain::createWindow()
 				RMX_LOG_INFO("Vsync setup...");
 				setVSyncMode(config.mFrameSync);
 			}
-		#endif
 			else
 			{
 				RMX_LOG_INFO("Failed to create OpenGL context, fallback to pure software renderer");
 				config.mRenderMethod = Configuration::RenderMethod::SOFTWARE;
 				// TODO: In this case, the SDL window was created with SDL_WINDOW_OPENGL flag, but that does not seem to be a problem
 			}
+		#endif
 		}
 	}
 
@@ -994,8 +1038,19 @@ bool EngineMain::createWindow()
 	else
 #endif
 	{
+#if defined(PLATFORM_WIIU)
+		if (useGX2)
+		{
+			if (!mDrawer.createDrawer<GX2Drawer>())
+			{
+				RMX_LOG_INFO("GX2 drawer setup failed, using software rendering");
+				config.mRenderMethod = Configuration::RenderMethod::SOFTWARE;
+				mDrawer.createDrawer<SoftwareDrawer>();
+			}
+		}
+#endif
 #if defined(PLATFORM_WINDOWS)
-		if (useDirect3D11)
+		if (nullptr == mDrawer.getActiveDrawer() && useDirect3D11)
 		{
 			if (!mDrawer.createDrawer<D3D11Drawer>())
 			{
@@ -1004,8 +1059,9 @@ bool EngineMain::createWindow()
 				mDrawer.createDrawer<SoftwareDrawer>();
 			}
 		}
+#endif
 #if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
-		else if (useVulkan)
+		if (nullptr == mDrawer.getActiveDrawer() && useVulkan)
 		{
 			if (!mDrawer.createDrawer<VulkanDrawer>())
 			{
@@ -1015,8 +1071,7 @@ bool EngineMain::createWindow()
 			}
 		}
 #endif
-		else
-#endif
+		if (nullptr == mDrawer.getActiveDrawer())
 		{
 			mDrawer.createDrawer<SoftwareDrawer>();
 		}
@@ -1068,14 +1123,17 @@ bool EngineMain::createWindow()
 
 void EngineMain::destroyWindow()
 {
+	RMX_LOG_INFO("Engine destroyWindow: renderer destroy begin");
 	mInternal.mVideoOut.destroyRenderer();
+	RMX_LOG_INFO("Engine destroyWindow: renderer destroy complete");
+	RMX_LOG_INFO("Engine destroyWindow: drawer destroy begin");
 	mDrawer.destroyDrawer();
+	RMX_LOG_INFO("Engine destroyWindow: drawer destroy complete");
 
 	if (nullptr != mSDLGLContext)
 	{
 	#if defined(PLATFORM_WIIU)
-		GX2GL_MakeCurrent(nullptr);
-		GX2GL_DeleteContext(mSDLGLContext);
+		RMX_LOG_WARNING("Ignoring stale SDL GL context pointer on Wii U native GX2 build");
 	#else
 		SDL_GL_MakeCurrent(nullptr, nullptr);
 		SDL_GL_DeleteContext(mSDLGLContext);
@@ -1085,10 +1143,14 @@ void EngineMain::destroyWindow()
 
 	SDL_Window* window = mSDLWindow;
 	mSDLWindow = nullptr;
+	RMX_LOG_INFO("Engine destroyWindow: clear video init");
 	FTX::Video->clearInitialized();
 
 	if (nullptr != window)
 	{
+		RMX_LOG_INFO("Engine destroyWindow: SDL_DestroyWindow begin");
 		SDL_DestroyWindow(window);
+		RMX_LOG_INFO("Engine destroyWindow: SDL_DestroyWindow complete");
 	}
+	RMX_LOG_INFO("Engine destroyWindow: complete");
 }

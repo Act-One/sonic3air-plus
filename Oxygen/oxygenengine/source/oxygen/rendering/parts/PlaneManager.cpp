@@ -8,6 +8,9 @@
 
 #include "oxygen/pch.h"
 #include "oxygen/application/EngineMain.h"
+#if defined(PLATFORM_WIIU)
+#include "oxygen/application/video/VideoOut.h"
+#endif
 #include "oxygen/rendering/parts/RenderParts.h"
 #include "oxygen/rendering/parts/PlaneManager.h"
 #include "oxygen/rendering/parts/PatternManager.h"
@@ -71,35 +74,51 @@ namespace
 		}
 	}
 
-	void fillBufferByAbstraction(uint16* buffer, const Vec2i& cameraPosition, const Vec2i& screenSize)
+	uint32 countNonZeroPlaneEntries(const uint16* buffer, int numPatterns)
 	{
-		// TODO: This is entirely S3AIR-specific
-		const uint32 minCameraTileX = cameraPosition.x / 16;
-		const uint32 minCameraTileY = cameraPosition.y / 16;
-
-		const uint32 width = (screenSize.x + 15) / 16;		// Usually 32; measured in tiles, not patterns (so we have to multiply by 2 here and there to get patterns)
-		const uint32 height = (screenSize.y + 15) / 16;		// Usually 16
-
-		for (uint32 y = 0; y < height; ++y)
+		uint32 nonZeroEntries = 0;
+		for (int k = 0; k < numPatterns; ++k)
 		{
-			uint16* lineBase0 = &buffer[(y*2) * width*2];
-			uint16* lineBase1 = &buffer[(y*2+1) * width*2];
+			if (buffer[k] != 0)
+				++nonZeroEntries;
+		}
+		return nonZeroEntries;
+	}
 
-			for (uint32 x = 0; x < width; ++x)
+	uint32 fillBufferByAbstraction(uint16* buffer, const Vec2i& cameraPosition, const Vec2i& screenSize, const Vec2i& playfieldPatterns)
+	{
+		// TODO: This is entirely S3AIR-specific.
+		const int cameraX = std::max(0, cameraPosition.x);
+		const int cameraY = std::max(0, cameraPosition.y);
+		const int width = std::max(0, screenSize.x);
+		const int height = std::max(0, screenSize.y);
+		const uint32 minTileX = cameraX / 16;
+		const uint32 minTileY = cameraY / 16;
+		const uint32 maxTileX = std::min((uint32)(cameraX + width + 15) / 16, minTileX + 31);
+		const uint32 maxTileY = std::min((uint32)(cameraY + height + 15) / 16, minTileY + 15);
+		const uint32 planeTileWidth = std::max(1, playfieldPatterns.x / 2);
+		const uint32 planeTileHeight = std::max(1, playfieldPatterns.y / 2);
+		uint32 nonZeroEntries = 0;
+
+		for (uint32 y = minTileY; y <= maxTileY; ++y)
+		{
+			for (uint32 x = minTileX; x <= maxTileX; ++x)
 			{
-				// Chunk coordinates
-				const uint32 globalColumn = minCameraTileX + ((x - minCameraTileX) % width);
-				const uint32 globalRow = minCameraTileY + ((y - minCameraTileY) % height);
+				const uint32 tileInPlaneX = x % planeTileWidth;
+				const uint32 tileInPlaneY = y % planeTileHeight;
+				uint16* lineBase0 = &buffer[tileInPlaneX * 2 + (tileInPlaneY * 2) * playfieldPatterns.x];
+				uint16* lineBase1 = &buffer[tileInPlaneX * 2 + (tileInPlaneY * 2 + 1) * playfieldPatterns.x];
 
-				const uint32 chunkColumn = globalColumn / 8;
-				const uint32 chunkRow = (globalRow / 8) & 0x1f;		// Looks like there are only 32 chunks in y-direction allowed in a level; that makes a maximum level height of 4096 pixels
+				// Chunk coordinates
+				const uint32 chunkColumn = x / 8;
+				const uint32 chunkRow = (y / 8) & 0x1f;		// Looks like there are only 32 chunks in y-direction allowed in a level; that makes a maximum level height of 4096 pixels
 
 				const uint32 chunkAddress = 0xffff0000 + EmulatorInterface::instance().readMemory16(0xffff8008 + chunkRow * 4) + chunkColumn;
 				const uint8  chunkType = EmulatorInterface::instance().readMemory8(chunkAddress);
 
 				// Tile coordinates inside chunk
-				const uint32 tileColumn = globalColumn % 8;
-				const uint32 tileRow = globalRow % 8;
+				const uint32 tileColumn = x % 8;
+				const uint32 tileRow = y % 8;
 
 				const uint32 tileAddress = 0xffff0000 + EmulatorInterface::instance().readMemory16(0x00f02a + chunkType * 2) + tileRow * 16 + tileColumn * 2;
 				const uint16 tile = EmulatorInterface::instance().readMemory16(tileAddress);
@@ -119,10 +138,10 @@ namespace
 				lineBase1[0] = EmulatorInterface::instance().readMemory16(tilePatternBaseAddress + 4 + mx - my) ^ xorMask;
 				lineBase1[1] = EmulatorInterface::instance().readMemory16(tilePatternBaseAddress + 6 - mx - my) ^ xorMask;
 
-				lineBase0 += 2;
-				lineBase1 += 2;
+				nonZeroEntries += (lineBase0[0] != 0) + (lineBase0[1] != 0) + (lineBase1[0] != 0) + (lineBase1[1] != 0);
 			}
 		}
+		return nonZeroEntries;
 	}
 }
 
@@ -143,6 +162,7 @@ void PlaneManager::reset()
 	mPlayfieldSize.set(64, 32);
 	mIsPlaneWBelowSplitY = false;
 	mPlaneAWSplitY = 0;
+	invalidatePlaneBuffers();
 
 	resetCustomPlanes();
 }
@@ -174,7 +194,10 @@ void PlaneManager::refresh()
 			{
 				if (isPlaneUsed(index))
 				{
-					copyPlanePatternsWithWrap(buffer, getPlaneBaseVRAMAddress(index), numPatterns);
+					const uint16 planeBaseAddress = getPlaneBaseVRAMAddress(index);
+					copyPlanePatternsWithWrap(buffer, planeBaseAddress, numPatterns);
+					mPlanePatternsBufferInitialized[index] = true;
+					++mPlanePatternsChangeCounter[index];
 					if (isDeveloperMode)
 					{
 						for (int k = 0; k < numPatterns; ++k)
@@ -183,10 +206,53 @@ void PlaneManager::refresh()
 						}
 					}
 				}
+				else
+				{
+					mPlanePatternsBufferInitialized[index] = false;
+				}
 				break;
 			}
 		}
 	}
+
+#if defined(PLATFORM_WIIU)
+	bool customPlaneAActive = false;
+	for (const CustomPlane& customPlane : mCustomPlanes)
+	{
+		if ((customPlane.mSourcePlane & 0x03) == PLANE_A)
+		{
+			customPlaneAActive = true;
+			break;
+		}
+	}
+	const uint32 planeANonZeroBefore = countNonZeroPlaneEntries(mPlanePatternsBuffer[PLANE_A], numPatterns);
+	const uint8 gameMode = EmulatorInterface::instance().readMemory8(0xfffff600) & 0x7f;
+	const int8 levelStarted = (int8)EmulatorInterface::instance().readMemory8(0xfffff711);
+	const bool mainLevelActive = (gameMode == 0x0c && levelStarted > 0);
+	const bool planeAIsSparse = (planeANonZeroBefore < 512);
+	const Vec2i screenSize = VideoOut::instance().getScreenSize();
+	if (mainLevelActive && (customPlaneAActive || planeAIsSparse) && screenSize.x > 0 && screenSize.y > 0)
+	{
+		const Vec2i cameraPosition = RenderParts::instance().getSpacesManager().getWorldSpaceOffset();
+		const uint32 nonZeroEntries = fillBufferByAbstraction(mPlanePatternsBuffer[PLANE_A], cameraPosition, screenSize, mPlayfieldSize);
+		mPlanePatternsBufferInitialized[PLANE_A] = true;
+		++mPlanePatternsChangeCounter[PLANE_A];
+
+		static int sLoggedAbstractionFillCount = 0;
+		if (sLoggedAbstractionFillCount < 8)
+		{
+			++sLoggedAbstractionFillCount;
+			RMX_LOG_INFO("PlaneManager: Wii U abstraction-filled Plane A camera=" << cameraPosition.x << "," << cameraPosition.y
+				<< " screen=" << screenSize.x << "x" << screenSize.y
+				<< " playfield=" << mPlayfieldSize.x << "x" << mPlayfieldSize.y
+				<< " before=" << planeANonZeroBefore
+				<< " nonZero=" << nonZeroEntries
+				<< " gameMode=0x" << rmx::hexString(gameMode, 2)
+				<< " levelStarted=" << (int)levelStarted
+				<< " customPlanes=" << (uint32)mCustomPlanes.size());
+		}
+	}
+#endif
 }
 
 void PlaneManager::resetCustomPlanes()
@@ -247,22 +313,42 @@ Vec4i PlaneManager::getPlayfieldSizeForShaders() const
 
 void PlaneManager::setNameTableBaseB(uint16 vramAddress)
 {
-	mNameTableBaseB = sanitizePlaneBaseVRAMAddress(vramAddress, "B");
+	const uint16 sanitized = sanitizePlaneBaseVRAMAddress(vramAddress, "B");
+	if (mNameTableBaseB != sanitized)
+	{
+		mNameTableBaseB = sanitized;
+		mPlanePatternsBufferInitialized[PLANE_B] = false;
+	}
 }
 
 void PlaneManager::setNameTableBaseA(uint16 vramAddress)
 {
-	mNameTableBaseA = sanitizePlaneBaseVRAMAddress(vramAddress, "A");
+	const uint16 sanitized = sanitizePlaneBaseVRAMAddress(vramAddress, "A");
+	if (mNameTableBaseA != sanitized)
+	{
+		mNameTableBaseA = sanitized;
+		mPlanePatternsBufferInitialized[PLANE_A] = false;
+	}
 }
 
 void PlaneManager::setNameTableBaseW(uint16 vramAddress)
 {
-	mNameTableBaseW = sanitizePlaneBaseVRAMAddress(vramAddress, "W");
+	const uint16 sanitized = sanitizePlaneBaseVRAMAddress(vramAddress, "W");
+	if (mNameTableBaseW != sanitized)
+	{
+		mNameTableBaseW = sanitized;
+		mPlanePatternsBufferInitialized[PLANE_W] = false;
+	}
 }
 
 void PlaneManager::setPlayfieldSizeInPatterns(const Vec2i& size)
 {
-	mPlayfieldSize = sanitizePlayfieldPatternSize(size);
+	const Vec2i sanitized = sanitizePlayfieldPatternSize(size);
+	if (mPlayfieldSize != sanitized)
+	{
+		mPlayfieldSize = sanitized;
+		invalidatePlaneBuffers();
+	}
 }
 
 void PlaneManager::setPlayfieldSizeInPixels(const Vec2i& size)
@@ -274,6 +360,12 @@ const uint16* PlaneManager::getPlanePatternsBuffer(uint8 index) const
 {
 	RMX_ASSERT(index < 4, "Invalid plane index " << index);
 	return resolveReadablePlaneManager(this, "getPlanePatternsBuffer").mPlanePatternsBuffer[index];
+}
+
+uint32 PlaneManager::getPlanePatternsChangeCounter(uint8 index) const
+{
+	RMX_ASSERT(index < 4, "Invalid plane index " << index);
+	return resolveReadablePlaneManager(this, "getPlanePatternsChangeCounter").mPlanePatternsChangeCounter[index];
 }
 
 uint16 PlaneManager::getPlaneBaseVRAMAddress(int planeIndex) const
@@ -334,14 +426,23 @@ const uint16* PlaneManager::getPlaneContent(int planeIndex, uint16 patternIndex)
 
 void PlaneManager::setWindowPlaneSplitX(bool rightSideWindow, uint16 splitX)
 {
-	mIsPlaneWRightOfSplitX = rightSideWindow;
-	mPlaneAWSplitX = splitX;
+	if (mIsPlaneWRightOfSplitX != rightSideWindow || mPlaneAWSplitX != splitX)
+	{
+		mIsPlaneWRightOfSplitX = rightSideWindow;
+		mPlaneAWSplitX = splitX;
+		mPlanePatternsBufferInitialized[PLANE_W] = false;
+	}
 }
 
 void PlaneManager::setWindowPlaneSplitY(bool bottomWindow, uint16 splitY)
 {
-	mIsPlaneWBelowSplitY = bottomWindow;
-	mPlaneAWSplitY = splitY;
+	if (mIsPlaneWBelowSplitY != bottomWindow || mPlaneAWSplitY != splitY)
+	{
+		mIsPlaneWBelowSplitY = bottomWindow;
+		mPlaneAWSplitY = splitY;
+		mPlanePatternsBufferInitialized[PLANE_A] = false;
+		mPlanePatternsBufferInitialized[PLANE_W] = false;
+	}
 }
 
 void PlaneManager::setRenderPlaneABehindW(bool renderPlaneABehindW)
@@ -501,7 +602,19 @@ void PlaneManager::dumpAsPaletteBitmap(PaletteBitmap& output, int planeIndex, bo
 
 void PlaneManager::setDefaultPlaneEnabled(uint8 index, bool enabled)
 {
-	mDisabledDefaultPlane[index] = !enabled;
+	if (index < 4)
+	{
+		mDisabledDefaultPlane[index] = !enabled;
+		mPlanePatternsBufferInitialized[index] = false;
+	}
+}
+
+void PlaneManager::invalidatePlaneBuffers()
+{
+	for (bool& initialized : mPlanePatternsBufferInitialized)
+	{
+		initialized = false;
+	}
 }
 
 void PlaneManager::setupCustomPlane(const Recti& rect, uint8 sourcePlane, uint8 scrollOffsets, uint16 renderQueue)
@@ -515,7 +628,7 @@ void PlaneManager::setupCustomPlane(const Recti& rect, uint8 sourcePlane, uint8 
 			++sLoggedInvalidCustomPlaneCount;
 			RMX_LOG_INFO("PlaneManager: ignoring custom plane with invalid source plane " << (int)sourcePlane
 				<< " (resolved plane index " << planeIndex << "), rect=(" << rect.x << "," << rect.y << "," << rect.width << "," << rect.height
-				<< "), scrollOffsets=" << (int)scrollOffsets << ", renderQueue=0x" << rmx::hexString(renderQueue, 4));
+				<< "), scrollOffsets=" << (int)scrollOffsets << ", renderQueue=" << rmx::hexString(renderQueue, 4));
 		}
 		return;
 	}
@@ -525,6 +638,21 @@ void PlaneManager::setupCustomPlane(const Recti& rect, uint8 sourcePlane, uint8 
 	plane.mSourcePlane = sourcePlane;
 	plane.mScrollOffsets = scrollOffsets;
 	plane.mRenderQueue = renderQueue;
+
+#if defined(PLATFORM_WIIU)
+	static int sLoggedCustomPlaneCount = 0;
+	if (sLoggedCustomPlaneCount < 32)
+	{
+		++sLoggedCustomPlaneCount;
+		RMX_LOG_INFO("PlaneManager: custom plane " << sLoggedCustomPlaneCount
+			<< " rect=(" << rect.x << "," << rect.y << "," << rect.width << "," << rect.height
+			<< ") source=" << rmx::hexString(sourcePlane, 2)
+			<< " plane=" << planeIndex
+			<< " priority=" << (((sourcePlane & 0x10) != 0) ? 1 : 0)
+			<< " scrollOffsets=" << (int)scrollOffsets
+			<< " renderQueue=" << rmx::hexString(renderQueue, 4));
+	}
+#endif
 }
 
 void PlaneManager::serializeSaveState(VectorBinarySerializer& serializer, uint8 formatVersion)
@@ -589,5 +717,6 @@ void PlaneManager::serializeSaveState(VectorBinarySerializer& serializer, uint8 
 		setNameTableBaseA(mNameTableBaseA);
 		setNameTableBaseB(mNameTableBaseB);
 		setNameTableBaseW(mNameTableBaseW);
+		invalidatePlaneBuffers();
 	}
 }

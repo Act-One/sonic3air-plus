@@ -127,9 +127,11 @@ void Application::initialize()
 
 	mOxygenMenu = &createChild<OxygenMenu>();
 	//mOxygenMenu->setVisible(true);
-
+// debug dont touch this
+#if !(defined(PLATFORM_WIIU) && !defined(DEBUG))
 	mProfilingView = &createChild<ProfilingView>();
 	mCheatSheetOverlay = &createChild<CheatSheetOverlay>();
+#endif
 
 	if (nullptr != mTouchControlsOverlay && nullptr == mTouchControlsOverlay->getParent())
 	{
@@ -152,18 +154,36 @@ void Application::deinitialize()
 	// Destroy game app here already, instead of using the auto-deletion of children
 	if (nullptr != mGameApp)
 	{
+		RMX_LOG_INFO("Application shutdown: deleting game app");
 		deleteChild(*mGameApp);
 		mGameApp = nullptr;
+		RMX_LOG_INFO("Application shutdown: game app deleted");
 	}
 
+	RMX_LOG_INFO("Application shutdown: delegate shutdownGame");
 	EngineMain::getDelegate().shutdownGame();
+	RMX_LOG_INFO("Application shutdown: delegate shutdownGame complete");
 
 	// Stop all sounds and especially streaming of emulated sounds before simulation shutdown
+	RMX_LOG_INFO("Application shutdown: clearing audio playback");
 	EngineMain::instance().getAudioOut().getAudioPlayer().clearPlayback();
+	RMX_LOG_INFO("Application shutdown: audio playback cleared");
+	RMX_LOG_INFO("Application shutdown: simulation shutdown");
 	mSimulation->shutdown();
+	RMX_LOG_INFO("Application shutdown: simulation shutdown complete");
 
 	// Update display index, in case the window was moved meanwhile
-	updateWindowDisplayIndex();
+#if defined(PLATFORM_WIIU)
+	RMX_LOG_INFO("Application shutdown complete");
+#else
+	if (nullptr != FTX::Video->getMainWindow())
+	{
+		RMX_LOG_INFO("Application shutdown: updating display index");
+		updateWindowDisplayIndex();
+		RMX_LOG_INFO("Application shutdown: display index updated");
+	}
+	RMX_LOG_INFO("Application shutdown complete");
+#endif
 }
 
 void Application::beginFrame()
@@ -382,7 +402,7 @@ void Application::keyboard(const rmx::KeyboardEvent& ev)
 							}
 						}
 					#endif
-						else
+						else if (nullptr != mCheatSheetOverlay)
 						{
 							mCheatSheetOverlay->toggle();
 						}
@@ -600,7 +620,9 @@ void Application::update(float timeElapsed)
 	}
 
 	// Update engine server client and netplay
+#if !(defined(PLATFORM_WIIU) && !defined(DEBUG))
 	EngineServerClient::instance().updateClient(timeElapsed);
+#endif
 
 	// Update drawer
 	EngineMain::instance().getDrawer().updateDrawer(timeElapsed);
@@ -766,6 +788,19 @@ void Application::render()
 		const double tickLengthMilliseconds = 1000.0 / (double)mSimulation->getSimulationFrequency();
 		const bool useVSync = Configuration::useVSync(config.mFrameSync);
 		const bool useFrameCap = Configuration::useFrameCap(config.mFrameSync) || (useVSync && !Configuration::renderMethodSupportsNativeVSync(config.mRenderMethod));
+#if defined(PLATFORM_WIIU)
+		static bool sLoggedWiiUFrameSync = false;
+		if (!sLoggedWiiUFrameSync)
+		{
+			RMX_LOG_INFO("Application: Wii U frame sync simFreq=" << mSimulation->getSimulationFrequency()
+				<< " frameSync=" << (int)config.mFrameSync
+				<< " renderMethod=" << (int)config.mRenderMethod
+				<< " useVSync=" << (useVSync ? 1 : 0)
+				<< " useFrameCap=" << (useFrameCap ? 1 : 0)
+				<< " tickMs=" << tickLengthMilliseconds);
+			sLoggedWiiUFrameSync = true;
+		}
+#endif
 		if (useFrameCap)
 		{
 			double delay = mNextRefreshTime - currentTime;

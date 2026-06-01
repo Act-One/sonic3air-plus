@@ -111,10 +111,14 @@ void OptionsConfig::buildSystem()
 	CATEGORY("Debugging")
 	{
 		configBuilder.addSetting("Script Optimization", option::SCRIPT_OPTIMIZATION)
+#if defined(PLATFORM_WIIU)
+			.addOption("Full", 3);
+#else
 			.addOption("Auto (Default)", -1)
 			.addOption("Disabled", 0)
 			.addOption("Basic", 1)
 			.addOption("Full", 3);
+#endif
 
 		configBuilder.addSetting("Debug Game Recording", option::GAME_RECORDING_MODE)
 			.addOption("Auto (Default)", -1)
@@ -137,6 +141,9 @@ void OptionsConfig::buildDisplay()
 	CATEGORY("General")
 	{
 		configBuilder.addSetting("Renderer:", option::RENDERER);
+#if defined(PLATFORM_WIIU)
+		configBuilder.addOption("GX2 Hardware", (uint32)Configuration::RenderMethod::GX2_FULL);
+#else
 		configBuilder.addOption("Fail-Safe / Software", (uint32)Configuration::RenderMethod::SOFTWARE);
 
 	#if defined(PLATFORM_WINDOWS)
@@ -158,6 +165,7 @@ void OptionsConfig::buildDisplay()
 		// OpenGL Hardware does not work correctly on PSVita
 		configBuilder.addOption("OpenGL Software", (uint32)Configuration::RenderMethod::OPENGL_SOFT);
 	#endif
+#endif
 
 		configBuilder.addSetting("Frame Sync:", option::FRAME_SYNC)
 			.addOption("V-Sync Off + FPS Cap", 0)

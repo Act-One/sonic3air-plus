@@ -586,10 +586,21 @@ void GameView::render()
 	VideoOut& videoOut = VideoOut::instance();
 	const Recti gameScreenRect = VideoOut::instance().getScreenRect();
 	mGameViewport.setResolution(gameScreenRect.getSize());
-	mFinalGameTexture.setupAsRenderTarget(gameScreenRect.getSize());
+#if defined(PLATFORM_WIIU)
+	// send that shit straight into the window
+	// we might pay the price for this later though
+	const bool renderDirectToWindow = (drawer.getType() == Drawer::Type::GX2);
+#else
+	const bool renderDirectToWindow = false;
+#endif
+	const bool renderGameScreenDirectToWindow = renderDirectToWindow && mStillImage.mMode == StillImageMode::NONE && !config.mMirrorMode;
+	if (!renderDirectToWindow)
+	{
+		mFinalGameTexture.setupAsRenderTarget(gameScreenRect.getSize());
+	}
 
 	// Refresh simulation output image
-	if (mStillImage.mMode != StillImageMode::NONE)
+	if (!renderGameScreenDirectToWindow && mStillImage.mMode != StillImageMode::NONE)
 	{
 		const constexpr float REDUCTION = 0.0333f;	// One blur step every 1/30 second
 		if (mStillImage.mBlurringStepTimer >= REDUCTION)
@@ -598,7 +609,7 @@ void GameView::render()
 			videoOut.blurGameScreen();
 		}
 	}
-	else
+	else if (!renderGameScreenDirectToWindow)
 	{
 		// Render a new game screen image if needed
 		//  -> This does some checks internally to determine if a new image is actually needed
@@ -630,12 +641,41 @@ void GameView::render()
 		return;
 	}
 
-	// Here goes the real rendering
-	drawer.setRenderTarget(mFinalGameTexture, gameScreenRect);
+	// Here goes the real rendering. 
+	// compose directly to the window target on GX2 to avoid sampling a tiled render target as a texture
+	if (renderDirectToWindow)
+	{
+		const Recti& gameViewportRect = mGameViewport.getRectOnScreen();
+		static Recti sLoggedDirectScreenRect;
+		static Recti sLoggedDirectGameScreenRect;
+		static Recti sLoggedDirectViewportRect;
+		if (sLoggedDirectScreenRect != FTX::screenRect() || sLoggedDirectGameScreenRect != gameScreenRect || sLoggedDirectViewportRect != gameViewportRect)
+		{
+			sLoggedDirectScreenRect = FTX::screenRect();
+			sLoggedDirectGameScreenRect = gameScreenRect;
+			sLoggedDirectViewportRect = gameViewportRect;
+			RMX_LOG_INFO("GameView direct GX2 layout: screenRect=" << sLoggedDirectScreenRect.x << "," << sLoggedDirectScreenRect.y << " " << sLoggedDirectScreenRect.width << "x" << sLoggedDirectScreenRect.height
+				<< " gameScreenRect=" << sLoggedDirectGameScreenRect.x << "," << sLoggedDirectGameScreenRect.y << " " << sLoggedDirectGameScreenRect.width << "x" << sLoggedDirectGameScreenRect.height
+				<< " gameViewportRect=" << sLoggedDirectViewportRect.x << "," << sLoggedDirectViewportRect.y << " " << sLoggedDirectViewportRect.width << "x" << sLoggedDirectViewportRect.height);
+		}
+		drawer.setWindowRenderTarget(FTX::screenRect());
+	}
+	else
+	{
+		drawer.setRenderTarget(mFinalGameTexture, gameScreenRect);
+	}
 	drawer.setBlendMode(BlendMode::OPAQUE);
 
 	// Simple mirror mode implementation: Just mirror the whole screen
-	if (config.mMirrorMode)
+	if (renderGameScreenDirectToWindow)
+	{
+#if defined(PLATFORM_WIIU)
+		videoOut.updateGameScreenOnCurrentTarget(gameScreenRect);
+		drawer.setWindowRenderTarget(gameScreenRect);
+		videoOut.drawGameScreenOnCurrentTarget(gameScreenRect);
+#endif
+	}
+	else if (config.mMirrorMode)
 	{
 		drawer.drawRect(gameScreenRect, videoOut.getGameScreenTexture(), Vec2f(1.0f, 0.0f), Vec2f(0.0f, 1.0f), Color::WHITE);
 	}
@@ -718,6 +758,18 @@ void GameView::render()
 	drawer.performRendering();
 
 	// Render the (pixelated) game UI
+// this function has taken my lunch money 3 times now
+#if defined(PLATFORM_WIIU)
+	if (renderDirectToWindow)
+	{
+		drawer.setWindowRenderTarget(gameScreenRect);
+		drawer.setBlendMode(BlendMode::ALPHA);
+	}
+	for (GuiBase* child : getChildren())
+	{
+		child->setRect(gameScreenRect);
+	}
+#endif
 	mRect = gameScreenRect;
 	GuiBase::render();
 
@@ -744,42 +796,52 @@ void GameView::render()
 		}
 	}
 
-	// Draw the combined image
-	const Recti& gameViewportRect = mGameViewport.getRectOnScreen();
-	static Recti sLoggedScreenRect;
-	static Recti sLoggedGameScreenRect;
-	static Recti sLoggedViewportRect;
-	if (sLoggedScreenRect != FTX::screenRect() || sLoggedGameScreenRect != gameScreenRect || sLoggedViewportRect != gameViewportRect)
+	if (!renderDirectToWindow)
 	{
-		sLoggedScreenRect = FTX::screenRect();
-		sLoggedGameScreenRect = gameScreenRect;
-		sLoggedViewportRect = gameViewportRect;
-		RMX_LOG_INFO("GameView viewport layout: screenRect=" << sLoggedScreenRect.x << "," << sLoggedScreenRect.y << " " << sLoggedScreenRect.width << "x" << sLoggedScreenRect.height
-			<< " gameScreenRect=" << sLoggedGameScreenRect.x << "," << sLoggedGameScreenRect.y << " " << sLoggedGameScreenRect.width << "x" << sLoggedGameScreenRect.height
-			<< " gameViewportRect=" << sLoggedViewportRect.x << "," << sLoggedViewportRect.y << " " << sLoggedViewportRect.width << "x" << sLoggedViewportRect.height);
-	}
-	drawer.setWindowRenderTarget(FTX::screenRect());
-	drawer.setBlendMode(BlendMode::OPAQUE);
+		// Draw the combined image
+		const Recti& gameViewportRect = mGameViewport.getRectOnScreen();
+		static Recti sLoggedScreenRect;
+		static Recti sLoggedGameScreenRect;
+		static Recti sLoggedViewportRect;
+		if (sLoggedScreenRect != FTX::screenRect() || sLoggedGameScreenRect != gameScreenRect || sLoggedViewportRect != gameViewportRect)
+		{
+			sLoggedScreenRect = FTX::screenRect();
+			sLoggedGameScreenRect = gameScreenRect;
+			sLoggedViewportRect = gameViewportRect;
+			RMX_LOG_INFO("GameView viewport layout: screenRect=" << sLoggedScreenRect.x << "," << sLoggedScreenRect.y << " " << sLoggedScreenRect.width << "x" << sLoggedScreenRect.height
+				<< " gameScreenRect=" << sLoggedGameScreenRect.x << "," << sLoggedGameScreenRect.y << " " << sLoggedGameScreenRect.width << "x" << sLoggedGameScreenRect.height
+				<< " gameViewportRect=" << sLoggedViewportRect.x << "," << sLoggedViewportRect.y << " " << sLoggedViewportRect.width << "x" << sLoggedViewportRect.height);
+		}
+		drawer.setWindowRenderTarget(FTX::screenRect());
+		drawer.setBlendMode(BlendMode::OPAQUE);
 #if defined(PLATFORM_WIIU)
-	drawer.drawRect(FTX::screenRect(), mFinalGameTexture);
+		if (drawer.getType() == Drawer::Type::GX2)
+		{
+			drawer.drawUpscaledRect(gameViewportRect, mFinalGameTexture);
+		}
+		else
+		{
+			drawer.drawRect(FTX::screenRect(), mFinalGameTexture, Vec2f(0.0f, 1.0f), Vec2f(1.0f, 0.0f), Color::WHITE);
+		}
 #else
-	drawer.drawUpscaledRect(gameViewportRect, mFinalGameTexture);
+		drawer.drawUpscaledRect(gameViewportRect, mFinalGameTexture);
 #endif
 
-	if (!FTX::Video->getVideoConfig().mAutoClearScreen)
-	{
-		// Draw black bars so no screen clearing is needed
-		const int x1 = gameViewportRect.x;
-		const int x2 = gameViewportRect.x + gameViewportRect.width;
-		const int x3 = FTX::Video->getScreenWidth();
-		const int y1 = gameViewportRect.y;
-		const int y2 = gameViewportRect.y + gameViewportRect.height;
-		const int y3 = FTX::Video->getScreenHeight();
+		if (!FTX::Video->getVideoConfig().mAutoClearScreen)
+		{
+			// Draw black bars so no screen clearing is needed
+			const int x1 = gameViewportRect.x;
+			const int x2 = gameViewportRect.x + gameViewportRect.width;
+			const int x3 = FTX::Video->getScreenWidth();
+			const int y1 = gameViewportRect.y;
+			const int y2 = gameViewportRect.y + gameViewportRect.height;
+			const int y3 = FTX::Video->getScreenHeight();
 
-		drawer.drawRect(Recti(0, 0, x3, y1), Color::BLACK);
-		drawer.drawRect(Recti(0, y2, x3, y3 - y2), Color::BLACK);
-		drawer.drawRect(Recti(0, y1, x1, y2 - y1), Color::BLACK);
-		drawer.drawRect(Recti(x2, y1, x3 - x2, y2 - y1), Color::BLACK);
+			drawer.drawRect(Recti(0, 0, x3, y1), Color::BLACK);
+			drawer.drawRect(Recti(0, y2, x3, y3 - y2), Color::BLACK);
+			drawer.drawRect(Recti(0, y1, x1, y2 - y1), Color::BLACK);
+			drawer.drawRect(Recti(x2, y1, x3 - x2, y2 - y1), Color::BLACK);
+		}
 	}
 
 	// Enable alpha again

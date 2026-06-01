@@ -118,9 +118,16 @@ void GameApp::update(float timeElapsed)
 		if (mCurrentState == State::DISCLAIMER)
 		{
 			mDisclaimerVisibility = std::min(mDisclaimerVisibility + dt / DISCLAIMER_FADE_IN_TIME, 1.0f);
+			mDisclaimerSkipDelay = std::max(mDisclaimerSkipDelay - dt, 0.0f);
 
 			mStateTimeout -= dt;
-			if (mStateTimeout <= 0.0f || InputManager::instance().anythingPressed())
+#if defined(PLATFORM_WIIU)
+			const InputManager::ControllerScheme& controller = InputManager::instance().getController(0);
+			const bool skipPressed = controller.Start.justPressed() || controller.A.justPressed();
+#else
+			const bool skipPressed = InputManager::instance().anythingPressed();
+#endif
+			if (mStateTimeout <= 0.0f || (mDisclaimerSkipDelay <= 0.0f && skipPressed))
 			{
 				gotoPhase(1);
 			}
@@ -179,19 +186,25 @@ void GameApp::update(float timeElapsed)
 
 void GameApp::render()
 {
+	GuiBase::render();
+
 	Drawer& drawer = EngineMain::instance().getDrawer();
 
-	if (mDisclaimerVisibility > 0.0f)
+	if (mDisclaimerVisibility > 0.0f && mDisclaimerTexture.isValid())
 	{
+#if defined(PLATFORM_WIIU)
 		const Rectf rect = RenderUtils::getLetterBoxRect(FTX::screenRect(), (float)mDisclaimerTexture.getWidth() / (float)mDisclaimerTexture.getHeight());
+		drawer.setWindowRenderTarget(FTX::screenRect());
+
+#else
+		const Rectf rect = RenderUtils::getLetterBoxRect(VideoOut::instance().getScreenRect(), (float)mDisclaimerTexture.getWidth() / (float)mDisclaimerTexture.getHeight());
+#endif
 		drawer.setBlendMode(BlendMode::OPAQUE);
 		drawer.setSamplingMode(SamplingMode::BILINEAR);
 		drawer.drawRect(rect, mDisclaimerTexture, Color(mDisclaimerVisibility, mDisclaimerVisibility, mDisclaimerVisibility));
 		drawer.setSamplingMode(SamplingMode::POINT);
 		drawer.performRendering();
 	}
-
-	GuiBase::render();
 }
 
 void GameApp::onStartGame()
@@ -277,9 +290,9 @@ void GameApp::onGamePaused(bool canRestart)
 	AudioOut::instance().pauseSoundContext(AudioOut::CONTEXT_INGAME + AudioOut::CONTEXT_SOUND);
 
 	mPauseMenu->enableRestart(canRestart);
-	mPauseMenu->onFadeIn();
 	if (nullptr == mPauseMenu->getParent())
 	{
+		mPauseMenu->onFadeIn();
 		mGameView->addChild(*mPauseMenu);
 	}
 }
@@ -371,6 +384,11 @@ void GameApp::gotoPhase(int phaseNumber)
 			// Start with the disclaimer
 			mCurrentState = State::DISCLAIMER;
 			mStateTimeout = 8.0f;
+#if defined(PLATFORM_WIIU)
+			mDisclaimerSkipDelay = 3.0f;
+#else
+			mDisclaimerSkipDelay = 1.0f;
+#endif
 			InputManager::instance().setTouchInputMode(InputManager::TouchInputMode::FULLSCREEN_START);
 
 			// Load disclaimer texture if not done already
@@ -384,6 +402,7 @@ void GameApp::gotoPhase(int phaseNumber)
 		case 1:
 		{
 			// Start with the intro & title screen
+			RMX_LOG_INFO("GameApp: entering title screen from phase " << phaseNumber);
 			mCurrentState = State::TITLE_SCREEN;
 			Game::instance().startIntoTitleScreen();
 			break;

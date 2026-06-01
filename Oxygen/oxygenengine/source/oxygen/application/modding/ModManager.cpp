@@ -14,6 +14,61 @@
 #include "oxygen/helper/JsonHelper.h"
 #include "oxygen/helper/Logging.h"
 #include "oxygen/helper/Utils.h"
+// we gotta make this shit reliable baby
+namespace
+{
+	std::wstring normalizeModListEntry(const std::string& activeEntry)
+	{
+		std::wstring path = String(activeEntry).toStdWString();
+		std::replace(path.begin(), path.end(), L'\\', L'/');
+
+		std::wstring lowerPath = path;
+		std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), [](wchar_t c) { return (wchar_t)towlower(c); });
+		const size_t modsPos = lowerPath.rfind(L"/mods/");
+		if (modsPos != std::wstring::npos)
+		{
+			path.erase(0, modsPos + 6);
+			lowerPath.erase(0, modsPos + 6);
+		}
+		while (rmx::startsWith(path, L"./"))
+		{
+			path.erase(0, 2);
+		}
+		while (!path.empty() && path.front() == L'/')
+		{
+			path.erase(path.begin());
+		}
+		if (rmx::startsWithCaseInsensitive(path, L"mods/"))
+		{
+			path.erase(0, 5);
+		}
+		while (!path.empty() && path.back() == L'/')
+		{
+			path.pop_back();
+		}
+		if (rmx::endsWithCaseInsensitive(path, L"/mod.json"))
+		{
+			path.erase(path.length() - 9);
+		}
+		return path;
+	}
+
+	void addModLookup(std::unordered_map<uint64, Mod*>& lookup, const std::string& value, Mod& mod)
+	{
+		if (!value.empty())
+		{
+			lookup[rmx::getMurmur2_64(value)] = &mod;
+		}
+	}
+
+	void addModLookup(std::unordered_map<uint64, Mod*>& lookup, const std::wstring& value, Mod& mod)
+	{
+		if (!value.empty())
+		{
+			lookup[rmx::getMurmur2_64(WString(value).toStdString())] = &mod;
+		}
+	}
+}
 
 
 ModManager::~ModManager()
@@ -25,15 +80,51 @@ void ModManager::startup()
 {
 	// Update base path (actually only needs to be done once, it shouldn't change afterwards anyways)
 	mBasePath = Configuration::instance().mGameAppDataPath + L"mods/";
+	FTX::FileSystem->createDirectory(mBasePath);
+	RMX_LOG_INFO("ModManager: scanning mods at " << WString(mBasePath).toStdString());
+#if defined(PLATFORM_WIIU)
+	{
+		std::vector<std::wstring> appRootModPaths;
+		std::wstring appRootPath = Configuration::instance().mGameAppDataPath;
+		std::replace(appRootPath.begin(), appRootPath.end(), L'\\', L'/');
+		if (rmx::endsWithCaseInsensitive(appRootPath, L"/savedata/"))
+		{
+			appRootPath.erase(appRootPath.length() - 9);
+			appRootModPaths.emplace_back(appRootPath + L"mods/");
+		}
+		appRootModPaths.emplace_back(L"fs:/vol/external01/wiiu/apps/sonic3air/mods/");
+		appRootModPaths.emplace_back(L"/vol/external01/wiiu/apps/sonic3air/mods/");
+
+		for (const std::wstring& appRootModsPath : appRootModPaths)
+		{
+			if (appRootModsPath != mBasePath && FTX::FileSystem->exists(appRootModsPath))
+			{
+				rmx::RealFileProvider* provider = new rmx::RealFileProvider();
+				FTX::FileSystem->addManagedFileProvider(*provider);
+				FTX::FileSystem->addMountPoint(*provider, mBasePath + L"root/", appRootModsPath, 0x40);
+				RMX_LOG_INFO("ModManager: also scanning Wii U app-root mods at " << WString(appRootModsPath).toStdString());
+				break;
+			}
+		}
+	}
+#endif
 
 	// First go through all mod directories recursively to gather all installed mods
 	scanMods();
 
 	// Now get the list of active mods
 	//  -> Check if there's an "active-mods.json" file and read it
-	if (FTX::FileSystem->exists(mBasePath + L"active-mods.json"))
+	std::wstring activeModsPath = mBasePath + L"active-mods.json";
+#if defined(PLATFORM_WIIU)
+	if (!FTX::FileSystem->exists(activeModsPath) && FTX::FileSystem->exists(mBasePath + L"root/active-mods.json"))
 	{
-		Json::Value json = JsonHelper::loadFile(mBasePath + L"active-mods.json");
+		activeModsPath = mBasePath + L"root/active-mods.json";
+		RMX_LOG_INFO("ModManager: using Wii U app-root active mod list");
+	}
+#endif
+	if (FTX::FileSystem->exists(activeModsPath))
+	{
+		Json::Value json = JsonHelper::loadFile(activeModsPath);
 
 		Json::Value activeMods = json["ActiveMods"];
 		const int numMods = activeMods.isArray() ? (int)activeMods.size() : 0;
@@ -42,14 +133,10 @@ void ModManager::startup()
 			if (!activeMods[i].isString())
 				continue;
 
-			const std::wstring localPath = String(activeMods[i].asString()).toStdWString();
-			const uint64 hash = rmx::getMurmur2_64(localPath);
-
-			// Search for this mod in the previously found mods
-			Mod* mod = mapFindOrDefault(mModsByLocalDirectoryHash, hash, nullptr);
+			Mod* mod = findModForActiveEntry(activeMods[i].asString());
 			if (nullptr == mod)
 			{
-				// Not found... we could make this an error / failed mod
+				RMX_LOG_INFO("ModManager: active mod entry not found: " << activeMods[i].asString());
 			}
 			else
 			{
@@ -64,15 +151,22 @@ void ModManager::startup()
 	copyModSettingsFromConfig();
 
 	onActiveModsChanged(true);
+	RMX_LOG_INFO("ModManager: startup found " << (uint32)mAllMods.size() << " mods, active " << (uint32)mActiveMods.size());
 }
 
 void ModManager::clear()
 {
+	for (auto& pair : mZipFileProviders)
+	{
+		delete pair.second;
+	}
+	mZipFileProviders.clear();
 	for (Mod* mod : mAllMods)
 		delete mod;
 	mAllMods.clear();
 	mActiveMods.clear();
 	mModsByLocalDirectoryHash.clear();
+	mModsByIDHash.clear();
 }
 
 bool ModManager::rescanMods()
@@ -246,6 +340,26 @@ bool ModManager::tryRemoveZipFileProvider(const std::wstring& zipLocalPath)
 	mZipFileProviders.erase(it);
 	return true;
 }
+// the bruh function (this does mostly everything)
+Mod* ModManager::findModForActiveEntry(const std::string& activeEntry) const
+{
+	const std::wstring localPath = normalizeModListEntry(activeEntry);
+	const auto it = mModsByLocalDirectoryHash.find(rmx::getMurmur2_64(localPath));
+	if (it != mModsByLocalDirectoryHash.end())
+	{
+		return it->second;
+	}
+
+	const auto it2 = mModsByIDHash.find(rmx::getMurmur2_64(activeEntry));
+	if (it2 != mModsByIDHash.end())
+	{
+		return it2->second;
+	}
+
+	const std::string normalizedEntry = WString(localPath).toStdString();
+	const auto it3 = mModsByIDHash.find(rmx::getMurmur2_64(normalizedEntry));
+	return (it3 != mModsByIDHash.end()) ? it3->second : nullptr;
+}
 
 bool ModManager::scanMods()
 {
@@ -259,6 +373,20 @@ bool ModManager::scanMods()
 	{
 		std::vector<std::wstring> zipPaths;
 		findZipsRecursively(zipPaths, L"", 3);
+		std::set<std::wstring> zipPathSet(zipPaths.begin(), zipPaths.end());
+		for (auto it = mZipFileProviders.begin(); it != mZipFileProviders.end(); )
+		{
+			if (zipPathSet.find(it->first) == zipPathSet.end())
+			{
+				RMX_LOG_INFO("Unloaded removed mod zip file: " << WString(it->first).toStdString());
+				delete it->second;
+				it = mZipFileProviders.erase(it);
+			}
+			else
+			{
+				++it;
+			}
+		}
 		for (const std::wstring& zipPath : zipPaths)
 		{
 			addZipFileProvider(zipPath);
@@ -383,7 +511,26 @@ bool ModManager::scanMods()
 		return (cmp != 0) ? (cmp < 0) : (a->mDirectoryName < b->mDirectoryName);
 	});
 
+	rebuildModIdLookup();
+
+	if (anyChange)
+	{
+		RMX_LOG_INFO("ModManager: scan complete, found " << (uint32)mAllMods.size() << " mods");
+	}
 	return anyChange;
+}
+// should probably check if its a lemon mod because those can be inconsistent on wii u but for now just leave it
+void ModManager::rebuildModIdLookup()
+{
+	mModsByIDHash.clear();
+	for (Mod* mod : mAllMods)
+	{
+		addModLookup(mModsByIDHash, mod->mUniqueID, *mod);
+		addModLookup(mModsByIDHash, mod->mDirectoryName, *mod);
+		addModLookup(mModsByIDHash, mod->mDisplayName, *mod);
+		addModLookup(mModsByIDHash, mod->mLocalDirectory, *mod);
+		addModLookup(mModsByIDHash, normalizeModListEntry(WString(mod->mLocalDirectory).toStdString()), *mod);
+	}
 }
 
 void ModManager::scanDirectoryRecursive(std::vector<FoundMod>& outFoundMods, const std::wstring& localPath)

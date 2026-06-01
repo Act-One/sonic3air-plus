@@ -57,6 +57,21 @@ void PatternManager::refresh()
 							memcpy(v3, v1, 8);
 						}
 
+						for (CacheItem::Pattern& pattern : cacheItem.mFlipVariation)
+						{
+							for (uint8 y = 0; y < 8; ++y)
+							{
+								uint8 mask = 0;
+								const uint8* pixels = &pattern.mPixels[y * 8];
+								for (uint8 x = 0; x < 8; ++x)
+								{
+									if (pixels[x] & 0x0f)
+										mask |= (uint8)(1u << x);
+								}
+								pattern.mOpaqueMaskByRow[y] = mask;
+							}
+						}
+
 						memcpy(cacheItem.mOriginalDataBackup, src, 0x20);
 						mChangeBits.setBit(patternIndex);
 					}
@@ -66,7 +81,6 @@ void PatternManager::refresh()
 			}
 		}
 	}
-	EmulatorInterface::instance().getVRamChangeBits().clearAllBits();
 }
 
 uint8 PatternManager::getLastUsedAtex(uint16 patternIndex) const

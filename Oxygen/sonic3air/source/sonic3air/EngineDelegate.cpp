@@ -158,6 +158,11 @@ void EngineDelegate::registerScriptBindings(lemon::Module& module)
 
 void EngineDelegate::registerNativizedCode(lemon::Program& program)
 {
+#if defined(PLATFORM_WIIU) && defined(S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT)
+	RMX_LOG_WARNING("[WiiU Lemon] Nativized LemonScript provider disabled for crash isolation");
+	program.mNativizedOpcodeProvider = nullptr;
+	return;
+#endif
 	static lemon::NativizedOpcodeProvider instance(&lemon::createNativizedCodeLookup);
 	program.mNativizedOpcodeProvider = instance.isValid() ? &instance : nullptr;
 }

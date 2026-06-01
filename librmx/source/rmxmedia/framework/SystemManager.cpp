@@ -23,6 +23,9 @@
 #elif defined(PLATFORM_WEB)
 	#include <emscripten.h>
 	#include <emscripten/html5.h>
+	// we again gotta take control of ProcUI, because SDL isn't playing nice with exit
+#elif defined(PLATFORM_WIIU)
+	#include <whb/proc.h>
 
 #endif
 
@@ -43,8 +46,8 @@ namespace rmx
 		if (mInitialized)
 			return true;
 
-		// On Wii U the GX2/WHB path owns video output directly. Initializing
-		// SDL's video backend creates a competing CafeOS scanbuffer owner.
+		// On Wii U the GX2 path owns video output directly.
+		// SDL is initialized without its video backend.
 #if defined(PLATFORM_WIIU)
 		if (SDL_Init(0) < 0)
 #else
@@ -60,6 +63,14 @@ namespace rmx
 			return false;
 		}
 
+#if defined(PLATFORM_WIIU)
+		if (!WHBProcIsRunning())
+		{
+			WHBProcInit();
+			mProcUIInitialized = true;
+		}
+#endif
+
 		mInitialized = true;
 		return true;
 	}
@@ -67,7 +78,19 @@ namespace rmx
 	void SystemManager::exit()
 	{
 		// Quit SDL
+		RMX_LOG_INFO("SystemManager: SDL_Quit begin");
 		SDL_Quit();
+		RMX_LOG_INFO("SystemManager: SDL_Quit complete");
+
+#if defined(PLATFORM_WIIU)
+		if (mProcUIInitialized)
+		{
+			RMX_LOG_INFO("SystemManager: WHBProcShutdown begin");
+			WHBProcShutdown();
+			RMX_LOG_INFO("SystemManager: WHBProcShutdown complete");
+			mProcUIInitialized = false;
+		}
+#endif
 	}
 
 	void SystemManager::checkSDLEvents()
@@ -206,9 +229,15 @@ namespace rmx
 
 	void SystemManager::run(GuiBase& app)
 	{
+		RMX_LOG_INFO("SystemManager: adding root app");
 		mRoot.addChild(app);
+		RMX_LOG_INFO("SystemManager: root app added");
+		RMX_LOG_INFO("SystemManager: entering main loop");
 		run();
+		RMX_LOG_INFO("SystemManager: main loop returned");
+		RMX_LOG_INFO("SystemManager: removing root app");
 		mRoot.removeChild(app);
+		RMX_LOG_INFO("SystemManager: root app removed");
 	}
 
 	void SystemManager::mainLoop()
@@ -250,6 +279,13 @@ namespace rmx
 		// Main loop
 		while (mRunning)
 		{
+#if defined(PLATFORM_WIIU)
+			if (!WHBProcIsRunning())
+			{
+				mRunning = false;
+				break;
+			}
+#endif
 			mainLoop();
 		}
 #endif

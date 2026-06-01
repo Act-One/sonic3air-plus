@@ -21,10 +21,11 @@
 
 // OpenGL support master switch
 //  -> Can be disabled for platforms where OpenGL does not work
-#if !defined(PLATFORM_UWP)
+#if !defined(PLATFORM_UWP) && !defined(PLATFORM_WIIU)
 	#define RMX_WITH_OPENGL_SUPPORT
 #endif
-
+// Disabled OpenGL on UWP so we can use d3d11 instead when the time comes i guess
+// Note: OpenGL should stay off for Wii U because gx2gl has proven not to be very performant
 
 // General includes
 #include "rmxbase.h"

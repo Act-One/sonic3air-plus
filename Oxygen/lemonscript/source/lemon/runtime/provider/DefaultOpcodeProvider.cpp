@@ -15,9 +15,23 @@
 #include "lemon/program/Program.h"
 #include "lemon/program/function/NativeFunction.h"
 
-
+// Default opcode provider, used as fallback if no nativized or optimized opcode provider is available or can handle a certain opcode
+// oh also endian safety for big endian
 namespace lemon
 {
+	namespace
+	{
+		FORCE_INLINE uint8* getScriptSlotPointerForType(int64* slot, BaseType baseType)
+		{
+			const size_t bytes = BaseTypeHelper::getSizeOfBaseType(baseType);
+		#if defined(PLATFORM_WIIU) || defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+			if (bytes > 0 && bytes < sizeof(int64))
+				return reinterpret_cast<uint8*>(slot) + (sizeof(int64) - bytes);
+		#endif
+			return reinterpret_cast<uint8*>(slot);
+		}
+	}
+
 	#define SELECT_EXEC_FUNC_BY_DATATYPE(_function_) \
 	{ \
 		switch (opcode.mDataType) \
@@ -459,7 +473,7 @@ namespace lemon
 					{
 						const GlobalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<GlobalVariable>();
 						int64* value = const_cast<Runtime&>(runtime).accessGlobalVariableValue(variable);
-						runtimeOpcode.setParameter(value);
+						runtimeOpcode.setParameter(getScriptSlotPointerForType(value, opcode.mDataType));
 
 						switch (BaseTypeHelper::getSizeOfBaseType(opcode.mDataType))
 						{
@@ -514,7 +528,7 @@ namespace lemon
 					{
 						const GlobalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<GlobalVariable>();
 						int64* value = const_cast<Runtime&>(runtime).accessGlobalVariableValue(variable);
-						runtimeOpcode.setParameter(value);
+						runtimeOpcode.setParameter(getScriptSlotPointerForType(value, opcode.mDataType));
 
 						switch (BaseTypeHelper::getSizeOfBaseType(opcode.mDataType))
 						{
