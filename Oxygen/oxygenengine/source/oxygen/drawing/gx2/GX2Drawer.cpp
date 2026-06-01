@@ -77,6 +77,16 @@ namespace
 		float localY;
 	};
 
+	struct PaletteSpriteVertex
+	{
+		float x;
+		float y;
+		float localX;
+		float localY;
+		float screenX;
+		float screenY;
+	};
+
 	struct VdpSpriteBatchVertex
 	{
 		float x;
@@ -136,7 +146,7 @@ namespace
 	static constexpr bool FORCE_COLOR_SHADER_TEST_RECT = false;
 	static constexpr bool SKIP_GX2_TEARDOWN_ON_EXIT = true;
 	static constexpr bool WAIT_FOR_SCAN_FLIP = true;
-	static constexpr bool PRESENT_LOGS = true;
+	static constexpr bool PRESENT_LOGS = false;
 	static constexpr uint32 PRESENT_LOG_LIMIT = 8;
 	static constexpr bool ENABLE_GX2_DRAWER_DIAGNOSTICS = false;
 	static constexpr bool ENABLE_GX2_TEXT_DIAGNOSTICS = false;
@@ -329,9 +339,25 @@ void main()
 }
 )";
 
-static constexpr const char* PALETTE_SPRITE_PS = R"(
+	static constexpr const char* PALETTE_SPRITE_VS = R"(
+#version 330
+in vec2 aPosition;
+in vec2 aLocalOffset;
+in vec2 aScreenPosition;
+out vec2 vLocalOffset;
+out vec2 vScreenPosition;
+void main()
+{
+	vLocalOffset = aLocalOffset;
+	vScreenPosition = aScreenPosition;
+	gl_Position = vec4(aPosition, 0.0, 1.0);
+}
+)";
+
+	static constexpr const char* PALETTE_SPRITE_PS = R"(
 #version 330
 in vec2 vLocalOffset;
+in vec2 vScreenPosition;
 uniform sampler2D uSpriteDataTexture;
 uniform vec4 uConfig0;
 uniform vec4 uConfig1;
@@ -357,7 +383,7 @@ void main()
 	float paletteIndex = sourceIndex + uConfig1.y;
 	float paletteX = mod(paletteIndex, 256.0);
 	float paletteY = floor(paletteIndex / 256.0);
-	float paletteOffset = (vLocalOffset.y < uConfig1.x) ? 0.0 : 2.0;
+	float paletteOffset = (vScreenPosition.y < uConfig1.x) ? 0.0 : 2.0;
 	vec4 color = texture(uSpriteDataTexture, vec2((paletteX + 0.5) / dataSize.x, (rectSize.y + paletteY + paletteOffset + 0.5) / dataSize.y));
 	color = vec4(uAddedColor.rgb, 0.0) + color * uTintColor;
 	if (color.a < 0.01)
@@ -1915,15 +1941,19 @@ public:
 
 	bool initializePaletteSpriteShader()
 	{
-		if (!compileShaderPair(mPaletteSpriteShaderGroup, "palette_sprite", PLANE_VS, PALETTE_SPRITE_PS))
+		if (!compileShaderPair(mPaletteSpriteShaderGroup, "palette_sprite", PALETTE_SPRITE_VS, PALETTE_SPRITE_PS))
 			return false;
-		if (!addAttrib(mPaletteSpriteShaderGroup, "aPosition", 0, offsetof(PlaneVertex, x), GX2_ATTRIB_FORMAT_FLOAT_32_32))
+		if (!addAttrib(mPaletteSpriteShaderGroup, "aPosition", 0, offsetof(PaletteSpriteVertex, x), GX2_ATTRIB_FORMAT_FLOAT_32_32))
 		{
 			RMX_ERROR("GX2Drawer: failed to initialize palette sprite position", freeCompiledShaderGroup(mPaletteSpriteShaderGroup); return false);
 		}
-		if (!addAttrib(mPaletteSpriteShaderGroup, "aLocalOffset", 0, offsetof(PlaneVertex, localX), GX2_ATTRIB_FORMAT_FLOAT_32_32))
+		if (!addAttrib(mPaletteSpriteShaderGroup, "aLocalOffset", 0, offsetof(PaletteSpriteVertex, localX), GX2_ATTRIB_FORMAT_FLOAT_32_32))
 		{
 			RMX_ERROR("GX2Drawer: failed to initialize palette sprite local offset", freeCompiledShaderGroup(mPaletteSpriteShaderGroup); return false);
+		}
+		if (!addAttrib(mPaletteSpriteShaderGroup, "aScreenPosition", 0, offsetof(PaletteSpriteVertex, screenX), GX2_ATTRIB_FORMAT_FLOAT_32_32))
+		{
+			RMX_ERROR("GX2Drawer: failed to initialize palette sprite screen position", freeCompiledShaderGroup(mPaletteSpriteShaderGroup); return false);
 		}
 		if (!makeFetchShader(mPaletteSpriteShaderGroup))
 		{
@@ -2135,6 +2165,42 @@ public:
 		vertices[3] = { x1, y1, lx1, ly1 };
 		vertices[4] = { x1, y0, lx1, ly0 };
 		vertices[5] = { x0, y0, lx0, ly0 };
+	}
+
+	void fillPaletteSpriteRectVertices(PaletteSpriteVertex* vertices, const Recti& rect) const
+	{
+		const float x0 = toClipX((float)rect.x);
+		const float x1 = toClipX((float)(rect.x + rect.width));
+		const float y0 = toClipY((float)rect.y);
+		const float y1 = toClipY((float)(rect.y + rect.height));
+		const float sx0 = (float)rect.x;
+		const float sx1 = (float)(rect.x + rect.width);
+		const float sy0 = (float)rect.y;
+		const float sy1 = (float)(rect.y + rect.height);
+
+		vertices[0] = { x0, y0, sx0, sy0, sx0, sy0 };
+		vertices[1] = { x0, y1, sx0, sy1, sx0, sy1 };
+		vertices[2] = { x1, y1, sx1, sy1, sx1, sy1 };
+		vertices[3] = { x1, y1, sx1, sy1, sx1, sy1 };
+		vertices[4] = { x1, y0, sx1, sy0, sx1, sy0 };
+		vertices[5] = { x0, y0, sx0, sy0, sx0, sy0 };
+	}
+
+	void fillPaletteSpriteMeshVertices(PaletteSpriteVertex* vertices, const std::vector<DrawerMeshVertex>& triangles) const
+	{
+		for (size_t i = 0; i < triangles.size(); ++i)
+		{
+			const DrawerMeshVertex& src = triangles[i];
+			vertices[i] =
+			{
+				toClipX(src.mPosition.x),
+				toClipY(src.mPosition.y),
+				src.mTexcoords.x,
+				src.mTexcoords.y,
+				src.mPosition.x,
+				src.mPosition.y
+			};
+		}
 	}
 
 	void setupViewport(const Recti& viewport, bool windowTarget)
@@ -2746,43 +2812,46 @@ public:
 			scrollOffsetX = scrollOffsetsManager.getScrollOffsetsH(dc.mScrollOffsets)[0];
 			scrollOffsetY = scrollOffsetsManager.getScrollOffsetsV(dc.mScrollOffsets)[0];
 		}
-		static uint32 sPlaneDrawLogCount = 0;
-		static uint32 sNonEmptyPlaneDrawLogCount = 0;
-		if (sPlaneDrawLogCount < 8 || sNonEmptyPlaneDrawLogCount < 24)
+		if constexpr (ENABLE_GX2_DRAWER_DIAGNOSTICS)
 		{
-			const uint16* planeBuffer = planeManager.getPlanePatternsBuffer((uint8)clamp(dc.mPlaneIndex, 0, 3));
-			const int sampleX = clamp((int)(std::abs(scrollOffsetX) / 8) % std::max(1, playfieldSize.z), 0, std::max(0, playfieldSize.z - 1));
-			const int sampleY = clamp((int)(std::abs(scrollOffsetY) / 8) % std::max(1, playfieldSize.w), 0, std::max(0, playfieldSize.w - 1));
-			const uint16 sampleEntry = (nullptr != planeBuffer) ? planeBuffer[sampleX + sampleY * playfieldSize.z] : 0;
-			uint32 nonZeroEntries = 0;
-			if (nullptr != planeBuffer)
+			static uint32 sPlaneDrawLogCount = 0;
+			static uint32 sNonEmptyPlaneDrawLogCount = 0;
+			if (sPlaneDrawLogCount < 8 || sNonEmptyPlaneDrawLogCount < 24)
 			{
-				const int maxEntries = std::min(playfieldSize.z * playfieldSize.w, 2048);
-				for (int index = 0; index < maxEntries; ++index)
+				const uint16* planeBuffer = planeManager.getPlanePatternsBuffer((uint8)clamp(dc.mPlaneIndex, 0, 3));
+				const int sampleX = clamp((int)(std::abs(scrollOffsetX) / 8) % std::max(1, playfieldSize.z), 0, std::max(0, playfieldSize.z - 1));
+				const int sampleY = clamp((int)(std::abs(scrollOffsetY) / 8) % std::max(1, playfieldSize.w), 0, std::max(0, playfieldSize.w - 1));
+				const uint16 sampleEntry = (nullptr != planeBuffer) ? planeBuffer[sampleX + sampleY * playfieldSize.z] : 0;
+				uint32 nonZeroEntries = 0;
+				if (nullptr != planeBuffer)
 				{
-					if (planeBuffer[index] != 0)
-						++nonZeroEntries;
+					const int maxEntries = std::min(playfieldSize.z * playfieldSize.w, 2048);
+					for (int index = 0; index < maxEntries; ++index)
+					{
+						if (planeBuffer[index] != 0)
+							++nonZeroEntries;
+					}
 				}
+				const bool shouldLogPlane = (sPlaneDrawLogCount < 8) || (nonZeroEntries > 0 && sNonEmptyPlaneDrawLogCount < 24);
+				if (shouldLogPlane)
+				{
+					RMX_LOG_INFO("GX2Drawer: plane draw " << sPlaneDrawLogCount
+						<< " nonEmpty=" << sNonEmptyPlaneDrawLogCount
+						<< " plane=" << dc.mPlaneIndex
+						<< " prio=" << (dc.mPriorityFlag ? 1 : 0)
+						<< " rect=" << rect.x << "," << rect.y << " " << rect.width << "x" << rect.height
+						<< " scrollId=" << (int)dc.mScrollOffsets
+						<< " scroll=" << scrollOffsetX << "," << scrollOffsetY
+						<< " useHV=" << useHorizontalScrolling << "," << useVerticalScrolling
+						<< " playfield=" << playfieldSize.x << "x" << playfieldSize.y
+						<< " patterns=" << playfieldSize.z << "x" << playfieldSize.w
+						<< " sample=" << rmx::hexString(sampleEntry, 4)
+						<< " nonZero=" << nonZeroEntries);
+					if (nonZeroEntries > 0)
+						++sNonEmptyPlaneDrawLogCount;
+				}
+				++sPlaneDrawLogCount;
 			}
-			const bool shouldLogPlane = (sPlaneDrawLogCount < 8) || (nonZeroEntries > 0 && sNonEmptyPlaneDrawLogCount < 24);
-			if (shouldLogPlane)
-			{
-				RMX_LOG_INFO("GX2Drawer: plane draw " << sPlaneDrawLogCount
-					<< " nonEmpty=" << sNonEmptyPlaneDrawLogCount
-					<< " plane=" << dc.mPlaneIndex
-					<< " prio=" << (dc.mPriorityFlag ? 1 : 0)
-					<< " rect=" << rect.x << "," << rect.y << " " << rect.width << "x" << rect.height
-					<< " scrollId=" << (int)dc.mScrollOffsets
-					<< " scroll=" << scrollOffsetX << "," << scrollOffsetY
-					<< " useHV=" << useHorizontalScrolling << "," << useVerticalScrolling
-					<< " playfield=" << playfieldSize.x << "x" << playfieldSize.y
-					<< " patterns=" << playfieldSize.z << "x" << playfieldSize.w
-					<< " sample=" << rmx::hexString(sampleEntry, 4)
-					<< " nonZero=" << nonZeroEntries);
-				if (nonZeroEntries > 0)
-					++sNonEmptyPlaneDrawLogCount;
-			}
-			++sPlaneDrawLogCount;
 		}
 
 		GX2Texture* planeDataTexture = getNativeTexture(dc.mResources->getPlaneDataTexture());
@@ -3016,13 +3085,16 @@ public:
 		applyScissor();
 		GX2SetAttribBuffer(0, vertexDataSize, sizeof(VdpSpriteBatchVertex), vertices);
 		GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, vertexIndex, 0, 1);
-		static uint32 sVdpBatchLogCount = 0;
-		if (sVdpBatchLogCount < 6)
+		if constexpr (ENABLE_GX2_DRAWER_DIAGNOSTICS)
 		{
-			RMX_LOG_INFO("GX2Drawer: VDP sprite batch submitted sprites=" << (uint32)commands.size()
-				<< " vertices=" << vertexIndex
-				<< " blend=" << (int)mCurrentBlendMode);
-			++sVdpBatchLogCount;
+			static uint32 sVdpBatchLogCount = 0;
+			if (sVdpBatchLogCount < 6)
+			{
+				RMX_LOG_INFO("GX2Drawer: VDP sprite batch submitted sprites=" << (uint32)commands.size()
+					<< " vertices=" << vertexIndex
+					<< " blend=" << (int)mCurrentBlendMode);
+				++sVdpBatchLogCount;
+			}
 		}
 		return true;
 	}
@@ -3061,30 +3133,44 @@ public:
 
 	bool drawGX2PaletteSprite(const GX2PaletteSpriteDrawCommand& dc)
 	{
-		if (dc.mRect.empty() || nullptr == dc.mDataTexture || !mayRenderAnything() || !mPaletteSpriteShaderReady)
+		if (nullptr == dc.mDataTexture || !mayRenderAnything() || !mPaletteSpriteShaderReady)
 			return false;
+		if (dc.mUseMesh)
+		{
+			if (dc.mTriangles.empty() || dc.mSourceSize.x <= 0 || dc.mSourceSize.y <= 0)
+				return false;
+		}
+		else if (dc.mRect.empty())
+		{
+			return false;
+		}
 
 		GX2Texture* dataTexture = getNativeTexture(*dc.mDataTexture);
 		if (nullptr == dataTexture)
 			return false;
 
-		PlaneVertex* vertices = allocatePlaneVertices(PRESENT_VERTEX_COUNT);
+		const uint32 vertexCount = dc.mUseMesh ? (uint32)dc.mTriangles.size() : PRESENT_VERTEX_COUNT;
+		PaletteSpriteVertex* vertices = allocateDynamicVertices<PaletteSpriteVertex>(vertexCount);
 		if (nullptr == vertices)
 			return false;
-		fillPlaneVertices(vertices, dc.mRect);
-		const uint32 vertexDataSize = sizeof(PlaneVertex) * PRESENT_VERTEX_COUNT;
+		const Recti configRect = dc.mUseMesh ? Recti(0, 0, dc.mSourceSize.x, dc.mSourceSize.y) : dc.mRect;
+		if (dc.mUseMesh)
+			fillPaletteSpriteMeshVertices(vertices, dc.mTriangles);
+		else
+			fillPaletteSpriteRectVertices(vertices, dc.mRect);
+		const uint32 vertexDataSize = (uint32)((size_t)vertexCount * sizeof(PaletteSpriteVertex));
 		DCFlushRange(vertices, vertexDataSize);
 		GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, vertices, vertexDataSize);
 
 		bindPaletteSpriteState(mCurrentColorBuffer->surface.width, mCurrentColorBuffer->surface.height, *dataTexture);
-		setPixelUniformVec4(mPaletteSpriteUniforms[0], Vec4f((float)dc.mRect.x, (float)dc.mRect.y, (float)dc.mRect.width, (float)dc.mRect.height));
+		setPixelUniformVec4(mPaletteSpriteUniforms[0], Vec4f((float)configRect.x, (float)configRect.y, (float)configRect.width, (float)configRect.height));
 		setPixelUniformVec4(mPaletteSpriteUniforms[1], Vec4f((float)dc.mSplitY, (float)dc.mAtex, (float)dataTexture->surface.width, (float)dataTexture->surface.height));
 		setPixelUniformVec4(mPaletteSpriteUniforms[2], Vec4f(dc.mTintColor.r, dc.mTintColor.g, dc.mTintColor.b, dc.mTintColor.a));
 		setPixelUniformVec4(mPaletteSpriteUniforms[3], Vec4f(dc.mAddedColor.r, dc.mAddedColor.g, dc.mAddedColor.b, dc.mAddedColor.a));
 		applyBlendMode();
 		applyScissor();
-		GX2SetAttribBuffer(0, vertexDataSize, sizeof(PlaneVertex), vertices);
-		GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, PRESENT_VERTEX_COUNT, 0, 1);
+		GX2SetAttribBuffer(0, vertexDataSize, sizeof(PaletteSpriteVertex), vertices);
+		GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, vertexCount, 0, 1);
 		return true;
 	}
 

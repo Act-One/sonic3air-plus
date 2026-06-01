@@ -85,6 +85,7 @@ public:
 	void drawGX2Plane(const PlaneGeometry& geometry, const Vec2i& gameResolution, GX2RenderResources& resources);
 	void drawGX2VdpSprite(const Recti& rect, const Vec2i& sizeInPatterns, uint16 firstPattern, int splitY, const Color& tintColor, const Color& addedColor, GX2RenderResources& resources);
 	void drawGX2PaletteSprite(const Recti& rect, DrawerTexture& dataTexture, int splitY, uint16 atex, const Color& tintColor, const Color& addedColor);
+	void drawGX2PaletteSprite(const std::vector<DrawerMeshVertex>& triangles, const Vec2i& sourceSize, DrawerTexture& dataTexture, int splitY, uint16 atex, const Color& tintColor, const Color& addedColor);
 #endif
 
 	void printText(Font& font, const Recti& rect, const String& text, int alignment = 1, Color color = Color::WHITE);

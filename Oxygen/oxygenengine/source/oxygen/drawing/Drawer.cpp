@@ -263,7 +263,6 @@ void Drawer::drawQuad(const DrawerMeshVertex* quad, DrawerTexture& texture)
 	triangles[5] = quad[3];
 	addDrawCommand(getPool<MeshDrawCommand>().createObject(std::move(triangles), texture));
 }
-// i am never gonna finish this gx2 renderer but we still got drawing commands
 #if defined(PLATFORM_WIIU)
 void Drawer::drawGX2Plane(const PlaneGeometry& geometry, const Vec2i& gameResolution, GX2RenderResources& resources)
 {
@@ -280,6 +279,14 @@ void Drawer::drawGX2PaletteSprite(const Recti& rect, DrawerTexture& dataTexture,
 	if (!rect.isEmpty())
 	{
 		addDrawCommand(getPool<GX2PaletteSpriteDrawCommand>().createObject(rect, dataTexture, Vec2i(splitY, (int)atex), tintColor, addedColor));
+	}
+}
+
+void Drawer::drawGX2PaletteSprite(const std::vector<DrawerMeshVertex>& triangles, const Vec2i& sourceSize, DrawerTexture& dataTexture, int splitY, uint16 atex, const Color& tintColor, const Color& addedColor)
+{
+	if (!triangles.empty() && sourceSize.x > 0 && sourceSize.y > 0)
+	{
+		addDrawCommand(getPool<GX2PaletteSpriteDrawCommand>().createObject(triangles, sourceSize, dataTexture, Vec2i(splitY, (int)atex), tintColor, addedColor));
 	}
 }
 #endif

@@ -367,6 +367,7 @@ protected:
 	GX2PaletteSpriteDrawCommand(const Recti& rect, DrawerTexture& dataTexture, const Vec2i& splitAndAtex, const Color& tintColor, const Color& addedColor) :
 		DrawCommand(Type::GX2_PALETTE_SPRITE),
 		mRect(rect),
+		mSourceSize(rect.getSize()),
 		mDataTexture(&dataTexture),
 		mSplitY(splitAndAtex.x),
 		mAtex((uint16)splitAndAtex.y),
@@ -374,13 +375,28 @@ protected:
 		mAddedColor(addedColor)
 	{}
 
+	GX2PaletteSpriteDrawCommand(const std::vector<DrawerMeshVertex>& triangles, const Vec2i& sourceSize, DrawerTexture& dataTexture, const Vec2i& splitAndAtex, const Color& tintColor, const Color& addedColor) :
+		DrawCommand(Type::GX2_PALETTE_SPRITE),
+		mTriangles(triangles),
+		mSourceSize(sourceSize),
+		mDataTexture(&dataTexture),
+		mSplitY(splitAndAtex.x),
+		mAtex((uint16)splitAndAtex.y),
+		mTintColor(tintColor),
+		mAddedColor(addedColor),
+		mUseMesh(true)
+	{}
+
 public:
 	Recti mRect;
+	std::vector<DrawerMeshVertex> mTriangles;
+	Vec2i mSourceSize;
 	DrawerTexture* mDataTexture = nullptr;
 	int mSplitY = 0;
 	uint16 mAtex = 0;
 	Color mTintColor = Color::WHITE;
 	Color mAddedColor = Color::TRANSPARENT;
+	bool mUseMesh = false;
 };
 #endif
 

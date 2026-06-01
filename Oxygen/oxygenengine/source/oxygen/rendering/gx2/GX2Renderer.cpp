@@ -28,7 +28,7 @@ namespace
 	constexpr bool ENABLE_GX2_RENDERER_DIAGNOSTIC_DUMPS = false;
 	constexpr bool ENABLE_GX2_RENDERER_FRAME_LOGS = false;
 	constexpr bool ENABLE_GX2_RENDERER_SPRITE_TRACE = false;
-	constexpr bool USE_SOFTWARE_GAME_RENDERER = true;
+	constexpr bool FORCE_SOFTWARE_GAME_RENDERER = false;
 
 	bool isBlendModeSupported(BlendMode blendMode)
 	{
@@ -242,6 +242,32 @@ namespace
 		}
 	}
 
+	void appendPaletteSpriteQuad(std::vector<DrawerMeshVertex>& vertices, const renderitems::CustomSpriteInfoBase& spriteInfo)
+	{
+		const float width = (float)spriteInfo.mSize.x;
+		const float height = (float)spriteInfo.mSize.y;
+		const Vec2f pivot((float)spriteInfo.mPivotOffset.x, (float)spriteInfo.mPivotOffset.y);
+		const Vec2f position((float)spriteInfo.mInterpolatedPosition.x, (float)spriteInfo.mInterpolatedPosition.y);
+
+		const Vec2f localPositions[6] =
+		{
+			Vec2f(0.0f, 0.0f),
+			Vec2f(0.0f, height),
+			Vec2f(width, height),
+			Vec2f(width, height),
+			Vec2f(width, 0.0f),
+			Vec2f(0.0f, 0.0f),
+		};
+
+		vertices.resize(6);
+		for (int i = 0; i < 6; ++i)
+		{
+			const Vec2f transformed = spriteInfo.mTransformation.transformVector(localPositions[i] + pivot) + position;
+			vertices[i].mPosition = transformed;
+			vertices[i].mTexcoords = localPositions[i];
+		}
+	}
+
 	void applySpriteTint(renderitems::SpriteInfo const& spriteInfo, Color& tintColor, Color& addedColor)
 	{
 		tintColor = spriteInfo.mTintColor;
@@ -318,13 +344,13 @@ void GX2Renderer::initialize()
 	mGameResolution = Configuration::instance().mGameScreen;
 	mRenderResources.initialize();
 	invalidateNativeRenderTarget();
-	if constexpr (USE_SOFTWARE_GAME_RENDERER)
+	if constexpr (FORCE_SOFTWARE_GAME_RENDERER)
 	{
-		RMX_LOG_INFO("GX2Renderer: using software game renderer output");
+		RMX_LOG_WARNING("GX2Renderer: forced software game renderer output");
 	}
 	else
 	{
-		RMX_LOG_INFO("GX2Renderer: native GX2 render-target path enabled, software fallback retained for unported geometry");
+		RMX_LOG_INFO("GX2Renderer: native GX2 game renderer enabled, software fallback retained for unported geometry");
 	}
 }
 
@@ -353,7 +379,7 @@ void GX2Renderer::setGameResolution(const Vec2i& gameResolution)
 
 void GX2Renderer::clearGameScreen()
 {
-	if constexpr (USE_SOFTWARE_GAME_RENDERER)
+	if constexpr (FORCE_SOFTWARE_GAME_RENDERER)
 	{
 		renderHybridGameScreen({});
 	}
@@ -403,12 +429,13 @@ void GX2Renderer::renderGameScreen(const std::vector<Geometry*>& geometries)
 	}
 	++sRenderFrame;
 
-	if constexpr (USE_SOFTWARE_GAME_RENDERER)
+	if constexpr (FORCE_SOFTWARE_GAME_RENDERER)
 	{
 		renderHybridGameScreen(geometries);
 		return;
 	}
 
+	mRenderResources.refresh();
 	if (!supportsNativeRendering(geometries))
 	{
 		static uint32 sFallbackLogCount = 0;
@@ -446,7 +473,7 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 	const Recti viewport = targetRect.empty() ? Recti(0, 0, mGameResolution.x, mGameResolution.y) : targetRect;
 	mCurrentTargetAlreadyHasNativeFrame = false;
 
-	if constexpr (USE_SOFTWARE_GAME_RENDERER)
+	if constexpr (FORCE_SOFTWARE_GAME_RENDERER)
 	{
 		std::vector<Geometry*> softwareGeometries;
 		prepareHybridOverlayGeometries(geometries, softwareGeometries);
@@ -500,6 +527,7 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 	mNativeOverlayGeometries.clear();
 	mNativeOverlayUsesInitialViewport = false;
 	invalidateNativeRenderTarget();
+	drawer.setWindowRenderTarget(viewport);
 	drawer.setBlendMode(BlendMode::OPAQUE);
 	drawer.setSamplingMode(SamplingMode::POINT);
 	drawer.setWrapMode(TextureWrapMode::CLAMP);
@@ -531,6 +559,7 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 	{
 		drawer.popScissor();
 	}
+	mCurrentTargetAlreadyHasNativeFrame = true;
 }
 
 void GX2Renderer::drawPresentedGameScreenToCurrentTarget(const Recti& targetRect)
@@ -1144,18 +1173,17 @@ void GX2Renderer::drawNativePaletteSprite(const renderitems::PaletteSpriteInfo& 
 	drawer.setBlendMode(spriteInfo.mBlendMode);
 	drawer.setSamplingMode(SamplingMode::POINT);
 	drawer.setWrapMode(TextureWrapMode::CLAMP);
+	DrawerTexture& dataTexture = mRenderResources.getPaletteSpriteDataTexture(spriteInfo, primaryPalette, secondaryPalette);
 	if (spriteInfo.mTransformation.isIdentity())
 	{
 		const Recti rect(spriteInfo.mInterpolatedPosition + spriteInfo.mPivotOffset, spriteInfo.mSize);
-		DrawerTexture& dataTexture = mRenderResources.getPaletteSpriteDataTexture(spriteInfo, primaryPalette, secondaryPalette);
 		drawer.drawGX2PaletteSprite(rect, dataTexture, paletteManager.mSplitPositionY, spriteInfo.mAtex, tintColor, addedColor);
 	}
 	else
 	{
-		DrawerTexture& texture = mRenderResources.getPaletteSpriteTexture(spriteInfo, primaryPalette);
 		std::vector<DrawerMeshVertex> vertices;
-		appendSpriteQuad(vertices, spriteInfo);
-		drawer.drawMesh(vertices, texture, tintColor, addedColor);
+		appendPaletteSpriteQuad(vertices, spriteInfo);
+		drawer.drawGX2PaletteSprite(vertices, spriteInfo.mSize, dataTexture, paletteManager.mSplitPositionY, spriteInfo.mAtex, tintColor, addedColor);
 	}
 }
 
