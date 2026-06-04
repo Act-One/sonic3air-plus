@@ -97,9 +97,7 @@ void GameView::updateGameViewport()
 	mGameViewport.setResolution(gameScreenRect.getSize());
 
 #if defined(PLATFORM_WIIU)
-	// Console output should cover the full TV surface. Aspect-preserving modes
-	// can leave small bars because Sonic 3 A.I.R.'s 400x224 buffer is not 16:9.
-	mGameViewport.setRectOnScreen(mRect);
+	mGameViewport.buildRectIntegerAspectFit(mRect);
 #else
 	switch (config.mUpscaling)
 	{
@@ -587,9 +585,7 @@ void GameView::render()
 	const Recti gameScreenRect = VideoOut::instance().getScreenRect();
 	mGameViewport.setResolution(gameScreenRect.getSize());
 #if defined(PLATFORM_WIIU)
-	// send that shit straight into the window
-	// we might pay the price for this later though
-	const bool renderDirectToWindow = (drawer.getType() == Drawer::Type::GX2);
+	const bool renderDirectToWindow = true;
 #else
 	const bool renderDirectToWindow = false;
 #endif
@@ -641,8 +637,8 @@ void GameView::render()
 		return;
 	}
 
-	// Here goes the real rendering. 
-	// compose directly to the window target on GX2 to avoid sampling a tiled render target as a texture
+	// Here goes the real rendering.
+	// GX2 binds the window target here; its renderer may still stage the game into a native-size texture for presentation.
 	if (renderDirectToWindow)
 	{
 		const Recti& gameViewportRect = mGameViewport.getRectOnScreen();
@@ -758,7 +754,6 @@ void GameView::render()
 	drawer.performRendering();
 
 	// Render the (pixelated) game UI
-// this function has taken my lunch money 3 times now
 #if defined(PLATFORM_WIIU)
 	if (renderDirectToWindow)
 	{

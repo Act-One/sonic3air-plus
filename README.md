@@ -1,106 +1,57 @@
-# Sonic 3 A.I.R.
+# Sonic 3 A.I.R. Plus
 
-Source code incl. dependencies for "Sonic 3 - Angel Island Revisited", a fan-made remaster of Sonic 3 & Knuckles.
+Sonic 3 A.I.R. Plus is currently my fork of Sonic 3 A.I.R., letting me experiment on a variety of different things. 
 
-Project homepage: https://sonic3air.org/
+## What this includes
 
+- WIP UWP support 
 
-### Disclaimer
+- WIP Wii U Support
 
-Sonic 3 A.I.R. is a non-profit fan game project. It is not affiliated in any way with SEGA or Sonic Team, the original creators of Sonic 3 and Sonic & Knuckles.
+- More render methods for PC
 
-Sonic the Hedgehog is a trademark of SEGA. All copyrights regarding Sonic the Hedgehog, including characters, names, terms, art, and music belong to SEGA. All registered trademarks belong to SEGA and Sonic Team.
+## How can i contribute?
 
-The developers of Sonic 3 A.I.R. have no intent to infringe said copyrights and registered trademarks.
-No financial gain is made from this project.
+- make a fork and make a pr, if you want to do anything related to Wii U i would hold off on that as my current implementation, while it works, is very messy.
 
-Any commercial use of this project without SEGA's explicit consent is strictly prohibited.
+## Wii U notes
 
+- Game ran at 60fps in my testing, with minor dips to 50-40fps. Incredibly playable
 
-## Repository overview
-
-This repository is split into several different projects:
-* The larger external dependencies (namely SDL2, Ogg/Vorbis, zlib) inside the "framework" directory. These are copies of the respective open source projects, with a few custom changes applied where needed - see the "how-to-build.txt" files in there for details.
-* The librmx libraries that together with the external dependencies build a foundation for my own projects (S3AIR and my private stuff). This primarily consists of rmxbase, a collection of helper and utility classes, and rmxmedia, which is providing a basic game framework built on top of SDL2 & OpenGL.
-* Lemonscript language library, with compiler and runtime environment for script execution.
-* Oxygen Engine, the backbone game engine powering Sonic 3 A.I.R. This includes input, graphics, audio handling, and all the other game application stuff, as well as a simulation environment built around lemonscript that - as far as needed for the purposes of S3AIR - emulates aspects of Sega Genesis hardware. Note that Oxygen can be built as its own application (OxygenApp) that lacks the S3AIR C++ code.
-* S3AIR-specific C++ code, scripts and data in the "Oxygen/sonic3air" directory. Yes, that's what it's named.
+- This has been in the works for 4 months. While that could mean that it has SOME level of quality, I am still pretty bad at coding and i wouldn't expect the code to be the best, especially with the variable names
 
 
-## How to build
+## Frequent issues
 
-For information on how to build for different platforms, find the readme files in the respective subdirectories of "Oxygen/sonic3air/build":
-* Windows: "_vstudio"
-* Mac:     "_xcode"
-* Linux:   "_cmake"
-* Android: "_android"
-* Web:     "_emscripten"
-* Switch:  "_make" (unmaintained)
+"[X] mod doesn't work on Wii U!!" 
 
-Additional platform ports:
-* Vita: See https://github.com/v-atamanenko/sonic3air
+It probably does, but to be safe i'd say it doesn't. there are so many things you can do with this engine, i know i didn't get everything.
 
+"I'm seeing a black screen"
 
-## External dependencies
+Make sure your glslcompiler.rpl is in the right place (though if you unzipped it to the root it should have been done automatically)
 
-External libraries and code used in this project:
-* SDL2 - in "framework/external/sdl"
-* libogg & libvorbis - in "framework/external/ogg-vorbis"
-* zlib incl. minizip - in "framework/external/zlib"
-* libcurl - in "framework/external/curl"
-* Dear ImGui - in "framework/external/imgui"
-* jsoncpp - in "librmx/source/rmxbase/jsoncpp"
-* GLEW - in "librmx/source/rmxmedia/glew"
-* Sound chip emulation related code from Genesis Plus GX - in "Oxygen/oxygenengine/source/oxygen/simulation/sound"
-* Discord Game SDK - in "Oxygen/sonic3air/source/external/discord_game_sdk"
-* xBRZ upscaler shader code - in "Oxygen/oxygenengine/data/shader" and once more in "Oxygen/sonic3air/data/shader"
-* Hqx upscaler shader code & data files - in "Oxygen/oxygenengine/data/shader" and once more in "Oxygen/sonic3air/data/shader"
+otherwise make an issue with your logfile.txt
 
 
-## Contributors
 
-Thanks to all contributors!
+"Where do i put my ROM? Do i have to rename it?"
 
-Source code contributions by:
-* Sappharad
-* Heyjoeway
-* Carjem Generations
-* Ultracoolguy
-* gl33ntwine
-* Rinnegatamante
-* MDashK
-* CodenameGamma
+Yes, you do have to rename it. But it accepts the normal Sonic 3 A.I.R. ROM naming (Sonic_Knuckles_wSonic3.bin). You just have to put it in savedata instead.
 
-Remastered soundtrack by:
-* G Spindash
-
-Game scripts & other contributions by:
-* Vinegar
-* Thorn
-* Legobouwer
-* GFX32
-* Dynamic Lemons
-* HazelSpooder
-* iCloudius
-* D.A. Garden
-* Alieneer
-* 3Pills
-* Elsie The Pict
-* TheMushrunt
-* mrgrassman14
-* Vague Rant
-* PaperTriangle
-* Crappy Productions
-* AtomicRey
-
-Additional thanks:
-* All contributors of the Sonic 3 / Sonic & Knuckles Disassembly (https://github.com/sonicretro/skdisasm), which has proven itself a valuable source of information on S3&K code
+Same goes for mods, put your mods in savedata in a mods folder
 
 
-## Want to contribute?
+"There's nothing showing on my GamePad"
 
-Here's the bad news: This repository isn't meant for direct distribution. If you have your own changes that you want to share with the world, create a **fork** of this repo, instead of making pull requests. I'd very much appreciate that as I really want to avoid having too much overhead with managing / reviewing code changes made by others. I'd rather use the time to continue with implementing my own ideas into the project.
+I turned it off that's why (real reason)
 
-Plus there's a second reason, and that's an important one for me as well: It's about code ownership and software licenses. It's much easier to use the librmx, lemonscript and Oxygen Engine code elsewhere under a different license than GPL if I don't have to ask a larger group of contributors whether they are okay with it. Because there are some plans for possible future projects using these codes as a foundation, maybe even commercial ones where GPL could make things complicated.
+i'm serious.
 
--- Euka
+## AI Use notice
+
+While I don't use AI as much as people usually use it for (everything), I will say I did use AI for some things. That being said it keeps removing my comments so idk whats going on there
+
+If you're gonna use ai in a PR, please review the output. I don't wanna have to review your PR just to look at AI slop code
+
+(the thing i mainly used it for was multithreading, cause i got NO clue how to do that on Wii U safely)

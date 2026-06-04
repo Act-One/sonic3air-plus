@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <atomic>
+
 
 namespace rmx
 {
@@ -81,9 +83,9 @@ namespace rmx
 		void setJobDelayUntilTicks(uint32 sdlTicks);
 
 		inline bool isJobRegistered() const	{ return (nullptr != mRegisteredAtManager); }
-		inline bool isJobWaiting() const	{ return (mJobState == JobState::WAITING); }
-		inline bool isJobRunning() const	{ return (mJobState == JobState::RUNNING); }
-		inline bool isJobDone() const		{ return (mJobState == JobState::DONE); }
+		inline bool isJobWaiting() const	{ return (mJobState.load(std::memory_order_acquire) == JobState::WAITING); }
+		inline bool isJobRunning() const	{ return (mJobState.load(std::memory_order_acquire) == JobState::RUNNING); }
+		inline bool isJobDone() const		{ return (mJobState.load(std::memory_order_acquire) == JobState::DONE); }
 
 		bool callJobFuncOnCallingThread();
 		void executeOnCallingThread();
@@ -93,7 +95,7 @@ namespace rmx
 		virtual bool jobFunc()  { return true; }
 
 	protected:
-		inline bool shouldJobBeRunning() const	{ return mJobShouldBeRunning; }
+		inline bool shouldJobBeRunning() const	{ return mJobShouldBeRunning.load(std::memory_order_acquire); }
 
 	protected:
 		String mJobType;							// Type string for the job
@@ -108,11 +110,11 @@ namespace rmx
 		};
 
 	private:
-		JobManager* mRegisteredAtManager = nullptr;	// Job manager instance this is registered at (should actually always be FTX::JobManager or nullptr)
-		JobState mJobState = JobState::INACTIVE;	// Current state
-		bool mJobShouldBeRunning = false;			// Can be set to false while running to signal the jobFunc that it should abort
-		float mJobPriority = 0.0f;					// Priority, higher values will be preferred; jobs with negative priorities won't get processed at all
-		uint32 mJobDelayUntilTicks = 0;				// SDL ticks value until when the job should get delayed; 0 if no delay active (which is the default)
+		JobManager* mRegisteredAtManager = nullptr;			// Job manager instance this is registered at (should actually always be FTX::JobManager or nullptr)
+		std::atomic<JobState> mJobState = JobState::INACTIVE;	// Current state
+		std::atomic_bool mJobShouldBeRunning = false;			// Can be set to false while running to signal the jobFunc that it should abort
+		float mJobPriority = 0.0f;							// Priority, higher values will be preferred; jobs with negative priorities won't get processed at all
+		uint32 mJobDelayUntilTicks = 0;						// SDL ticks value until when the job should get delayed; 0 if no delay active (which is the default)
 	};
 
 

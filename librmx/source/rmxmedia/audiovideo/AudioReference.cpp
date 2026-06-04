@@ -88,7 +88,13 @@ void AudioReference::setPosition(float position)
 void AudioReference::setLoopStartInSamples(int loopStart)
 {
 	if (valid())
-		mInstance->mLoopStart = loopStart;
+	{
+		const int requestedLoopStart = std::max(0, loopStart);
+		const AudioBuffer* audioBuffer = mInstance->mAudioBuffer;
+		const int length = (nullptr != audioBuffer) ? audioBuffer->getLength() : 0;
+		const bool bufferLengthIsFinal = (nullptr != audioBuffer) && (!mInstance->mStreaming || audioBuffer->isCompleted());
+		mInstance->mLoopStart = (length > 0 && bufferLengthIsFinal) ? clamp(requestedLoopStart, 0, length - 1) : requestedLoopStart;
+	}
 }
 
 void AudioReference::setVolume(float volume)

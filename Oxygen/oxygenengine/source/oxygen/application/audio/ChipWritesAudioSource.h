@@ -32,6 +32,8 @@ private:
 	std::vector<std::vector<SoundChipWrite>> mSoundChipWritesByFrame;
 
 	SoundEmulation mSoundEmulation;
+	int16 mSoundBuffer[0x10000] = {};
+	int16 mPcm[2][0x10000] = {};
 	size_t mCurrentFrame = 0;
 
 	float mPrecacheTime = 0.0f;

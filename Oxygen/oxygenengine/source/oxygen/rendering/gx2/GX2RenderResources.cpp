@@ -22,27 +22,79 @@
 
 namespace
 {
+	constexpr bool ENABLE_WIIU_GX2_RESOURCE_TIMING_LOGS = false;
 	const Vec2i PALETTE_TEXTURE_SIZE(256, (int)(PaletteManager::MAIN_PALETTE_SIZE / 256) * 2);
 	const Vec2i PATTERN_CACHE_TEXTURE_SIZE(0x40, 0x800);
 	const Vec2i PLANE_PATTERN_TEXTURE_SIZE(128, 128);
 	const Vec2i H_SCROLL_TEXTURE_SIZE(0x100, 1);
 	const Vec2i V_SCROLL_TEXTURE_SIZE(0x20, 1);
-	const Vec2i PLANE_DATA_TEXTURE_SIZE(256, 1040);
+	const Vec2i PLANE_DATA_TEXTURE_SIZE(512, 1024);
 	constexpr int PLANE_DATA_PATTERN_Y = 0;
-	constexpr int PLANE_DATA_PALETTE_Y = 512;
-	constexpr int PLANE_DATA_INDEX_Y = 516;
-	constexpr int PLANE_DATA_HSCROLL_Y = 1028;
-	constexpr int PLANE_DATA_VSCROLL_Y = 1033;
-
+	constexpr int PLANE_DATA_PALETTE_Y = 256;
+	constexpr int PLANE_DATA_INDEX_Y = 384;
+	constexpr int PLANE_DATA_HSCROLL_Y = 512;
+	constexpr int PLANE_DATA_VSCROLL_Y = 520;
+	constexpr bool UPLOAD_LEGACY_PLANE_TEXTURES = false;
 	uint32 packDataPixel(uint8 r, uint8 g = 0, uint8 b = 0, uint8 a = 0xff)
 	{
-		return ((uint32)r << 24) | ((uint32)g << 16) | ((uint32)b << 8) | (uint32)a;
+		// Keep packed helper data in the same ABGR32 layout as normal Bitmap pixels.
+		return (uint32)r | ((uint32)g << 8) | ((uint32)b << 16) | ((uint32)a << 24);
 	}
 
 	uint64 hashPointer(uint64 seed, const void* ptr)
 	{
 		const uint64 value = (uint64)(uintptr_t)ptr;
 		return seed ^ (value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2));
+	}
+
+	uint64 hashBytes(uint64 seed, const void* data, size_t size)
+	{
+		const uint8* bytes = static_cast<const uint8*>(data);
+		for (size_t i = 0; i < size; ++i)
+		{
+			seed ^= (uint64)bytes[i];
+			seed *= 1099511628211ull;
+		}
+		return seed;
+	}
+
+#if defined(PLATFORM_WIIU)
+	double getElapsedMilliseconds(uint64 start, uint64 end)
+	{
+		return (double)(end - start) * 1000.0 / (double)SDL_GetPerformanceFrequency();
+	}
+#endif
+
+	int getVdpSpriteSplitRelativeY(const renderitems::VdpSpriteInfo& spriteInfo, int splitY)
+	{
+		const int height = spriteInfo.mSize.y * 8;
+		const int relativeY = splitY - spriteInfo.mInterpolatedPosition.y;
+		return clamp(relativeY, 0, height);
+	}
+
+	uint64 getVdpSpriteCacheKey(const renderitems::VdpSpriteInfo& spriteInfo, int splitY)
+	{
+		const uint64 splitRelativeY = (uint64)(uint16)getVdpSpriteSplitRelativeY(spriteInfo, splitY);
+		return ((uint64)(uint16)spriteInfo.mFirstPattern << 48)
+			^ ((uint64)(uint16)spriteInfo.mSize.x << 32)
+			^ ((uint64)(uint16)spriteInfo.mSize.y << 16)
+			^ splitRelativeY;
+	}
+
+	uint64 hashVdpSpritePatterns(const renderitems::VdpSpriteInfo& spriteInfo, const PatternManager::CacheItem* patternCache)
+	{
+		uint64 hash = 1469598103934665603ull;
+		for (int patternX = 0; patternX < spriteInfo.mSize.x; ++patternX)
+		{
+			for (int patternY = 0; patternY < spriteInfo.mSize.y; ++patternY)
+			{
+				const uint16 patternIndex = spriteInfo.mFirstPattern + patternY + patternX * spriteInfo.mSize.y;
+				hash ^= (uint64)patternIndex;
+				hash *= 1099511628211ull;
+				hash = hashBytes(hash, patternCache[patternIndex & 0x07ff].mFlipVariation[0].mPixels, 64);
+			}
+		}
+		return hash;
 	}
 
 	void buildPaletteSpriteBitmap(Bitmap& outBitmap, const PaletteBitmap& source, const PaletteBase& palette, uint16 atex)
@@ -96,16 +148,57 @@ namespace
 		dirtyRect.set(minX, minY, maxX - minX, maxY - minY);
 	}
 
-	void includePackedPatternRows(Recti& dirtyRect, const Bitmap& destination, const std::vector<uint16>& patternIndices)
+	void appendDirtyRegion(std::vector<Recti>& dirtyRegions, Recti& dirtyRect, const Recti& rect)
+	{
+		if (rect.empty())
+			return;
+
+		includeDirtyRect(dirtyRect, rect);
+		if (!dirtyRegions.empty())
+		{
+			Recti& last = dirtyRegions.back();
+			if (last.x == rect.x && last.width == rect.width && last.y + last.height == rect.y)
+			{
+				last.height += rect.height;
+				return;
+			}
+			if (last.y == rect.y && last.height == rect.height && last.x + last.width == rect.x)
+			{
+				last.width += rect.width;
+				return;
+			}
+		}
+		dirtyRegions.push_back(rect);
+	}
+
+	void includePackedPatternRowRegions(std::vector<Recti>& dirtyRegions, Recti& dirtyRect, const Bitmap& destination, const std::vector<uint16>& patternIndices)
 	{
 		const int patternsPerRow = std::max(1, destination.getWidth() / PATTERN_CACHE_TEXTURE_SIZE.x);
+		constexpr int patternRowCount = PLANE_DATA_PALETTE_Y - PLANE_DATA_PATTERN_Y;
+		std::array<uint32, patternRowCount> rowMasks = {};
 		for (uint16 patternIndex : patternIndices)
 		{
-			const int packedX = (patternIndex % patternsPerRow) * PATTERN_CACHE_TEXTURE_SIZE.x;
+			const int packedPatternX = patternIndex % patternsPerRow;
+			const int packedX = packedPatternX * PATTERN_CACHE_TEXTURE_SIZE.x;
 			const int packedY = patternIndex / patternsPerRow;
-			if (packedY >= destination.getHeight() || packedX + PATTERN_CACHE_TEXTURE_SIZE.x > destination.getWidth())
+			if (packedY >= patternRowCount || packedY >= destination.getHeight() || packedX + PATTERN_CACHE_TEXTURE_SIZE.x > destination.getWidth() || packedPatternX >= 32)
 				continue;
-			includeDirtyRect(dirtyRect, Recti(packedX, PLANE_DATA_PATTERN_Y + packedY, PATTERN_CACHE_TEXTURE_SIZE.x, 1));
+			rowMasks[packedY] |= 1u << packedPatternX;
+		}
+
+		for (int y = 0; y < patternRowCount; ++y)
+		{
+			const uint32 mask = rowMasks[y];
+			if (mask == 0)
+				continue;
+
+			int firstPatternX = 0;
+			while (firstPatternX < patternsPerRow && (mask & (1u << firstPatternX)) == 0)
+				++firstPatternX;
+			int lastPatternX = patternsPerRow - 1;
+			while (lastPatternX > firstPatternX && (mask & (1u << lastPatternX)) == 0)
+				--lastPatternX;
+			appendDirtyRegion(dirtyRegions, dirtyRect, Recti(firstPatternX * PATTERN_CACHE_TEXTURE_SIZE.x, PLANE_DATA_PATTERN_Y + y, (lastPatternX - firstPatternX + 1) * PATTERN_CACHE_TEXTURE_SIZE.x, 1));
 		}
 	}
 
@@ -152,13 +245,58 @@ namespace
 
 	void uploadBitmapRegion(DrawerTexture& texture, Bitmap& bitmap, const Recti& dirtyRect)
 	{
-		texture.accessBitmap() = bitmap;
-		if (!texture.isValid() || texture.getSize() != bitmap.getSize() || dirtyRect.empty())
+		Bitmap& textureBitmap = texture.accessBitmap();
+		if (!texture.isValid() || texture.getSize() != bitmap.getSize() || textureBitmap.getSize() != bitmap.getSize() || dirtyRect.empty())
 		{
+			textureBitmap = bitmap;
 			texture.bitmapUpdated();
 			return;
 		}
-		texture.bitmapRegionUpdated(dirtyRect);
+
+		const Recti rect = Recti::getIntersection(dirtyRect, Recti(0, 0, bitmap.getWidth(), bitmap.getHeight()));
+		if (rect.empty())
+			return;
+
+		for (int y = 0; y < rect.height; ++y)
+		{
+			memcpy(textureBitmap.getPixelPointer(rect.x, rect.y + y), bitmap.getPixelPointer(rect.x, rect.y + y), (size_t)rect.width * sizeof(uint32));
+		}
+		texture.bitmapRegionUpdated(rect);
+	}
+
+	void uploadBitmapRegions(DrawerTexture& texture, Bitmap& bitmap, const std::vector<Recti>& dirtyRects)
+	{
+		if (dirtyRects.empty())
+			return;
+
+		Bitmap& textureBitmap = texture.accessBitmap();
+		if (!texture.isValid() || texture.getSize() != bitmap.getSize() || textureBitmap.getSize() != bitmap.getSize())
+		{
+			textureBitmap = bitmap;
+			texture.bitmapUpdated();
+			return;
+		}
+
+		const Recti bounds(0, 0, bitmap.getWidth(), bitmap.getHeight());
+		std::vector<Recti> clampedRects;
+		clampedRects.reserve(dirtyRects.size());
+		for (const Recti& dirtyRect : dirtyRects)
+		{
+			const Recti rect = Recti::getIntersection(dirtyRect, bounds);
+			if (rect.empty())
+				continue;
+
+			for (int y = 0; y < rect.height; ++y)
+			{
+				memcpy(textureBitmap.getPixelPointer(rect.x, rect.y + y), bitmap.getPixelPointer(rect.x, rect.y + y), (size_t)rect.width * sizeof(uint32));
+			}
+			clampedRects.push_back(rect);
+		}
+
+		if (!clampedRects.empty())
+		{
+			texture.bitmapRegionsUpdated(clampedRects);
+		}
 	}
 
 	bool updatePaletteBitmap(const PaletteBase& palette, Bitmap& bitmap, int offsetY, uint16& changeCounter)
@@ -268,12 +406,32 @@ namespace
 			const uint32* src = bitmap.getPixelPointer(0, y);
 			for (int x = 0; x < bitmap.getWidth(); ++x)
 			{
-				if ((src[x] & 0xffffff00u) != 0)
+				if ((src[x] & 0x0000ffffu) != 0)
 					++count;
 			}
 		}
 		return count;
 	}
+
+	uint32 countPriorityPixels(const Bitmap& bitmap, int maxRows)
+	{
+		if (bitmap.empty())
+			return 0;
+
+		uint32 count = 0;
+		const int rows = std::min(bitmap.getHeight(), maxRows);
+		for (int y = 0; y < rows; ++y)
+		{
+			const uint32* src = bitmap.getPixelPointer(0, y);
+			for (int x = 0; x < bitmap.getWidth(); ++x)
+			{
+				if ((src[x] & 0x00008000u) != 0)
+					++count;
+			}
+		}
+		return count;
+	}
+
 }
 
 
@@ -288,6 +446,7 @@ void GX2RenderResources::initialize()
 	mPatternCacheBitmap.create(PATTERN_CACHE_TEXTURE_SIZE);
 	mPlaneDataBitmap.create(PLANE_DATA_TEXTURE_SIZE);
 	mPlaneDataBitmap.clear(0);
+	mPlaneDataTexture.setContentKnownOpaque(true);
 	for (int index = 0; index < 4; ++index)
 	{
 		mPlanePatternBitmap[index].create(PLANE_PATTERN_TEXTURE_SIZE);
@@ -307,11 +466,13 @@ void GX2RenderResources::initialize()
 		mPlanePatternBitmapUsed[index] = false;
 		mPlanePatternSourceCacheInitialized[index] = false;
 		mPlanePatternSourceCache[index].clear();
+		mPlanePatternPriorityCounts[index] = 0;
 		mPlaneDataPlaneDirty[index] = true;
 	}
 	for (int index = 0; index < 5; ++index)
 	{
 		mScrollOffsetBitmapInitialized[index] = false;
+		mScrollOffsetChangeCounters[index] = 0xffffffff;
 		mPlaneDataScrollDirty[index] = true;
 	}
 	mPlaneDataInitialized = false;
@@ -323,11 +484,60 @@ void GX2RenderResources::initialize()
 
 void GX2RenderResources::refresh()
 {
+#if defined(PLATFORM_WIIU)
+	const uint64 t0 = ENABLE_WIIU_GX2_RESOURCE_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+#endif
 	refreshMainPaletteTexture();
+#if defined(PLATFORM_WIIU)
+	const uint64 t1 = ENABLE_WIIU_GX2_RESOURCE_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+#endif
 	refreshPatternCacheTexture();
+#if defined(PLATFORM_WIIU)
+	const uint64 t2 = ENABLE_WIIU_GX2_RESOURCE_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+#endif
 	refreshPlanePatternTextures();
+#if defined(PLATFORM_WIIU)
+	const uint64 t3 = ENABLE_WIIU_GX2_RESOURCE_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+#endif
 	refreshScrollOffsetTextures();
+#if defined(PLATFORM_WIIU)
+	const uint64 t4 = ENABLE_WIIU_GX2_RESOURCE_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+#endif
 	refreshPlaneDataTexture();
+#if defined(PLATFORM_WIIU)
+	const uint64 t5 = ENABLE_WIIU_GX2_RESOURCE_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+	if constexpr (ENABLE_WIIU_GX2_RESOURCE_TIMING_LOGS)
+	{
+		static uint32 sSampleCount = 0;
+		static double sPaletteMs = 0.0;
+		static double sPatternMs = 0.0;
+		static double sPlaneMs = 0.0;
+		static double sScrollMs = 0.0;
+		static double sPlaneDataMs = 0.0;
+		++sSampleCount;
+		sPaletteMs += getElapsedMilliseconds(t0, t1);
+		sPatternMs += getElapsedMilliseconds(t1, t2);
+		sPlaneMs += getElapsedMilliseconds(t2, t3);
+		sScrollMs += getElapsedMilliseconds(t3, t4);
+		sPlaneDataMs += getElapsedMilliseconds(t4, t5);
+		if ((sSampleCount % 180) == 0)
+		{
+			const double inv = 1.0 / 180.0;
+			RMX_LOG_INFO("GX2 resources timing avg palette=" << (float)(sPaletteMs * inv)
+				<< "ms pattern=" << (float)(sPatternMs * inv)
+				<< "ms plane=" << (float)(sPlaneMs * inv)
+				<< "ms scroll=" << (float)(sScrollMs * inv)
+				<< "ms planeData=" << (float)(sPlaneDataMs * inv)
+				<< "ms total=" << (float)((sPaletteMs + sPatternMs + sPlaneMs + sScrollMs + sPlaneDataMs) * inv)
+				<< "ms");
+			sPaletteMs = 0.0;
+			sPatternMs = 0.0;
+			sPlaneMs = 0.0;
+			sScrollMs = 0.0;
+			sPlaneDataMs = 0.0;
+		}
+	}
+#endif
 }
 
 void GX2RenderResources::clearAllCaches()
@@ -359,6 +569,10 @@ void GX2RenderResources::clearAllCaches()
 	{
 		initialized = false;
 	}
+	for (uint32& priorityCount : mPlanePatternPriorityCounts)
+	{
+		priorityCount = 0;
+	}
 	for (std::vector<uint16>& cache : mPlanePatternSourceCache)
 	{
 		cache.clear();
@@ -366,6 +580,10 @@ void GX2RenderResources::clearAllCaches()
 	for (bool& initialized : mScrollOffsetBitmapInitialized)
 	{
 		initialized = false;
+	}
+	for (uint32& counter : mScrollOffsetChangeCounters)
+	{
+		counter = 0xffffffff;
 	}
 	mPlaneDataInitialized = false;
 	mPlaneDataPatternFullDirty = true;
@@ -413,13 +631,15 @@ DrawerTexture& GX2RenderResources::getPlaneDataTexture()
 	return mPlaneDataTexture;
 }
 
+bool GX2RenderResources::hasPriorityPlanePatterns(int planeIndex) const
+{
+	return (planeIndex >= 0 && planeIndex < 4) && mPlanePatternPriorityCounts[planeIndex] > 0;
+}
+
 DrawerTexture& GX2RenderResources::getVdpSpriteTexture(const renderitems::VdpSpriteInfo& spriteInfo)
 {
-	uint64 cacheKey = ((uint64)(uint16)spriteInfo.mFirstPattern << 48)
-		^ ((uint64)(uint16)spriteInfo.mSize.x << 32)
-		^ ((uint64)(uint16)spriteInfo.mSize.y << 16)
-		^ ((uint64)(uint16)spriteInfo.mInterpolatedPosition.y);
-	cacheKey ^= ((uint64)(uint16)mRenderParts.getPaletteManager().mSplitPositionY << 1);
+	const PaletteManager& paletteManager = mRenderParts.getPaletteManager();
+	const uint64 cacheKey = getVdpSpriteCacheKey(spriteInfo, paletteManager.mSplitPositionY);
 
 	CachedSpriteTexture& cached = mVdpSpriteTextures[cacheKey];
 	if (!cached.mTexture)
@@ -427,11 +647,26 @@ DrawerTexture& GX2RenderResources::getVdpSpriteTexture(const renderitems::VdpSpr
 		cached.mTexture.reset(new DrawerTexture());
 	}
 
+	const Vec2i sourceSize(spriteInfo.mSize.x * 8, spriteInfo.mSize.y * 8);
+	const uint16 primaryPaletteCounter = paletteManager.getMainPalette(0).getChangeCounter();
+	const uint16 secondaryPaletteCounter = paletteManager.getMainPalette(1).getChangeCounter();
+	const uint64 patternSignature = hashVdpSpritePatterns(spriteInfo, mRenderParts.getPatternManager().getPatternCache());
+	if (cached.mSourceSize == sourceSize
+		&& cached.mPaletteChangeCounter == primaryPaletteCounter
+		&& cached.mSecondaryPaletteChangeCounter == secondaryPaletteCounter
+		&& cached.mPatternSignature == patternSignature)
+	{
+		return *cached.mTexture;
+	}
+
 	Bitmap bitmap;
 	buildVdpSpriteBitmap(bitmap, spriteInfo, mRenderParts);
 	cached.mTexture->accessBitmap().swap(bitmap);
 	cached.mTexture->bitmapUpdated();
-	cached.mSourceSize = cached.mTexture->getSize();
+	cached.mSourceSize = sourceSize;
+	cached.mPaletteChangeCounter = primaryPaletteCounter;
+	cached.mSecondaryPaletteChangeCounter = secondaryPaletteCounter;
+	cached.mPatternSignature = patternSignature;
 	return *cached.mTexture;
 }
 
@@ -503,6 +738,7 @@ DrawerTexture& GX2RenderResources::getPaletteSpriteDataTexture(const renderitems
 	if (!cached.mTexture)
 	{
 		cached.mTexture.reset(new DrawerTexture());
+		cached.mTexture->setContentKnownOpaque(true);
 	}
 
 	const PaletteSprite& sprite = *static_cast<PaletteSprite*>(spriteInfo.mCacheItem->mSprite);
@@ -542,10 +778,14 @@ DrawerTexture& GX2RenderResources::getPaletteSpriteDataTexture(const renderitems
 	}
 	if (changed)
 	{
-		if (forceFullUpload)
+		if (forceFullUpload || dirtyRect.empty())
+		{
 			cached.mTexture->bitmapUpdated();
+		}
 		else
+		{
 			cached.mTexture->bitmapRegionUpdated(dirtyRect);
+		}
 	}
 	return *cached.mTexture;
 }
@@ -616,6 +856,10 @@ void GX2RenderResources::refreshPatternCacheTexture()
 		{
 			writePatternCacheRow(mPatternCacheBitmap, patternIndex, patternCache);
 		}
+		if constexpr (UPLOAD_LEGACY_PLANE_TEXTURES)
+		{
+			uploadBitmap(mPatternCacheTexture, mPatternCacheBitmap);
+		}
 		mPatternCacheInitialized = true;
 		mPlaneDataPatternFullDirty = true;
 		mPlaneDataPatternDirty = true;
@@ -639,6 +883,10 @@ void GX2RenderResources::refreshPatternCacheTexture()
 	}
 	if (!mChangedPatternIndices.empty())
 	{
+		if constexpr (UPLOAD_LEGACY_PLANE_TEXTURES)
+		{
+			uploadBitmap(mPatternCacheTexture, mPatternCacheBitmap);
+		}
 		mPlaneDataPatternDirty = true;
 	}
 }
@@ -665,6 +913,7 @@ void GX2RenderResources::refreshPlanePatternTextures()
 			mPlanePatternBitmapUsed[index] = planeUsed;
 			mPlanePatternSourceCacheInitialized[index] = false;
 			mPlanePatternChangeCounters[index] = 0xffffffff;
+			mPlanePatternPriorityCounts[index] = 0;
 			mPlaneDataPlaneDirty[index] = true;
 		}
 
@@ -672,6 +921,14 @@ void GX2RenderResources::refreshPlanePatternTextures()
 		{
 			mPlanePatternSourceCache[index].clear();
 			mPlanePatternChangeCounters[index] = 0xffffffff;
+			mPlanePatternPriorityCounts[index] = 0;
+			if (mPlaneDataPlaneDirty[index])
+			{
+				if constexpr (UPLOAD_LEGACY_PLANE_TEXTURES)
+				{
+					uploadBitmap(mPlanePatternTextures[index], mPlanePatternBitmap[index]);
+				}
+			}
 			continue;
 		}
 
@@ -707,6 +964,14 @@ void GX2RenderResources::refreshPlanePatternTextures()
 			}
 		}
 		mPlanePatternSourceCacheInitialized[index] = true;
+		if (changed)
+		{
+			if constexpr (UPLOAD_LEGACY_PLANE_TEXTURES)
+			{
+				uploadBitmap(mPlanePatternTextures[index], mPlanePatternBitmap[index]);
+			}
+			mPlanePatternPriorityCounts[index] = countPriorityPixels(mPlanePatternBitmap[index], PLANE_PATTERN_TEXTURE_SIZE.y);
+		}
 		mPlaneDataPlaneDirty[index] |= changed;
 	}
 }
@@ -725,8 +990,14 @@ void GX2RenderResources::refreshScrollOffsetTextures()
 			mHScrollOffsetBitmap[index].clear(packDataPixel(0, 0));
 			mVScrollOffsetBitmap[index].clear(packDataPixel(0, 0));
 			mScrollOffsetBitmapInitialized[index] = true;
+			mScrollOffsetChangeCounters[index] = 0xffffffff;
 			mPlaneDataScrollDirty[index] = true;
 		}
+
+		const uint32 scrollChangeCounter = scrollOffsetsManager.getScrollOffsetsChangeCounter(index);
+		if (mScrollOffsetChangeCounters[index] == scrollChangeCounter)
+			continue;
+		mScrollOffsetChangeCounters[index] = scrollChangeCounter;
 
 		const uint16* hSource = scrollOffsetsManager.getScrollOffsetsH(index);
 		bool changed = false;
@@ -740,7 +1011,32 @@ void GX2RenderResources::refreshScrollOffsetTextures()
 		{
 			changed |= writeScrollOffsetEntry(mVScrollOffsetBitmap[index], x, vSource[x]);
 		}
+		if (changed)
+		{
+			if constexpr (UPLOAD_LEGACY_PLANE_TEXTURES)
+			{
+				uploadBitmap(mHScrollOffsetTextures[index], mHScrollOffsetBitmap[index]);
+				uploadBitmap(mVScrollOffsetTextures[index], mVScrollOffsetBitmap[index]);
+			}
+		}
 		mPlaneDataScrollDirty[index] |= changed;
+	}
+
+	if (!mScrollOffsetBitmapInitialized[4])
+	{
+		if (mHScrollOffsetBitmap[4].empty())
+			mHScrollOffsetBitmap[4].create(H_SCROLL_TEXTURE_SIZE);
+		if (mVScrollOffsetBitmap[4].empty())
+			mVScrollOffsetBitmap[4].create(V_SCROLL_TEXTURE_SIZE);
+		mHScrollOffsetBitmap[4].clear(packDataPixel(0, 0));
+		mVScrollOffsetBitmap[4].clear(packDataPixel(0, 0));
+		mScrollOffsetBitmapInitialized[4] = true;
+		mPlaneDataScrollDirty[4] = true;
+		if constexpr (UPLOAD_LEGACY_PLANE_TEXTURES)
+		{
+			uploadBitmap(mHScrollOffsetTextures[4], mHScrollOffsetBitmap[4]);
+			uploadBitmap(mVScrollOffsetTextures[4], mVScrollOffsetBitmap[4]);
+		}
 	}
 }
 
@@ -785,30 +1081,33 @@ void GX2RenderResources::refreshPlaneDataTexture()
 		return;
 
 	Recti dirtyRect;
+	std::vector<Recti> dirtyRegions;
+	dirtyRegions.reserve(24);
 	if (mPlaneDataPatternDirty)
 	{
-		if (mPlaneDataPatternFullDirty || mChangedPatternIndices.size() > 512)
+		if (mPlaneDataPatternFullDirty || mChangedPatternIndices.size() > 128)
 		{
 			copyPackedPatternCache(mPlaneDataBitmap, 0, PLANE_DATA_PATTERN_Y, mPatternCacheBitmap);
-			includeDirtyRect(dirtyRect, Recti(0, PLANE_DATA_PATTERN_Y, mPlaneDataBitmap.getWidth(), PLANE_DATA_PALETTE_Y - PLANE_DATA_PATTERN_Y));
+			appendDirtyRegion(dirtyRegions, dirtyRect, Recti(0, PLANE_DATA_PATTERN_Y, mPlaneDataBitmap.getWidth(), PLANE_DATA_PALETTE_Y - PLANE_DATA_PATTERN_Y));
 		}
 		else
 		{
 			copyPackedPatternRows(mPlaneDataBitmap, 0, PLANE_DATA_PATTERN_Y, mPatternCacheBitmap, mChangedPatternIndices);
-			includePackedPatternRows(dirtyRect, mPlaneDataBitmap, mChangedPatternIndices);
+			includePackedPatternRowRegions(dirtyRegions, dirtyRect, mPlaneDataBitmap, mChangedPatternIndices);
 		}
 	}
 	if (mPlaneDataPaletteDirty)
 	{
 		copyBitmap(mPlaneDataBitmap, 0, PLANE_DATA_PALETTE_Y, mMainPaletteBitmap);
-		includeDirtyRect(dirtyRect, Recti(0, PLANE_DATA_PALETTE_Y, PALETTE_TEXTURE_SIZE.x, PALETTE_TEXTURE_SIZE.y));
+		appendDirtyRegion(dirtyRegions, dirtyRect, Recti(0, PLANE_DATA_PALETTE_Y, PALETTE_TEXTURE_SIZE.x, PALETTE_TEXTURE_SIZE.y));
 	}
 	for (int index = 0; index < 4; ++index)
 	{
 		if (mPlaneDataPlaneDirty[index])
 		{
-			copyBitmap(mPlaneDataBitmap, 0, PLANE_DATA_INDEX_Y + index * PLANE_PATTERN_TEXTURE_SIZE.y, mPlanePatternBitmap[index]);
-			includeDirtyRect(dirtyRect, Recti(0, PLANE_DATA_INDEX_Y + index * PLANE_PATTERN_TEXTURE_SIZE.y, PLANE_PATTERN_TEXTURE_SIZE.x, PLANE_PATTERN_TEXTURE_SIZE.y));
+			const int planeX = index * PLANE_PATTERN_TEXTURE_SIZE.x;
+			copyBitmap(mPlaneDataBitmap, planeX, PLANE_DATA_INDEX_Y, mPlanePatternBitmap[index]);
+			appendDirtyRegion(dirtyRegions, dirtyRect, Recti(planeX, PLANE_DATA_INDEX_Y, PLANE_PATTERN_TEXTURE_SIZE.x, PLANE_PATTERN_TEXTURE_SIZE.y));
 		}
 	}
 	for (int index = 0; index < 5; ++index)
@@ -816,26 +1115,45 @@ void GX2RenderResources::refreshPlaneDataTexture()
 		{
 			copyBitmap(mPlaneDataBitmap, 0, PLANE_DATA_HSCROLL_Y + index, mHScrollOffsetBitmap[index]);
 			copyBitmap(mPlaneDataBitmap, 0, PLANE_DATA_VSCROLL_Y + index, mVScrollOffsetBitmap[index]);
-			includeDirtyRect(dirtyRect, Recti(0, PLANE_DATA_HSCROLL_Y + index, H_SCROLL_TEXTURE_SIZE.x, H_SCROLL_TEXTURE_SIZE.y));
-			includeDirtyRect(dirtyRect, Recti(0, PLANE_DATA_VSCROLL_Y + index, V_SCROLL_TEXTURE_SIZE.x, V_SCROLL_TEXTURE_SIZE.y));
+			appendDirtyRegion(dirtyRegions, dirtyRect, Recti(0, PLANE_DATA_HSCROLL_Y + index, H_SCROLL_TEXTURE_SIZE.x, H_SCROLL_TEXTURE_SIZE.y));
+			appendDirtyRegion(dirtyRegions, dirtyRect, Recti(0, PLANE_DATA_VSCROLL_Y + index, V_SCROLL_TEXTURE_SIZE.x, V_SCROLL_TEXTURE_SIZE.y));
 		}
 
-	uploadBitmapRegion(mPlaneDataTexture, mPlaneDataBitmap, dirtyRect);
-#if defined(PLATFORM_WIIU)
-	static uint32 sPlaneDataUploadLogCount = 0;
-	if (sPlaneDataUploadLogCount < 8)
+	if (!dirtyRegions.empty())
 	{
-		RMX_LOG_INFO("GX2RenderResources: plane atlas upload " << sPlaneDataUploadLogCount
-			<< " patternDirty=" << (mPlaneDataPatternDirty ? 1 : 0)
-			<< " patternFull=" << (mPlaneDataPatternFullDirty ? 1 : 0)
-			<< " changedPatterns=" << (uint32)mChangedPatternIndices.size()
-			<< " paletteDirty=" << (mPlaneDataPaletteDirty ? 1 : 0)
-			<< " planeMask=" << rmx::hexString(planeDirtyMask, 2)
-			<< " scrollMask=" << rmx::hexString(scrollDirtyMask, 2)
-			<< " planeBNonZero=" << countNonZeroPixels(mPlanePatternBitmap[0], PLANE_PATTERN_TEXTURE_SIZE.y)
-			<< " planeANonZero=" << countNonZeroPixels(mPlanePatternBitmap[1], PLANE_PATTERN_TEXTURE_SIZE.y)
-			<< " planeWNonZero=" << countNonZeroPixels(mPlanePatternBitmap[2], PLANE_PATTERN_TEXTURE_SIZE.y));
-		++sPlaneDataUploadLogCount;
+		uploadBitmapRegions(mPlaneDataTexture, mPlaneDataBitmap, dirtyRegions);
+	}
+#if defined(PLATFORM_WIIU)
+	static constexpr bool ENABLE_WIIU_PLANE_UPLOAD_DIAGNOSTICS = false;
+	static uint32 sPlaneDataUploadLogCount = 0;
+	static uint32 sPriorityPlaneBUploadLogCount = 0;
+	if constexpr (ENABLE_WIIU_PLANE_UPLOAD_DIAGNOSTICS)
+	{
+		const bool mayLogStartupUpload = sPlaneDataUploadLogCount < 2;
+		const bool mayLogPriorityPlaneBUpload = ((planeDirtyMask & 0x01) != 0 && sPriorityPlaneBUploadLogCount < 2);
+		const uint32 planeBPriority = mayLogPriorityPlaneBUpload ? mPlanePatternPriorityCounts[0] : 0;
+		const bool logPriorityPlaneBUpload = mayLogPriorityPlaneBUpload && planeBPriority > 0;
+		if (mayLogStartupUpload || logPriorityPlaneBUpload)
+		{
+			const uint32 planeBNonZero = countNonZeroPixels(mPlanePatternBitmap[0], PLANE_PATTERN_TEXTURE_SIZE.y);
+			RMX_LOG_INFO("GX2RenderResources: plane atlas upload " << sPlaneDataUploadLogCount
+				<< " patternDirty=" << (mPlaneDataPatternDirty ? 1 : 0)
+				<< " patternFull=" << (mPlaneDataPatternFullDirty ? 1 : 0)
+				<< " changedPatterns=" << (uint32)mChangedPatternIndices.size()
+				<< " paletteDirty=" << (mPlaneDataPaletteDirty ? 1 : 0)
+				<< " planeMask=" << rmx::hexString(planeDirtyMask, 2)
+				<< " scrollMask=" << rmx::hexString(scrollDirtyMask, 2)
+				<< " dirtyRect=" << dirtyRect.x << "," << dirtyRect.y << " " << dirtyRect.width << "x" << dirtyRect.height
+				<< " planeBNonZero=" << planeBNonZero
+				<< " planeBPriority=" << planeBPriority
+				<< " planeANonZero=" << countNonZeroPixels(mPlanePatternBitmap[1], PLANE_PATTERN_TEXTURE_SIZE.y)
+				<< " planeAPriority=" << mPlanePatternPriorityCounts[1]
+				<< " planeWNonZero=" << countNonZeroPixels(mPlanePatternBitmap[2], PLANE_PATTERN_TEXTURE_SIZE.y)
+				<< " planeWPriority=" << mPlanePatternPriorityCounts[2]);
+			++sPlaneDataUploadLogCount;
+			if (logPriorityPlaneBUpload)
+				++sPriorityPlaneBUploadLogCount;
+		}
 	}
 #endif
 	mPlaneDataPatternFullDirty = false;

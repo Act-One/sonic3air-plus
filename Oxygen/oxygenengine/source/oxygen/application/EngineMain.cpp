@@ -133,8 +133,8 @@ void EngineMain::earlySetup()
 	INIT_RMX;
 	INIT_RMXEXT_OGGVORBIS;
 #if defined(PLATFORM_WIIU)
-	FTX::JobManager->setMaxThreads(2);
-	RMX_LOG_INFO("Wii U job workers capped at 2 on CPU2");
+	FTX::JobManager->setMaxThreads(1);
+	RMX_LOG_INFO("Wii U job workers capped at 1 on CPU0 to keep audio jobs off the main loop core");
 #endif
 }
 
@@ -414,7 +414,7 @@ void EngineMain::run()
 	Application* application = new Application();
 	FTX::System->run(*application);
 	RMX_LOG_INFO("Main application loop returned");
-	RMX_LOG_INFO("Wii U: deferring Application destruction to process teardown");
+	RMX_LOG_INFO("Wii U: leaving Application instance for process teardown");
 #else
 	Application application;
 	FTX::System->run(application);
@@ -423,6 +423,43 @@ void EngineMain::run()
 
 void EngineMain::shutdown()
 {
+#if defined(PLATFORM_WIIU)
+	// Leave the audio callback and streaming jobs quiet before releasing video/GX2 state.
+	if (nullptr != mAudioOut)
+	{
+		RMX_LOG_INFO("Engine shutdown: AudioOut shutdown begin");
+		FTX::Audio->playAudio(false);
+		mAudioOut->shutdown();
+		RMX_LOG_INFO("Engine shutdown: AudioOut shutdown complete");
+		SAFE_DELETE(mAudioOut);
+		RMX_LOG_INFO("Engine shutdown: AudioOut deleted");
+	}
+
+	RMX_LOG_INFO("Engine shutdown: FTX audio exit begin");
+	FTX::Audio->exit();
+	RMX_LOG_INFO("Engine shutdown: FTX audio exit complete");
+
+	RMX_LOG_INFO("Engine shutdown: job manager shutdown begin");
+	FTX::JobManager->~JobManager();
+	RMX_LOG_INFO("Engine shutdown: job manager shutdown complete");
+
+	RMX_LOG_INFO("Engine shutdown: VideoOut shutdown begin");
+	mInternal.mVideoOut.shutdown();
+	RMX_LOG_INFO("Engine shutdown: VideoOut shutdown complete");
+
+	RMX_LOG_INFO("Engine shutdown: destroyWindow begin");
+	destroyWindow();
+	RMX_LOG_INFO("Engine shutdown: destroyWindow complete");
+
+	RMX_LOG_INFO("Engine shutdown: drawer shutdown begin");
+	mDrawer.shutdown();
+	RMX_LOG_INFO("Engine shutdown: drawer shutdown complete");
+
+	RMX_LOG_INFO("System shutdown");
+	RMX_LOG_INFO("Engine shutdown: FTX system exit begin");
+	FTX::System->exit();
+	RMX_LOG_INFO("Engine shutdown: FTX system exit complete");
+#else
 	RMX_LOG_INFO("Engine shutdown: destroyWindow begin");
 	destroyWindow();
 	RMX_LOG_INFO("Engine shutdown: destroyWindow complete");
@@ -447,15 +484,16 @@ void EngineMain::shutdown()
 
 	// Cleanup system
 	RMX_LOG_INFO("System shutdown");
+	RMX_LOG_INFO("Engine shutdown: job manager shutdown begin");
+	FTX::JobManager->~JobManager();
+	RMX_LOG_INFO("Engine shutdown: job manager shutdown complete");
 	RMX_LOG_INFO("Engine shutdown: FTX audio exit begin");
 	FTX::Audio->exit();
 	RMX_LOG_INFO("Engine shutdown: FTX audio exit complete");
 	RMX_LOG_INFO("Engine shutdown: FTX system exit begin");
 	FTX::System->exit();
 	RMX_LOG_INFO("Engine shutdown: FTX system exit complete");
-	RMX_LOG_INFO("Engine shutdown: job manager shutdown begin");
-	FTX::JobManager->~JobManager();
-	RMX_LOG_INFO("Engine shutdown: job manager shutdown complete");
+#endif
 
 	RMX_LOG_INFO("Engine shutdown: copy mod settings");
 	mInternal.mModManager.copyModSettingsToConfig();
@@ -616,11 +654,6 @@ bool EngineMain::initConfigAndSettings()
 		RMX_LOG_INFO("Wii U: forcing native GX2 renderer over saved '" << Configuration::getRenderMethodConfigString(config.mRenderMethod) << "' setting");
 		config.mRenderMethod = Configuration::RenderMethod::GX2_FULL;
 		config.mAutoDetectRenderMethod = false;
-	}
-	if (config.mBackgroundBlur > 0)
-	{
-		RMX_LOG_INFO("Wii U: disabling background blur for native GX2 renderer");
-		config.mBackgroundBlur = 0;
 	}
 #endif
 

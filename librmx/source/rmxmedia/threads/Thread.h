@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <atomic>
+
 
 namespace rmx
 {
@@ -58,9 +60,7 @@ namespace rmx
 
 		void joinThread();
 
-		bool isThreadRunning() const  { return mIsThreadRunning; }
-// uh oh on this one, we probably need to sync ppc2 with teardown so that the app
-// exits properly in multithreaded mode. currently a gamble whether the game will exit or not
+		bool isThreadRunning() const  { return mIsThreadRunning.load(std::memory_order_acquire); }
 #if defined(PLATFORM_WIIU)
 		void setWiiUThreadAffinity(uint32 affinity);
 #endif
@@ -74,12 +74,12 @@ namespace rmx
 		void runThreadInternal();
 
 	protected:
-		bool mShouldBeRunning = false;		// If set to false, the thread should stop itself; this has to be implemented in the sub-class
+		std::atomic_bool mShouldBeRunning = false;		// If set to false, the thread should stop itself; this has to be implemented in the sub-class
 
 	private:
 		SDL_Thread* mSDLThread = nullptr;
 		std::string mName;
-		bool mIsThreadRunning = false;		// Set as long as the actual thread is running
+		std::atomic_bool mIsThreadRunning = false;		// Set as long as the actual thread is running
 #if defined(PLATFORM_WIIU)
 		uint32 mWiiUThreadAffinity = 0;
 #endif

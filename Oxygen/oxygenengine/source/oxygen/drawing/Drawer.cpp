@@ -39,6 +39,9 @@ namespace
 	template<> ObjectPool<GX2PlaneDrawCommand>&				 getPool<GX2PlaneDrawCommand>			  ()	{ return DrawCommand::mFactory.mGX2PlaneDrawCommands; }
 	template<> ObjectPool<GX2VdpSpriteDrawCommand>&			 getPool<GX2VdpSpriteDrawCommand>		  ()	{ return DrawCommand::mFactory.mGX2VdpSpriteDrawCommands; }
 	template<> ObjectPool<GX2PaletteSpriteDrawCommand>&		 getPool<GX2PaletteSpriteDrawCommand>	  ()	{ return DrawCommand::mFactory.mGX2PaletteSpriteDrawCommands; }
+	template<> ObjectPool<GX2TextureSpriteDrawCommand>&		 getPool<GX2TextureSpriteDrawCommand>	  ()	{ return DrawCommand::mFactory.mGX2TextureSpriteDrawCommands; }
+	template<> ObjectPool<GX2BlurDrawCommand>&				 getPool<GX2BlurDrawCommand>			  ()	{ return DrawCommand::mFactory.mGX2BlurDrawCommands; }
+	template<> ObjectPool<GX2ClearDepthDrawCommand>&		 getPool<GX2ClearDepthDrawCommand>		  ()	{ return DrawCommand::mFactory.mGX2ClearDepthDrawCommands; }
 #endif
 }
 
@@ -66,9 +69,8 @@ Drawer::Type Drawer::getType() const
 void Drawer::destroyDrawer()
 {
 #if defined(PLATFORM_WIIU)
-// if we try to delete every texture one-by-one before GX2 is done with them
-// the whole thing just locks up. not our problem anymore though CafeOS will clean
-// up the mess. we're going home.
+	// GX2 texture implementations are detached here instead of destroyed one by one.
+	// The active GX2 drawer owns display shutdown; CafeOS reclaims the remaining texture storage at process exit.
 	for (DrawerTexture* texture : mDrawerTextures)
 	{
 		texture->mImplementation = nullptr;
@@ -269,25 +271,54 @@ void Drawer::drawGX2Plane(const PlaneGeometry& geometry, const Vec2i& gameResolu
 	addDrawCommand(getPool<GX2PlaneDrawCommand>().createObject(resources, geometry.mActiveRect, geometry.mPlaneIndex, geometry.mPriorityFlag, geometry.mScrollOffsets, gameResolution));
 }
 
-void Drawer::drawGX2VdpSprite(const Recti& rect, const Vec2i& sizeInPatterns, uint16 firstPattern, int splitY, const Color& tintColor, const Color& addedColor, GX2RenderResources& resources)
+void Drawer::drawGX2VdpSprite(const Recti& rect, const Vec2i& sizeInPatterns, uint16 firstPattern, int splitY, const Color& tintColor, const Color& addedColor, bool priorityFlag, bool shadowHighlightMode, GX2RenderResources& resources)
 {
-	addDrawCommand(getPool<GX2VdpSpriteDrawCommand>().createObject(resources, rect, sizeInPatterns, Vec2i((int)firstPattern, splitY), tintColor, addedColor));
+	addDrawCommand(getPool<GX2VdpSpriteDrawCommand>().createObject(resources, rect, sizeInPatterns, Vec4i((int)firstPattern, splitY, priorityFlag ? 1 : 0, shadowHighlightMode ? 1 : 0), tintColor, addedColor));
 }
 
-void Drawer::drawGX2PaletteSprite(const Recti& rect, DrawerTexture& dataTexture, int splitY, uint16 atex, const Color& tintColor, const Color& addedColor)
+void Drawer::drawGX2PaletteSprite(const Recti& rect, DrawerTexture& dataTexture, int splitY, uint16 atex, const Color& tintColor, const Color& addedColor, bool priorityFlag, bool shadowHighlightMode)
 {
 	if (!rect.isEmpty())
 	{
-		addDrawCommand(getPool<GX2PaletteSpriteDrawCommand>().createObject(rect, dataTexture, Vec2i(splitY, (int)atex), tintColor, addedColor));
+		addDrawCommand(getPool<GX2PaletteSpriteDrawCommand>().createObject(rect, dataTexture, Vec4i(splitY, (int)atex, priorityFlag ? 1 : 0, shadowHighlightMode ? 1 : 0), tintColor, addedColor));
 	}
 }
 
-void Drawer::drawGX2PaletteSprite(const std::vector<DrawerMeshVertex>& triangles, const Vec2i& sourceSize, DrawerTexture& dataTexture, int splitY, uint16 atex, const Color& tintColor, const Color& addedColor)
+void Drawer::drawGX2PaletteSprite(const std::vector<DrawerMeshVertex>& triangles, const Vec2i& sourceSize, DrawerTexture& dataTexture, int splitY, uint16 atex, const Color& tintColor, const Color& addedColor, bool priorityFlag, bool shadowHighlightMode)
 {
 	if (!triangles.empty() && sourceSize.x > 0 && sourceSize.y > 0)
 	{
-		addDrawCommand(getPool<GX2PaletteSpriteDrawCommand>().createObject(triangles, sourceSize, dataTexture, Vec2i(splitY, (int)atex), tintColor, addedColor));
+		addDrawCommand(getPool<GX2PaletteSpriteDrawCommand>().createObject(triangles, sourceSize, dataTexture, Vec4i(splitY, (int)atex, priorityFlag ? 1 : 0, shadowHighlightMode ? 1 : 0), tintColor, addedColor));
 	}
+}
+
+void Drawer::drawGX2TextureSprite(const Recti& rect, DrawerTexture& texture, const Color& tintColor, const Color& addedColor, bool priorityFlag)
+{
+	if (!rect.isEmpty())
+	{
+		addDrawCommand(getPool<GX2TextureSpriteDrawCommand>().createObject(rect, texture, tintColor, addedColor, priorityFlag));
+	}
+}
+
+void Drawer::drawGX2TextureSprite(const std::vector<DrawerMeshVertex>& triangles, DrawerTexture& texture, const Color& tintColor, const Color& addedColor, bool priorityFlag)
+{
+	if (!triangles.empty())
+	{
+		addDrawCommand(getPool<GX2TextureSpriteDrawCommand>().createObject(triangles, texture, tintColor, addedColor, priorityFlag));
+	}
+}
+
+void Drawer::drawGX2Blur(DrawerTexture& processingTexture, const Vec2i& resolution, const Vec4f& kernel)
+{
+	if (resolution.x > 0 && resolution.y > 0)
+	{
+		addDrawCommand(getPool<GX2BlurDrawCommand>().createObject(processingTexture, resolution, kernel));
+	}
+}
+
+void Drawer::clearGX2Depth()
+{
+	addDrawCommand(getPool<GX2ClearDepthDrawCommand>().createObject());
 }
 #endif
 

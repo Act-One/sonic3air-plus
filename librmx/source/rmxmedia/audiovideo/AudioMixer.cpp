@@ -215,11 +215,27 @@ namespace rmx
 	bool AudioMixer::mixAudioBufferInner(AudioManager::AudioInstance& audioInstance, int32** output, size_t numOutputSamplesNeeded, const SDL_AudioSpec& outputFormat, int sourceIndexAdvance)
 	{
 		AudioBuffer& audioBuffer = *audioInstance.mAudioBuffer;
+		const int bufferLength = audioBuffer.getLength();
+		if (bufferLength <= 0)
+		{
+			return audioInstance.mStreaming;
+		}
 
 		// Check if the audio buffer got cleared (that can happen in Oxygen Engine)
 		//  -> In that case, just stop the sound immediately
-		if (audioInstance.mPosition > audioBuffer.getLength())
-			return false;
+		if (audioInstance.mPosition > bufferLength)
+		{
+			if (!audioInstance.mLoop)
+				return false;
+
+			audioInstance.mLoopStart = clamp(audioInstance.mLoopStart, 0, bufferLength - 1);
+			const int loopingPartLength = bufferLength - audioInstance.mLoopStart;
+			if (loopingPartLength <= 0)
+				return false;
+
+			const int overshoot = audioInstance.mPosition - bufferLength;
+			audioInstance.mPosition = audioInstance.mLoopStart + (overshoot % loopingPartLength);
+		}
 
 		const int instanceChannels = audioBuffer.getChannels();
 		const float volumeMultiplier = mOutputVolume * 0x10000;
@@ -246,6 +262,7 @@ namespace rmx
 				else if (audioInstance.mLoop)
 				{
 					// Restart looped sound
+					audioInstance.mLoopStart = clamp(audioInstance.mLoopStart, 0, bufferLength - 1);
 					audioInstance.mPosition = audioInstance.mLoopStart;
 					numAvailableInputSamples = audioBuffer.getData(instanceData, audioInstance.mPosition);
 					if (numAvailableInputSamples <= 0)

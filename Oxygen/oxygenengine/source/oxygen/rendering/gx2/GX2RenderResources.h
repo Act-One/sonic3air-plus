@@ -38,6 +38,7 @@ public:
 	DrawerTexture& getHScrollOffsetsTexture(int scrollOffsetsIndex);
 	DrawerTexture& getVScrollOffsetsTexture(int scrollOffsetsIndex);
 	DrawerTexture& getPlaneDataTexture();
+	bool hasPriorityPlanePatterns(int planeIndex) const;
 
 	DrawerTexture& getVdpSpriteTexture(const renderitems::VdpSpriteInfo& spriteInfo);
 	DrawerTexture& getComponentSpriteTexture(const renderitems::ComponentSpriteInfo& spriteInfo);
@@ -52,6 +53,7 @@ private:
 		uint32 mSpriteChangeCounter = 0xffffffff;
 		uint16 mPaletteChangeCounter = 0xffff;
 		uint16 mSecondaryPaletteChangeCounter = 0xffff;
+		uint64 mPatternSignature = 0;
 		Vec2i mSourceSize;
 	};
 
@@ -91,12 +93,14 @@ private:
 	bool mPlanePatternBitmapUsed[4] = { false, false, false, false };
 	bool mPlanePatternSourceCacheInitialized[4] = { false, false, false, false };
 	bool mScrollOffsetBitmapInitialized[5] = { false, false, false, false, false };
+	uint32 mScrollOffsetChangeCounters[5] = { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff };
 	bool mPlaneDataInitialized = false;
 	bool mPlaneDataPatternFullDirty = true;
 	bool mPlaneDataPatternDirty = true;
 	bool mPlaneDataPaletteDirty = true;
 	bool mPlaneDataPlaneDirty[4] = { true, true, true, true };
 	bool mPlaneDataScrollDirty[5] = { true, true, true, true, true };
+	uint32 mPlanePatternPriorityCounts[4] = { 0, 0, 0, 0 };
 	std::vector<uint16> mChangedPatternIndices;
 	std::vector<uint16> mPlanePatternSourceCache[4];
 

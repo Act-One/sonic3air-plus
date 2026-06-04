@@ -29,7 +29,7 @@ public:
 	inline void setVerticalScrolling(bool enable)			{ mVerticalScrolling = enable; }
 
 	inline uint8 getHorizontalScrollMask() const			{ return mHorizontalScrollMask; }
-	inline void setHorizontalScrollMask(uint8 scrollMask)	{ mHorizontalScrollMask = scrollMask; }
+	void setHorizontalScrollMask(uint8 scrollMask);
 
 	inline uint16 getHorizontalScrollTableBase() const			{ return mHorizontalScrollTableBase; }
 	void setHorizontalScrollTableBase(uint16 vramAddress);
@@ -42,6 +42,7 @@ public:
 
 	const uint16* getScrollOffsetsH(int setIndex) const;
 	const uint16* getScrollOffsetsV(int setIndex) const;
+	uint32 getScrollOffsetsChangeCounter(int setIndex) const;
 
 	inline const Vec2i& getPlaneWScrollOffset() const			 { return mScrollOffsetW; }
 	inline void setPlaneWScrollOffset(const Vec2i& scrollOffset) { mScrollOffsetW = scrollOffset; }
@@ -57,6 +58,7 @@ private:
 	bool mVerticalScrolling = false;
 	uint8 mHorizontalScrollMask = 0xff;
 	uint16 mHorizontalScrollTableBase = 0xf000;
+	bool mHorizontalScrollSourceDirty = true;
 
 	struct ScrollOffsetSet
 	{
@@ -65,6 +67,7 @@ private:
 		uint16 mScrollOffsetsV[0x20]    = { 0 };	// One scroll offset per row of 0x10 pixels
 		bool mExplicitOverwriteV[0x20]  = { 0 };	// One flag per vertical scroll offset; set if it was explicitly overwritten
 		bool mHorizontalScrollNoRepeat  = false;
+		uint32 mChangeCounter = 1;
 	};
 	ScrollOffsetSet mSets[4];		// First two are for the planes, the others are used for certain effects that require an additional set of scroll offsets
 	Vec2i mScrollOffsetW;
@@ -81,6 +84,7 @@ private:
 		uint16 mLastScrollOffsetsV[0x20] = { 0 };
 		int16 mDifferenceScrollOffsetsH[0x100] = { 0 };
 		int16 mDifferenceScrollOffsetsV[0x20] = { 0 };
+		uint32 mChangeCounter = 1;
 	};
 	InterpolatedScrollOffsetSet mInterpolatedSets[4];
 };

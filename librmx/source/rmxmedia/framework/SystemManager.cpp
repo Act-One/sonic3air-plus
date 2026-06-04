@@ -23,7 +23,6 @@
 #elif defined(PLATFORM_WEB)
 	#include <emscripten.h>
 	#include <emscripten/html5.h>
-	// we again gotta take control of ProcUI, because SDL isn't playing nice with exit
 #elif defined(PLATFORM_WIIU)
 	#include <whb/proc.h>
 
@@ -242,9 +241,27 @@ namespace rmx
 
 	void SystemManager::mainLoop()
 	{
+#if defined(PLATFORM_WIIU)
+		if (!WHBProcIsRunning())
+		{
+			quit();
+			return;
+		}
+#endif
+
 		mRoot.beginFrame();
 
 		checkSDLEvents();
+
+#if defined(PLATFORM_WIIU)
+		if (!WHBProcIsRunning())
+		{
+			mRoot.endFrame();
+			quit();
+			return;
+		}
+#endif
+
 		update();
 		render();
 

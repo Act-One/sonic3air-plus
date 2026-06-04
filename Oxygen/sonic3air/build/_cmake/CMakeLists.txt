@@ -103,7 +103,7 @@ if (PLATFORM_WIIU_BUILD)
 	)
 endif()
 
-option(S3AIR_WIIU_ENABLE_LTO "Enable link-time optimization for Wii U release builds" ON)
+option(S3AIR_WIIU_ENABLE_LTO "Enable link-time optimization for Wii U release builds" OFF)
 option(S3AIR_WIIU_BUILD_GX2GL_COMPAT "Build the legacy gx2gl/OpenGL compatibility renderer on Wii U" OFF)
 option(S3AIR_WIIU_BUILD_GX2VK "Build gx2vk alongside native GX2 for Wii U renderer experiments" OFF)
 option(S3AIR_WIIU_ENABLE_GX2VK_RENDERER "Enable Sonic 3 A.I.R.'s Vulkan renderer on Wii U through gx2vk" OFF)

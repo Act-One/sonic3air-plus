@@ -22,6 +22,7 @@
 #include "oxygen/application/EngineMain.h"
 #include "oxygen/application/gameview/GameView.h"
 #include "oxygen/application/video/VideoOut.h"
+#include "oxygen/helper/Logging.h"
 #include "oxygen/simulation/CodeExec.h"
 #include "oxygen/simulation/Simulation.h"
 
@@ -235,6 +236,33 @@ void MenuBackground::render()
 			detail::drawQuad(drawer, splitMin, splitAlter, global::mDataSelectAltBackground);
 		}
 	}
+
+#if defined(PLATFORM_WIIU)
+	static constexpr bool ENABLE_WIIU_MENU_BACKGROUND_LOGS = false;
+	if constexpr (ENABLE_WIIU_MENU_BACKGROUND_LOGS)
+	{
+		static uint32 sMenuBackgroundLogCount = 0;
+		if (sMenuBackgroundLogCount < 20)
+		{
+			RMX_LOG_INFO("MenuBackground: render"
+				<< " index=" << sMenuBackgroundLogCount
+				<< " rect=" << mRect.x << "," << mRect.y << " " << mRect.width << "x" << mRect.height
+				<< " target=" << (int)mTarget
+				<< " transition=" << (mInTransition ? 1 : 0)
+				<< " titleActive=" << ((titleLeft < titleRight) ? 1 : 0)
+				<< " mainMenuMode=" << (Game::instance().isInMainMenuMode() ? 1 : 0)
+				<< " animated=" << (mAnimatedBackgroundActive ? 1 : 0)
+				<< " title=" << titleLeft << ".." << titleRight
+				<< " splits=" << splitLight << "," << splitBlue << "," << splitAlter
+				<< " layers=" << mLightLayer.mCurrentPosition << "/" << mLightLayer.mTargetPosition
+				<< "," << mBlueLayer.mCurrentPosition << "/" << mBlueLayer.mTargetPosition
+				<< "," << mAlterLayer.mCurrentPosition << "/" << mAlterLayer.mTargetPosition
+				<< "," << mBackgroundLayer.mCurrentPosition << "/" << mBackgroundLayer.mTargetPosition
+				<< " preview=" << mPreviewVisibility);
+		}
+		++sMenuBackgroundLogCount;
+	}
+#endif
 
 	// Separators
 	drawer.setSamplingMode(SamplingMode::BILINEAR);

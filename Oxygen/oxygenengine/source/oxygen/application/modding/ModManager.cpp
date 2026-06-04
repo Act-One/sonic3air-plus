@@ -14,7 +14,7 @@
 #include "oxygen/helper/JsonHelper.h"
 #include "oxygen/helper/Logging.h"
 #include "oxygen/helper/Utils.h"
-// we gotta make this shit reliable baby
+
 namespace
 {
 	std::wstring normalizeModListEntry(const std::string& activeEntry)

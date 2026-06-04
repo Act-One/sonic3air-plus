@@ -127,7 +127,6 @@ void Application::initialize()
 
 	mOxygenMenu = &createChild<OxygenMenu>();
 	//mOxygenMenu->setVisible(true);
-// debug dont touch this
 #if !(defined(PLATFORM_WIIU) && !defined(DEBUG))
 	mProfilingView = &createChild<ProfilingView>();
 	mCheatSheetOverlay = &createChild<CheatSheetOverlay>();
@@ -150,6 +149,10 @@ void Application::deinitialize()
 {
 	RMX_LOG_INFO("");
 	RMX_LOG_INFO("--- SHUTDOWN ---");
+
+#if defined(PLATFORM_WIIU)
+	RMX_LOG_INFO("Application shutdown: Wii U drawer shutdown deferred to engine shutdown");
+#endif
 
 	// Destroy game app here already, instead of using the auto-deletion of children
 	if (nullptr != mGameApp)
@@ -831,6 +834,51 @@ void Application::render()
 		}
 
 		drawer.presentScreen();
+
+#if defined(PLATFORM_WIIU)
+		static constexpr bool ENABLE_WIIU_RUNTIME_CADENCE_LOGS = false;
+		if constexpr (ENABLE_WIIU_RUNTIME_CADENCE_LOGS)
+		{
+			static double sLastCadenceLogTime = 0.0;
+			static int sPresentedFrames = 0;
+			static int sCadenceLogCount = 0;
+
+			++sPresentedFrames;
+			const double cadenceTime = mApplicationTimer.getSecondsSinceStart() * 1000.0;
+			if (sLastCadenceLogTime <= 0.0)
+			{
+				sLastCadenceLogTime = cadenceTime;
+				sPresentedFrames = 0;
+			}
+			else if (sCadenceLogCount < 24 && cadenceTime - sLastCadenceLogTime >= 2000.0)
+			{
+				const double elapsedMs = cadenceTime - sLastCadenceLogTime;
+				const double presentRate = (double)sPresentedFrames * 1000.0 / elapsedMs;
+				const float systemRate = (nullptr != FTX::System) ? FTX::System->getFramerate() : 0.0f;
+				RMX_LOG_INFO("Application: Wii U cadence presents=" << sPresentedFrames
+					<< " elapsedMs=" << elapsedMs
+					<< " presentHz=" << presentRate
+					<< " systemFps=" << systemRate
+					<< " frameSync=" << (int)config.mFrameSync
+					<< " useVSync=" << (useVSync ? 1 : 0)
+					<< " useFrameCap=" << (useFrameCap ? 1 : 0));
+				static std::vector<std::pair<Profiling::Region*, int>> sProfilingRegions;
+				Profiling::listRegionsRecursive(sProfilingRegions);
+				RMX_LOG_INFO("Application: Wii U profiling rootMs=" << (Profiling::getRootRegion().mAverageTime * 1000.0)
+					<< " simPerSec=" << Profiling::getAdditionalData().mAverageSimulationsPerSecond
+					<< " smoothSimPerSec=" << Profiling::getAdditionalData().mSmoothedSimulationsPerSecond);
+				for (const std::pair<Profiling::Region*, int>& pair : sProfilingRegions)
+				{
+					const Profiling::Region& region = *pair.first;
+					RMX_LOG_INFO("Application: Wii U profiling region " << region.mName
+						<< " ms=" << (region.mAverageTime * 1000.0));
+				}
+				sLastCadenceLogTime = cadenceTime;
+				sPresentedFrames = 0;
+				++sCadenceLogCount;
+			}
+		}
+#endif
 
 	#if 0
 		// Use a glFinish or glFlush here...?

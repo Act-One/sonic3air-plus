@@ -7,7 +7,6 @@
 */
 
 #include "rmxmedia.h"
-// the pain begins.
 #if defined(PLATFORM_WIIU)
 	#include <coreinit/thread.h>
 #endif
@@ -40,7 +39,8 @@ namespace rmx
 		{
 			if (job.mRegisteredAtManager != this)
 				return;
-			if (job.mJobState != JobBase::JobState::INACTIVE && job.mJobState != JobBase::JobState::DONE)
+			const JobBase::JobState state = job.mJobState.load(std::memory_order_acquire);
+			if (state != JobBase::JobState::INACTIVE && state != JobBase::JobState::DONE)
 				return;
 
 			// Job is already registered here, but needs to have its state reset back to waiting
@@ -62,7 +62,7 @@ namespace rmx
 		}
 
 		// Job is ready to be processed
-		job.mJobState = JobBase::JobState::WAITING;
+		job.mJobState.store(JobBase::JobState::WAITING, std::memory_order_release);
 
 		// Wake up a thread
 		if (!mThreads.empty())
@@ -91,6 +91,7 @@ namespace rmx
 			return;
 
 		bool wasRemoved = false;
+		bool wasRunning = false;
 		SDL_LockMutex(mConditionLock);
 		for (size_t i = 0; i < mJobs.size(); ++i)
 		{
@@ -105,18 +106,20 @@ namespace rmx
 				wasRemoved = true;
 			}
 		}
+		wasRunning = (job.mJobState.load(std::memory_order_acquire) == JobBase::JobState::RUNNING);
+		job.mJobPriority = -1.0f;
+		job.mJobShouldBeRunning.store(false, std::memory_order_release);
 		job.mRegisteredAtManager = nullptr;
 		SDL_UnlockMutex(mConditionLock);
 
-		if (wasRemoved)
+		if (wasRemoved || wasRunning)
 		{
 			// Wait until job execution is done
-			job.mJobPriority = -1.0f;
-			job.mJobShouldBeRunning = false;
-			while (job.mJobState == JobBase::JobState::RUNNING)
+			while (job.mJobState.load(std::memory_order_acquire) == JobBase::JobState::RUNNING)
 			{
 				SDL_Delay(1);
 			}
+			job.mJobState.store(JobBase::JobState::INACTIVE, std::memory_order_release);
 		}
 	}
 
@@ -187,7 +190,7 @@ namespace rmx
 		const uint32 currentTicks = SDL_GetTicks();
 		for (JobBase* job : mJobs)
 		{
-			if (job->mJobState == JobBase::JobState::WAITING)
+			if (job->mJobState.load(std::memory_order_acquire) == JobBase::JobState::WAITING)
 			{
 				if (job->mJobDelayUntilTicks <= currentTicks)
 				{
@@ -210,8 +213,8 @@ namespace rmx
 			// Ignore priorities below 0.0f
 			if (bestJob->mJobPriority >= 0.0f)
 			{
-				bestJob->mJobShouldBeRunning = true;
-				bestJob->mJobState = JobBase::JobState::RUNNING;
+				bestJob->mJobShouldBeRunning.store(true, std::memory_order_release);
+				bestJob->mJobState.store(JobBase::JobState::RUNNING, std::memory_order_release);
 			}
 			else
 			{
@@ -268,38 +271,38 @@ namespace rmx
 
 	bool JobBase::callJobFuncOnCallingThread()
 	{
-		mJobShouldBeRunning = true;
-		mJobState = JobBase::JobState::RUNNING;
+		mJobShouldBeRunning.store(true, std::memory_order_release);
+		mJobState.store(JobBase::JobState::RUNNING, std::memory_order_release);
 
 		// Call job function implementation once
 		const bool result = jobFunc();
 		if (result)
 		{
 			// Job is done
-			mJobState = JobBase::JobState::DONE;
+			mJobState.store(JobBase::JobState::DONE, std::memory_order_release);
 		}
 		else
 		{
 			// Set back to waiting state
-			mJobState = JobBase::JobState::WAITING;
+			mJobState.store(JobBase::JobState::WAITING, std::memory_order_release);
 		}
 		return result;
 	}
 
 	void JobBase::executeOnCallingThread()
 	{
-		if (mJobState <= JobBase::JobState::WAITING)
+		if (mJobState.load(std::memory_order_acquire) <= JobBase::JobState::WAITING)
 		{
-			mJobShouldBeRunning = true;
-			mJobState = JobBase::JobState::RUNNING;
+			mJobShouldBeRunning.store(true, std::memory_order_release);
+			mJobState.store(JobBase::JobState::RUNNING, std::memory_order_release);
 
 			// Execute until done
 			while (!jobFunc())
 			{
 			}
 
-			mJobShouldBeRunning = false;
-			mJobState = JobBase::JobState::DONE;
+			mJobShouldBeRunning.store(false, std::memory_order_release);
+			mJobState.store(JobBase::JobState::DONE, std::memory_order_release);
 		}
 	}
 
@@ -310,7 +313,12 @@ namespace rmx
 		mJobManager(jobManager)
 	{
 #if defined(PLATFORM_WIIU)
-		setWiiUThreadAffinity(OS_THREAD_ATTRIB_AFFINITY_CPU2);
+		static const uint32 WIIU_JOB_WORKER_AFFINITIES[] =
+		{
+			OS_THREAD_ATTRIB_AFFINITY_CPU0,
+			OS_THREAD_ATTRIB_AFFINITY_CPU1
+		};
+		setWiiUThreadAffinity(WIIU_JOB_WORKER_AFFINITIES[index % 2]);
 #else
 		(void)index;
 #endif
@@ -328,14 +336,21 @@ namespace rmx
 				if (result)
 				{
 					// Job is done
-					job->mJobState = JobBase::JobState::DONE;
-					job->mRegisteredAtManager->removeJob(*job);
+					job->mJobState.store(JobBase::JobState::DONE, std::memory_order_release);
+					mJobManager.removeJob(*job);
 				}
 				else
 				{
 					// Set back to waiting state
 					//  -> Note that the job's priority might have changed, or there's another job with higher priority now, so don't just continue with this job
-					job->mJobState = JobBase::JobState::WAITING;
+					if (job->mRegisteredAtManager == &mJobManager && job->mJobShouldBeRunning.load(std::memory_order_acquire))
+					{
+						job->mJobState.store(JobBase::JobState::WAITING, std::memory_order_release);
+					}
+					else
+					{
+						job->mJobState.store(JobBase::JobState::DONE, std::memory_order_release);
+					}
 				}
 			}
 		}

@@ -16,8 +16,6 @@
 #include "lemon/runtime/provider/NativizedOpcodeProvider.h"
 #include "lemon/program/Program.h"
 
-// keep this disabled unless you want to pay the penalties of what comes with the insane logging
-// mostly useful for short emulator-side debugging runs; it slows hardware to a crawl
 namespace lemon
 {
 	namespace

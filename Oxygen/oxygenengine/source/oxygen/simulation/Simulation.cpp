@@ -118,9 +118,28 @@ namespace
 {
 #if defined(PLATFORM_WIIU)
 	static constexpr bool ENABLE_WIIU_SIM_FRAME_TRACE = false;
+	static constexpr bool ENABLE_WIIU_SIM_TIMING_LOGS = false;
+	static constexpr bool ENABLE_WIIU_CODE_EXEC_WORKER = false;
+
+	double getWiiUSimElapsedMilliseconds(uint64 start, uint64 end)
+	{
+		static const double frequency = (double)SDL_GetPerformanceFrequency();
+		return ((double)(end - start) * 1000.0) / frequency;
+	}
 
 	bool performFrameUpdateOnWiiU(CodeExec& codeExec, detail::CodeExecFrameUpdateThread* worker)
 	{
+		if constexpr (!ENABLE_WIIU_CODE_EXEC_WORKER)
+		{
+			static bool sLoggedMainThreadCodeExec = false;
+			if (!sLoggedMainThreadCodeExec)
+			{
+				sLoggedMainThreadCodeExec = true;
+				RMX_LOG_INFO("Simulation: Wii U CodeExec worker disabled; running frame updates on main thread");
+			}
+			return codeExec.performFrameUpdate();
+		}
+
 		if (nullptr == worker)
 			return codeExec.performFrameUpdate();
 
@@ -178,9 +197,12 @@ bool Simulation::startup()
 	Configuration& config = Configuration::instance();
 
 #if defined(PLATFORM_WIIU)
-	if (!mWiiUCodeExecThread)
+	if constexpr (ENABLE_WIIU_CODE_EXEC_WORKER)
 	{
-		mWiiUCodeExecThread.reset(new detail::CodeExecFrameUpdateThread());
+		if (!mWiiUCodeExecThread)
+		{
+			mWiiUCodeExecThread.reset(new detail::CodeExecFrameUpdateThread());
+		}
 	}
 #endif
 
@@ -237,17 +259,19 @@ bool Simulation::startup()
 void Simulation::shutdown()
 {
 	RMX_LOG_INFO("Simulation shutdown");
-#if defined(PLATFORM_WIIU)
 	mIsRunning = false;
-	RMX_LOG_INFO("Simulation shutdown complete");
-	return;
-#else
+#if defined(PLATFORM_WIIU)
+	if (mWiiUCodeExecThread)
+	{
+		RMX_LOG_INFO("Simulation shutdown: stopping Wii U code exec worker");
+		mWiiUCodeExecThread.reset();
+		RMX_LOG_INFO("Simulation shutdown: Wii U code exec worker stopped");
+	}
+#endif
 	mInputRecorder.shutdown();
 	RMX_LOG_INFO("Simulation input recorder shutdown complete");
 
-	mIsRunning = false;
 	RMX_LOG_INFO("Simulation shutdown complete");
-#endif
 }
 
 void Simulation::reloadScriptsAfterModsChange()
@@ -478,6 +502,9 @@ bool Simulation::generateFrame()
 {
 	ControlsIn& controlsIn = ControlsIn::instance();
 
+#if defined(PLATFORM_WIIU)
+	const uint64 simT0 = ENABLE_WIIU_SIM_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+#endif
 	const bool beginningNewFrame = mCodeExec.willBeginNewFrame();
 	const float tickLength = 1.0f / getSimulationFrequency();
 
@@ -566,6 +593,11 @@ bool Simulation::generateFrame()
 		}
 	}
 
+#if defined(PLATFORM_WIIU)
+	const uint64 simT1 = ENABLE_WIIU_SIM_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+	uint64 simT2 = simT1;
+	uint64 simT3 = simT1;
+#endif
 	if (!completedCurrentFrame)		// Can be true already if game recorder playback just loaded a state
 	{
 		// Perform game simulation
@@ -576,7 +608,9 @@ bool Simulation::generateFrame()
 		}
 #endif
 #if defined(PLATFORM_WIIU)
+		simT2 = ENABLE_WIIU_SIM_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
 		completedCurrentFrame = performFrameUpdateOnWiiU(mCodeExec, mWiiUCodeExecThread.get());
+		simT3 = ENABLE_WIIU_SIM_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
 #else
 		completedCurrentFrame = mCodeExec.performFrameUpdate();
 #endif
@@ -587,6 +621,10 @@ bool Simulation::generateFrame()
 		}
 #endif
 	}
+
+#if defined(PLATFORM_WIIU)
+	const uint64 simT4 = ENABLE_WIIU_SIM_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+#endif
 
 	// Steps to do when a frame got completed
 	if (completedCurrentFrame)
@@ -649,6 +687,48 @@ bool Simulation::generateFrame()
 		if (mStepsLimit > 0)
 			--mStepsLimit;
 	}
+
+#if defined(PLATFORM_WIIU)
+	const uint64 simT5 = ENABLE_WIIU_SIM_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+	if constexpr (ENABLE_WIIU_SIM_TIMING_LOGS)
+	{
+		static uint32 sTimingSamples = 0;
+		static double sPreFrameMilliseconds = 0.0;
+		static double sCodeExecMilliseconds = 0.0;
+		static double sPostFrameMilliseconds = 0.0;
+		static double sTotalMilliseconds = 0.0;
+		static double sMaxCodeExecMilliseconds = 0.0;
+		static double sMaxTotalMilliseconds = 0.0;
+
+		if (completedCurrentFrame)
+		{
+			const double preFrameMilliseconds = getWiiUSimElapsedMilliseconds(simT0, simT1);
+			const double codeExecMilliseconds = getWiiUSimElapsedMilliseconds(simT2, simT3);
+			const double postFrameMilliseconds = getWiiUSimElapsedMilliseconds(simT4, simT5);
+			const double totalMilliseconds = getWiiUSimElapsedMilliseconds(simT0, simT5);
+			sPreFrameMilliseconds += preFrameMilliseconds;
+			sCodeExecMilliseconds += codeExecMilliseconds;
+			sPostFrameMilliseconds += postFrameMilliseconds;
+			sTotalMilliseconds += totalMilliseconds;
+			sMaxCodeExecMilliseconds = std::max(sMaxCodeExecMilliseconds, codeExecMilliseconds);
+			sMaxTotalMilliseconds = std::max(sMaxTotalMilliseconds, totalMilliseconds);
+			++sTimingSamples;
+
+			if (sTimingSamples >= 180)
+			{
+				const double inv = 1.0 / (double)sTimingSamples;
+				RMX_LOG_INFO("Simulation timing avg pre=" << (sPreFrameMilliseconds * inv) << "ms code=" << (sCodeExecMilliseconds * inv) << "ms post=" << (sPostFrameMilliseconds * inv) << "ms total=" << (sTotalMilliseconds * inv) << "ms maxCode=" << sMaxCodeExecMilliseconds << "ms maxTotal=" << sMaxTotalMilliseconds << "ms");
+				sTimingSamples = 0;
+				sPreFrameMilliseconds = 0.0;
+				sCodeExecMilliseconds = 0.0;
+				sPostFrameMilliseconds = 0.0;
+				sTotalMilliseconds = 0.0;
+				sMaxCodeExecMilliseconds = 0.0;
+				sMaxTotalMilliseconds = 0.0;
+			}
+		}
+	}
+#endif
 
 	// Return false if frame got interrupted
 	//  -> In this case, the outer loop should break
