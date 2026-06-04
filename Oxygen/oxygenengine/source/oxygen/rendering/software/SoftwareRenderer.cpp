@@ -135,8 +135,10 @@ namespace detail
 		SoftwareRenderer::BufferedPlaneData::PixelBlock* mCurrentPixelBlock = nullptr;
 		uint16 mLastPatternBits = 0xffff;
 	};
-// try to split up blitting work to let CPU2 handle some of it 
+// Keep fallback blitting off the simulation core on Wii U.
 #if defined(PLATFORM_WIIU)
+	static constexpr bool ENABLE_WIIU_SOFTWARE_RENDER_WORKER = false;
+
 	class SoftwareRendererWorkerTask
 	{
 	public:
@@ -150,7 +152,7 @@ namespace detail
 		SoftwareRendererWorkerThread() :
 			ThreadBase("Software Renderer Worker")
 		{
-			setWiiUThreadAffinity(OS_THREAD_ATTRIB_AFFINITY_CPU2);
+			setWiiUThreadAffinity(OS_THREAD_ATTRIB_AFFINITY_CPU0);
 			mConditionVariable = SDL_CreateCond();
 			mConditionLock = SDL_CreateMutex();
 			startThread();
@@ -434,10 +436,22 @@ void SoftwareRenderer::initialize()
 	mGameResolution = Configuration::instance().mGameScreen;
 	mGameScreenTexture.accessBitmap().create(mGameResolution.x, mGameResolution.y);
 #if defined(PLATFORM_WIIU)
-	if (!mWiiURenderWorker)
+	if constexpr (detail::ENABLE_WIIU_SOFTWARE_RENDER_WORKER)
 	{
-		mWiiURenderWorker.reset(new detail::SoftwareRendererWorkerThread());
-		RMX_LOG_INFO("SoftwareRenderer: CPU2 render worker enabled");
+		if (!mWiiURenderWorker)
+		{
+			mWiiURenderWorker.reset(new detail::SoftwareRendererWorkerThread());
+			RMX_LOG_INFO("SoftwareRenderer: CPU0 render worker enabled");
+		}
+	}
+	else
+	{
+		static bool sLoggedWorkerDisabled = false;
+		if (!sLoggedWorkerDisabled)
+		{
+			sLoggedWorkerDisabled = true;
+			RMX_LOG_INFO("SoftwareRenderer: CPU0 render worker disabled; using single-threaded fallback");
+		}
 	}
 #endif
 }
@@ -951,7 +965,7 @@ void SoftwareRenderer::renderPlane(const PlaneGeometry& geometry)
 			static uint32 sPlaneBuildLogCount = 0;
 			if (sPlaneBuildLogCount < 10)
 			{
-				RMX_LOG_INFO("SoftwareRenderer: CPU2 plane build rect=" << rect.width << "x" << rect.height
+				RMX_LOG_INFO("SoftwareRenderer: worker plane build rect=" << rect.width << "x" << rect.height
 					<< " mainRows=" << (splitY - minY)
 					<< " workerRows=" << (maxY - splitY));
 				++sPlaneBuildLogCount;
@@ -1024,7 +1038,7 @@ void SoftwareRenderer::renderPlane(const PlaneGeometry& geometry)
 			static uint32 sPlaneWriteLogCount = 0;
 			if (sPlaneWriteLogCount < 10)
 			{
-				RMX_LOG_INFO("SoftwareRenderer: CPU2 plane write blocks=" << blocks.size()
+				RMX_LOG_INFO("SoftwareRenderer: worker plane write blocks=" << blocks.size()
 					<< " pixels=" << totalPixels
 					<< " mainBlocks=" << splitIndex
 					<< " workerBlocks=" << (blocks.size() - splitIndex));
@@ -1265,7 +1279,7 @@ void SoftwareRenderer::renderSprite(const SpriteGeometry& geometry)
 					static uint32 sIndexedSpriteLogCount = 0;
 					if (sIndexedSpriteLogCount < 8)
 					{
-						RMX_LOG_INFO("SoftwareRenderer: CPU2 indexed sprite blit rect=" << targetRect.width << "x" << targetRect.height
+						RMX_LOG_INFO("SoftwareRenderer: worker indexed sprite blit rect=" << targetRect.width << "x" << targetRect.height
 							<< " mainRows=" << mainRect.height
 							<< " workerRows=" << workerRect.height);
 						++sIndexedSpriteLogCount;
@@ -1292,7 +1306,7 @@ void SoftwareRenderer::renderSprite(const SpriteGeometry& geometry)
 					static uint32 sComponentSpriteLogCount = 0;
 					if (sComponentSpriteLogCount < 8)
 					{
-						RMX_LOG_INFO("SoftwareRenderer: CPU2 component sprite blit rect=" << targetRect.width << "x" << targetRect.height
+						RMX_LOG_INFO("SoftwareRenderer: worker component sprite blit rect=" << targetRect.width << "x" << targetRect.height
 							<< " mainRows=" << mainRect.height
 							<< " workerRows=" << workerRect.height);
 						++sComponentSpriteLogCount;

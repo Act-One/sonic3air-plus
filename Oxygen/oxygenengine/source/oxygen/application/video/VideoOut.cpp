@@ -60,6 +60,15 @@ VideoOut::~VideoOut()
 
 namespace
 {
+#if defined(PLATFORM_WIIU)
+	constexpr bool ENABLE_WIIU_VIDEOOUT_TIMING_LOGS = false;
+
+	double getElapsedMilliseconds(uint64 start, uint64 end)
+	{
+		return (double)(end - start) * 1000.0 / (double)SDL_GetPerformanceFrequency();
+	}
+#endif
+
 	Vec2i sanitizeGameResolution(const Vec2i& screenSize)
 	{
 #if defined(PLATFORM_WIIU)
@@ -272,6 +281,19 @@ void VideoOut::setScreenSize(uint32 width, uint32 height)
 {
 	const Vec2i requestedSize((int)width, (int)height);
 	const Vec2i sanitizedSize = sanitizeGameResolution(requestedSize);
+	if (sanitizedSize == mGameResolution)
+	{
+#if defined(PLATFORM_WIIU)
+		static uint32 sNoopScreenSizeLogCount = 0;
+		if (sNoopScreenSizeLogCount < 4 && requestedSize != sanitizedSize)
+		{
+			RMX_LOG_INFO("VideoOut: ignored unchanged setScreenSize request " << requestedSize.x << " x " << requestedSize.y
+				<< " effective " << sanitizedSize.x << " x " << sanitizedSize.y);
+			++sNoopScreenSizeLogCount;
+		}
+#endif
+		return;
+	}
 	RMX_LOG_INFO("VideoOut: setScreenSize " << mGameResolution.x << " x " << mGameResolution.y << " -> " << requestedSize.x << " x " << requestedSize.y
 		<< " effective " << sanitizedSize.x << " x " << sanitizedSize.y);
 	mGameResolution = sanitizedSize;
@@ -708,19 +730,12 @@ void VideoOut::collectGeometries(std::vector<Geometry*>& geometries)
 	}
 
 	// Insert blur effect geometry at the right position
-	const bool allowBackgroundBlur =
-#if defined(PLATFORM_WIIU) // i hope this compiles (update, it does)
-		false;
-#else
-		true;
-#endif
-	if (allowBackgroundBlur && Configuration::instance().mBackgroundBlur > 0)
+	if (Configuration::instance().mBackgroundBlur > 0)
 	{
 		constexpr uint16 BLUR_RENDER_QUEUE = 0x1800;
 
 		// Anything there to blur at all?
 		//  -> There might be no blurred background at all (e.g. in S3K Sky Sanctuary upper levels)
-		// not sure if this works on Wii U yet though
 		bool blurNeeded = false;
 		for (const Geometry* geometry : geometries)
 		{
@@ -756,15 +771,20 @@ void VideoOut::renderGameScreen()
 	// Render them
 	mActiveRenderer->renderGameScreen(mGeometries);
 }
-// fuck you wii u
 #if defined(PLATFORM_WIIU)
 void VideoOut::renderGameScreenToCurrentTarget(const Recti& targetRect)
 {
+#if defined(PLATFORM_WIIU)
+	const uint64 t0 = ENABLE_WIIU_VIDEOOUT_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+#endif
 	clearGeometries();
 	if (mRenderParts->getActiveDisplay())
 	{
 		collectGeometries(mGeometries);
 	}
+#if defined(PLATFORM_WIIU)
+	const uint64 t1 = ENABLE_WIIU_VIDEOOUT_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+#endif
 
 	if (mActiveRenderer == mGX2Renderer && nullptr != mGX2Renderer)
 	{
@@ -774,6 +794,31 @@ void VideoOut::renderGameScreenToCurrentTarget(const Recti& targetRect)
 	{
 		mActiveRenderer->renderGameScreen(mGeometries);
 	}
+#if defined(PLATFORM_WIIU)
+	const uint64 t2 = ENABLE_WIIU_VIDEOOUT_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
+	if constexpr (ENABLE_WIIU_VIDEOOUT_TIMING_LOGS)
+	{
+		static uint32 sSampleCount = 0;
+		static double sCollectMs = 0.0;
+		static double sRenderMs = 0.0;
+		static uint32 sGeometries = 0;
+		++sSampleCount;
+		sCollectMs += getElapsedMilliseconds(t0, t1);
+		sRenderMs += getElapsedMilliseconds(t1, t2);
+		sGeometries += (uint32)mGeometries.size();
+		if ((sSampleCount % 180) == 0)
+		{
+			const double inv = 1.0 / 180.0;
+			RMX_LOG_INFO("VideoOut timing avg collect=" << (float)(sCollectMs * inv)
+				<< "ms render=" << (float)(sRenderMs * inv)
+				<< "ms total=" << (float)((sCollectMs + sRenderMs) * inv)
+				<< "ms geometries=" << (uint32)((double)sGeometries * inv));
+			sCollectMs = 0.0;
+			sRenderMs = 0.0;
+			sGeometries = 0;
+		}
+	}
+#endif
 }
 #endif
 

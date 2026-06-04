@@ -340,21 +340,25 @@ void PauseMenu::render()
 			const int rightAnchor = screenWidth + roundToInt((1.0f - menuVisibility) * 160.0f);
 			int py = screenHeight - (int)mMenuEntries.size() * LINE_HEIGHT;
 #if defined(PLATFORM_WIIU)
-			static uint32 sPauseLayoutLogCount = 0;
-			if (sPauseLayoutLogCount < 8)
+			static constexpr bool ENABLE_WIIU_PAUSE_LAYOUT_LOGS = false;
+			if constexpr (ENABLE_WIIU_PAUSE_LAYOUT_LOGS)
 			{
-				RMX_LOG_INFO("PauseMenu: Wii U layout rect=" << gameScreenRect.width << "x" << gameScreenRect.height
-					<< " clamped=" << screenWidth << "x" << screenHeight
-					<< " rightAnchor=" << rightAnchor
-					<< " entries=" << mMenuEntries.size());
-				++sPauseLayoutLogCount;
+				static uint32 sPauseLayoutLogCount = 0;
+				if (sPauseLayoutLogCount < 8)
+				{
+					RMX_LOG_INFO("PauseMenu: Wii U layout rect=" << gameScreenRect.width << "x" << gameScreenRect.height
+						<< " clamped=" << screenWidth << "x" << screenHeight
+						<< " rightAnchor=" << rightAnchor
+						<< " entries=" << mMenuEntries.size());
+					++sPauseLayoutLogCount;
+				}
 			}
 #endif
 
 			constexpr uint64 upperBGKey = rmx::constMurmur2_64("pause_screen_upper");
 			constexpr uint64 lowerBGKey = rmx::constMurmur2_64("pause_screen_lower");
 			drawer.drawSprite(Vec2i(rightAnchor - 210, 0), upperBGKey);
-			drawer.drawSprite(Vec2i(rightAnchor - 190, py - 8), lowerBGKey);
+			drawer.drawSprite(Vec2i(rightAnchor - 240, py - 8), lowerBGKey);
 
 			for (size_t line = 0; line < mMenuEntries.size(); ++line)
 			{

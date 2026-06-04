@@ -41,7 +41,7 @@ namespace rmx
 
 	ThreadBase::~ThreadBase()
 	{
-		if (mIsThreadRunning)
+		if (mSDLThread != nullptr)
 		{
 			signalStopThread(true);
 		}
@@ -60,9 +60,7 @@ namespace rmx
 
 	void ThreadBase::runThreadInternal()
 	{
-		mIsThreadRunning = true;
-		mShouldBeRunning = true;
-// we should probably switch to SDL for threading but OS functions are working for now
+		mIsThreadRunning.store(true, std::memory_order_release);
 #if defined(PLATFORM_WIIU)
 		if (mWiiUThreadAffinity != 0)
 		{
@@ -70,37 +68,43 @@ namespace rmx
 		}
 #endif
 		threadFunc();
-		mShouldBeRunning = false;
-		mIsThreadRunning = false;
+		mShouldBeRunning.store(false, std::memory_order_release);
+		mIsThreadRunning.store(false, std::memory_order_release);
 	}
 
 	void ThreadBase::startThread()
 	{
-		if (!mIsThreadRunning)
+		if (!mIsThreadRunning.load(std::memory_order_acquire) && nullptr == mSDLThread)
 		{
+			mShouldBeRunning.store(true, std::memory_order_release);
 		#if !defined(PLATFORM_VITA)
 			mSDLThread = SDL_CreateThread(ThreadBase::runThreadStatic, mName.c_str(), this);
 		#else
 			mSDLThread = SDL_CreateThreadWithStackSize(ThreadBase::runThreadStatic, mName.c_str(), 4 * 1024 * 1024, this);
 		#endif
+			if (nullptr == mSDLThread)
+			{
+				mShouldBeRunning.store(false, std::memory_order_release);
+			}
 		}
 	}
 
 	void ThreadBase::signalStopThread(bool join)
 	{
-		if (mIsThreadRunning)
+		mShouldBeRunning.store(false, std::memory_order_release);
+		if (join)
 		{
-			mShouldBeRunning = false;
-			if (join)
-				joinThread();
+			joinThread();
 		}
 	}
 
 	void ThreadBase::joinThread()
 	{
-		if (mIsThreadRunning && nullptr != mSDLThread)
+		if (nullptr != mSDLThread)
 		{
 			SDL_WaitThread(mSDLThread, nullptr);
+			mSDLThread = nullptr;
+			mIsThreadRunning.store(false, std::memory_order_release);
 		}
 	}
 

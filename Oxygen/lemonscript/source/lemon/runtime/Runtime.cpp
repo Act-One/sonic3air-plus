@@ -461,7 +461,6 @@ namespace lemon
 			return false;
 
 		const DataTypeDefinition& returnType = (nullptr != params.mReturnType) ? *params.mReturnType : PredefinedDataTypes::VOID;
-		// the function signature hash has notoriously been a wall of pain for wii u
 		// Build the function signature hash
 		uint32 signatureHash = Function::getVoidSignatureHash();
 		if (!returnType.isA<VoidDataType>() || !params.mParams.empty())

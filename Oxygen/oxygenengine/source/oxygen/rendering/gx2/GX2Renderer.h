@@ -16,6 +16,8 @@
 #include "oxygen/drawing/DrawerTexture.h"
 
 
+class Drawer;
+
 class GX2Renderer final : public Renderer
 {
 public:
@@ -44,8 +46,13 @@ private:
 	DrawerTexture& updateGameScreenPresentTexture();
 	void ensureProcessingTexture();
 	void copyNativeGameScreenToProcessingTexture(const Recti& viewport);
+	void resetNativeBlurProcessingState();
+	void beginNativeBlurProcessingTarget(Drawer& drawer, bool outputIsWindow, const Recti& outputViewport);
+	void restoreNativeBlurOutputTarget(Drawer& drawer);
+	void resetNativeQueuedState();
+	void setNativeBlendMode(Drawer& drawer, BlendMode blendMode);
 	void prepareHybridOverlayGeometries(const std::vector<Geometry*>& geometries, std::vector<Geometry*>& outSoftwareGeometries);
-	bool canPinNativeOverlayGeometry(const Geometry& geometry) const;
+	bool canPinNativeOverlayGeometry(const Geometry& geometry, bool allowDepthSensitiveSprites) const;
 	bool canDrawNativeOverlayGeometry(const Geometry& geometry, bool allowDepthSensitiveSprites) const;
 	bool isDepthWritingGeometry(const Geometry& geometry) const;
 	void drawNativeGeometry(const Geometry& geometry, bool& scissorActive);
@@ -55,6 +62,7 @@ private:
 	void drawNativeComponentSprite(const renderitems::ComponentSpriteInfo& spriteInfo);
 	void drawNativePaletteSprite(const renderitems::PaletteSpriteInfo& spriteInfo);
 	void drawNativeSpriteMask(const renderitems::SpriteMaskInfo& spriteInfo);
+	void drawNativeBlur(const EffectBlurGeometry& geometry);
 	void invalidateNativeRenderTarget();
 
 private:
@@ -70,4 +78,9 @@ private:
 	std::vector<Geometry*> mNativeOverlayGeometries;
 	Recti mNativeOverlayInitialViewport;
 	bool mNativeOverlayUsesInitialViewport = false;
+	bool mHasNativeQueuedBlendMode = false;
+	BlendMode mNativeQueuedBlendMode = BlendMode::OPAQUE;
+	bool mNativeBlurProcessingActive = false;
+	bool mNativeBlurOutputIsWindow = false;
+	Recti mNativeBlurOutputViewport;
 };

@@ -156,7 +156,6 @@ namespace
 				const bool requestHardware = (renderMethodString.endsWith("full") || renderMethodString.endsWith("hardware"));
 				outRenderMethod = (requestHardware && Configuration::isSupportedRenderMethod(Configuration::RenderMethod::VULKAN_FULL)) ? Configuration::RenderMethod::VULKAN_FULL : Configuration::RenderMethod::VULKAN_SOFT;
 			}
-			// add gx2 render method for Wii U since it's the literal only API it has for graphics
 			else if (renderMethodString.startsWith("gx2"))
 			{
 				outRenderMethod = Configuration::RenderMethod::GX2_FULL;
@@ -332,7 +331,7 @@ bool Configuration::isVulkanRenderMethod(RenderMethod renderMethod)
 {
 	return (renderMethod == RenderMethod::VULKAN_SOFT || renderMethod == RenderMethod::VULKAN_FULL);
 }
-// hi my name is GX2 and I'm the only render method available on Wii U, so I guess I'll just be my own category
+
 bool Configuration::isGX2RenderMethod(RenderMethod renderMethod)
 {
 	return (renderMethod == RenderMethod::GX2_FULL);
@@ -412,7 +411,6 @@ Configuration::Configuration()
 #endif
 
 #if defined(PLATFORM_WIIU)
-// we kinda need the audio worker thread on wii u otherwise alot of stuttering happens
 	mAudio.mUseAudioThreading = true;
 #endif
 
@@ -777,8 +775,8 @@ void Configuration::serializeStandardSettings(JsonSerializer& serializer)
 
 	// Script
 	serializer.serialize("ScriptOptimizationLevel", mScriptOptimizationLevel);
-	// crank this shit up to the maximum and don't let it change, lower optimization levels do bad things
 #if defined(PLATFORM_WIIU)
+	// Lower optimization levels are too slow on Wii U.
 	mScriptOptimizationLevel = 3;
 #endif
 

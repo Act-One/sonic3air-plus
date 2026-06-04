@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include <rmxbase.h>
 
 class Drawer;
@@ -22,9 +24,11 @@ public:
 
 	virtual void updateFromBitmap(const Bitmap& bitmap) = 0;
 	virtual void updateFromBitmapRegion(const Bitmap& bitmap, const Recti& rect);
+	virtual void updateFromBitmapRegions(const Bitmap& bitmap, const std::vector<Recti>& rects);
 	virtual void setupAsRenderTarget(const Vec2i& size) = 0;
 	virtual void writeContentToBitmap(Bitmap& outBitmap) = 0;
 	virtual void refreshImplementation(bool setupRenderTarget, const Vec2i& size) = 0;
+	virtual void setContentKnownOpaque(bool knownOpaque) {}
 
 protected:
 	DrawerTexture& mOwner;
@@ -57,8 +61,10 @@ public:
 
 	const Bitmap& getBitmap() const;
 	Bitmap& accessBitmap();
+	void setContentKnownOpaque(bool knownOpaque);
 	void bitmapUpdated();
 	void bitmapRegionUpdated(const Recti& rect);
+	void bitmapRegionsUpdated(const std::vector<Recti>& rects);
 
 	void setupAsRenderTarget(const Vec2i& size);
 	void writeContentToBitmap(Bitmap& outBitmap);
@@ -73,6 +79,7 @@ private:
 	Bitmap mBitmap;		// Holding the texture content, except if this is an OpenGL render target
 	Vec2i mSize;		// Resolution of the texture -- either the size of the bitmap or of an OpenGL render target
 	bool mSetupAsRenderTarget = false;
+	bool mContentKnownOpaque = false;
 
 	DrawerTextureImplementation* mImplementation = nullptr;
 };

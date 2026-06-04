@@ -154,15 +154,14 @@ bool ChipWritesAudioSource::jobFunc()
 		const std::vector<SoundChipWrite>& writes = isPlaying ? mSoundChipWritesByFrame[mCurrentFrame] : EMPTY_LIST;
 		++mCurrentFrame;
 
-		static int16 soundBuffer[0x10000];
-		const uint32 length = mSoundEmulation.update(soundBuffer, writes);	// Returns length in samples
+		const uint32 length = mSoundEmulation.update(mSoundBuffer, writes);	// Returns length in samples
 
 		if (!isPlaying)
 		{
 			// Check if sound chips still produce output
 			for (uint32 i = 0; i < length * 2; ++i)
 			{
-				if (soundBuffer[i] < -2 || soundBuffer[i] > 0)	// Sometimes we get -2 indefinitely (e.g. sound ID "CC" does this)
+				if (mSoundBuffer[i] < -2 || mSoundBuffer[i] > 0)	// Sometimes we get -2 indefinitely (e.g. sound ID "CC" does this)
 				{
 					isPlaying = true;
 					break;
@@ -172,13 +171,12 @@ bool ChipWritesAudioSource::jobFunc()
 
 		if (isPlaying)
 		{
-			static int16 pcm[2][0x10000];
-			int16* pcmPtr[2] = { pcm[0], pcm[1] };
+			int16* pcmPtr[2] = { mPcm[0], mPcm[1] };
 
 			for (uint32 i = 0; i < length; ++i)
 			{
-				pcm[0][i] = soundBuffer[i*2];
-				pcm[1][i] = soundBuffer[i*2+1];
+				mPcm[0][i] = mSoundBuffer[i*2];
+				mPcm[1][i] = mSoundBuffer[i*2+1];
 			}
 			mAudioBuffer.lock();
 			mAudioBuffer.addData(pcmPtr, length);

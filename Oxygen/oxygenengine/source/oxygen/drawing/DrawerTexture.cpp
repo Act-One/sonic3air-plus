@@ -16,6 +16,14 @@ void DrawerTextureImplementation::updateFromBitmapRegion(const Bitmap& bitmap, c
 	updateFromBitmap(bitmap);
 }
 
+void DrawerTextureImplementation::updateFromBitmapRegions(const Bitmap& bitmap, const std::vector<Recti>& rects)
+{
+	for (const Recti& rect : rects)
+	{
+		updateFromBitmapRegion(bitmap, rect);
+	}
+}
+
 DrawerTexture::~DrawerTexture()
 {
 	invalidate();
@@ -48,6 +56,7 @@ void DrawerTexture::setImplementation(DrawerTextureImplementation* implementatio
 
 	if (nullptr != implementation)
 	{
+		implementation->setContentKnownOpaque(mContentKnownOpaque);
 		implementation->refreshImplementation(mSetupAsRenderTarget, mSize);
 	}
 }
@@ -66,6 +75,15 @@ const Bitmap& DrawerTexture::getBitmap() const
 Bitmap& DrawerTexture::accessBitmap()
 {
 	return mBitmap;
+}
+
+void DrawerTexture::setContentKnownOpaque(bool knownOpaque)
+{
+	mContentKnownOpaque = knownOpaque;
+	if (nullptr != mImplementation)
+	{
+		mImplementation->setContentKnownOpaque(knownOpaque);
+	}
 }
 
 void DrawerTexture::bitmapUpdated()
@@ -92,6 +110,30 @@ void DrawerTexture::bitmapRegionUpdated(const Recti& rect)
 	if (nullptr != mImplementation)
 	{
 		mImplementation->updateFromBitmapRegion(mBitmap, rect);
+	}
+}
+
+void DrawerTexture::bitmapRegionsUpdated(const std::vector<Recti>& rects)
+{
+	mSize.set(mBitmap.getWidth(), mBitmap.getHeight());
+	mSetupAsRenderTarget = false;
+
+	bool hasRegion = false;
+	for (const Recti& rect : rects)
+	{
+		if (!rect.empty())
+		{
+			hasRegion = true;
+			break;
+		}
+	}
+	if (!hasRegion)
+		return;
+
+	ensureValidity();
+	if (nullptr != mImplementation)
+	{
+		mImplementation->updateFromBitmapRegions(mBitmap, rects);
 	}
 }
 
@@ -124,5 +166,6 @@ void DrawerTexture::swap(DrawerTexture& other)
 {
 	mBitmap.swap(other.mBitmap);
 	std::swap(mSize, other.mSize);
+	std::swap(mContentKnownOpaque, other.mContentKnownOpaque);
 	std::swap(mImplementation, other.mImplementation);
 }

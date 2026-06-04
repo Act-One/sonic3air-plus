@@ -92,10 +92,10 @@ bool ConfigurationImpl::loadSettingsInternal(JsonSerializer& serializer, Setting
 		RMX_LOG_INFO("Configuration: Wii U forcing simulation frequency " << mSimulationFrequency << " -> 60");
 		mSimulationFrequency = 60;
 	}
-	if (mFrameSync != Configuration::FrameSyncType::VSYNC_ON)
+	if (mFrameSync != Configuration::FrameSyncType::VSYNC_OFF)
 	{
-		RMX_LOG_INFO("Configuration: Wii U forcing frame sync " << (int)mFrameSync << " -> VSync On");
-		mFrameSync = Configuration::FrameSyncType::VSYNC_ON;
+		RMX_LOG_INFO("Configuration: Wii U forcing frame sync " << (int)mFrameSync << " -> 60 Hz cap without vsync");
+		mFrameSync = Configuration::FrameSyncType::VSYNC_OFF;
 	}
 #endif
 

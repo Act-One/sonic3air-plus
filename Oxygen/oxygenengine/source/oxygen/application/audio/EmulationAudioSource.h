@@ -43,6 +43,8 @@ private:
 
 	SoundEmulation mSoundEmulation;
 	SoundDriver mSoundDriver;
+	int16 mSoundBuffer[0x10000] = {};
+	int16 mPcm[2][0x10000] = {};
 
 	float mPrecacheTime = 0.0f;
 };

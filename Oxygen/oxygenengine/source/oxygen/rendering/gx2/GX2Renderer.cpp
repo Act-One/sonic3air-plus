@@ -29,7 +29,11 @@ namespace
 	constexpr bool ENABLE_GX2_RENDERER_FRAME_LOGS = false;
 	constexpr bool ENABLE_GX2_RENDERER_SPRITE_TRACE = false;
 	constexpr bool FORCE_SOFTWARE_GAME_RENDERER = false;
-
+	constexpr bool FORCE_NATIVE_WINDOW_GAME_OFFSCREEN = true;
+	constexpr bool USE_INDEXED_PALETTE_SPRITE_SHADER = true;
+	constexpr bool USE_ATLAS_VDP_SPRITE_SHADER = true;
+	constexpr bool ENABLE_GX2_FALLBACK_BITMAP_LOGS = false;
+	constexpr bool ENABLE_NATIVE_PRIORITY_DEPTH = true;
 	bool isBlendModeSupported(BlendMode blendMode)
 	{
 		switch (blendMode)
@@ -54,87 +58,36 @@ namespace
 		return color.r == 0.0f && color.g == 0.0f && color.b == 0.0f && color.a == 0.0f;
 	}
 
-	uint32 tintedABGR(uint32 abgr, const Color& tint)
+	Vec4f calculateBlurKernel(float x)
 	{
-		const uint32 r = (uint32)roundToInt((float)((abgr) & 0xff) * tint.r);
-		const uint32 g = (uint32)roundToInt((float)((abgr >> 8) & 0xff) * tint.g);
-		const uint32 b = (uint32)roundToInt((float)((abgr >> 16) & 0xff) * tint.b);
-		const uint32 a = (uint32)roundToInt((float)((abgr >> 24) & 0xff) * tint.a);
-		return std::min<uint32>(r, 255)
-			 | (std::min<uint32>(g, 255) << 8)
-			 | (std::min<uint32>(b, 255) << 16)
-			 | (std::min<uint32>(a, 255) << 24);
+		const float y = 1.0f - 2.0f * x;
+		return Vec4f(y * y, y * x, x * y, x * x);
 	}
 
-	void buildPaletteSpriteBitmap(Bitmap& outBitmap, const PaletteBitmap& source, const PaletteBase& palette, uint16 atex)
+	const Vec4f& getBlurKernel(int blurValue)
 	{
-		outBitmap.create(source.getWidth(), source.getHeight());
-		const uint32* colors = palette.getRawColors();
-		const size_t colorCount = palette.getSize();
-		const uint8* src = source.getData();
-		uint32* dst = outBitmap.getData();
-		for (int i = 0; i < source.getPixelCount(); ++i)
+		static const Vec4f BLUR_KERNELS[] =
 		{
-			const uint8 sourceIndex = src[i];
-			if ((sourceIndex & 0x0f) == 0)
-			{
-				dst[i] = 0;
-				continue;
-			}
-			const uint32 index = (uint32)sourceIndex + atex;
-			dst[i] = (index < colorCount) ? colors[index] : 0;
-		}
-	}
-
-	void buildTintedBitmap(Bitmap& outBitmap, const Bitmap& source, const Color& tint)
-	{
-		outBitmap.create(source.getWidth(), source.getHeight());
-		const uint32* src = source.getData();
-		uint32* dst = outBitmap.getData();
-		if (tint == Color::WHITE)
-		{
-			memcpy(dst, src, (size_t)source.getPixelCount() * sizeof(uint32));
-			return;
-		}
-		for (int i = 0; i < source.getPixelCount(); ++i)
-		{
-			dst[i] = tintedABGR(src[i], tint);
-		}
-	}
-
-	void buildVdpSpriteBitmap(Bitmap& outBitmap, const renderitems::VdpSpriteInfo& spriteInfo, RenderParts& renderParts)
-	{
-		const Vec2i size(spriteInfo.mSize.x * 8, spriteInfo.mSize.y * 8);
-		outBitmap.create(size);
-		outBitmap.clear(0);
-
-		const PaletteManager& paletteManager = renderParts.getPaletteManager();
-		const uint32* palettes[2] =
-		{
-			paletteManager.getMainPalette(0).getRawColors(),
-			paletteManager.getMainPalette(1).getRawColors()
+			Vec4f(1.0f, 0.0f, 0.0f, 0.0f),
+			calculateBlurKernel(16.0f / 256.0f),
+			calculateBlurKernel(32.0f / 256.0f),
+			calculateBlurKernel(48.0f / 256.0f),
+			calculateBlurKernel(64.0f / 256.0f)
 		};
-		const PatternManager::CacheItem* patternCache = renderParts.getPatternManager().getPatternCache();
+		return BLUR_KERNELS[blurValue % 5];
+	}
 
-		for (int y = 0; y < size.y; ++y)
+	bool usesBackgroundBlur(const std::vector<Geometry*>& geometries)
+	{
+		if (Configuration::instance().mBackgroundBlur <= 0)
+			return false;
+
+		for (const Geometry* geometry : geometries)
 		{
-			const uint32* palette = ((spriteInfo.mInterpolatedPosition.y + y) < paletteManager.mSplitPositionY) ? palettes[0] : palettes[1];
-			uint32* dst = outBitmap.getPixelPointer(0, y);
-			for (int x = 0; x < size.x; ++x)
-			{
-				int patternX = x / 8;
-				int patternY = y / 8;
-				if (spriteInfo.mFirstPattern & 0x0800)
-					patternX = spriteInfo.mSize.x - patternX - 1;
-				if (spriteInfo.mFirstPattern & 0x1000)
-					patternY = spriteInfo.mSize.y - patternY - 1;
-
-				const uint16 patternIndex = spriteInfo.mFirstPattern + patternY + patternX * spriteInfo.mSize.y;
-				const PatternManager::CacheItem::Pattern& pattern = patternCache[patternIndex & 0x07ff].mFlipVariation[(patternIndex >> 11) & 3];
-				const uint8 colorIndex = pattern.mPixels[(x & 7) + (y & 7) * 8] + ((patternIndex >> 9) & 0x30);
-				dst[x] = (colorIndex & 0x0f) ? palette[colorIndex] : 0;
-			}
+			if (nullptr != geometry && geometry->getType() == Geometry::Type::EFFECT_BLUR)
+				return true;
 		}
+		return false;
 	}
 
 	void dumpBitmapPpmOnce(const char* path, const Bitmap& bitmap)
@@ -174,7 +127,7 @@ namespace
 		uint32 center = 0;
 	};
 
-	BitmapSample sampleBitmap(const Bitmap& bitmap)
+	BitmapSample sampleBitmapRegion(const Bitmap& bitmap, const Recti& requestedRect)
 	{
 		BitmapSample sample;
 		if (bitmap.empty())
@@ -182,13 +135,22 @@ namespace
 
 		const int width = bitmap.getWidth();
 		const int height = bitmap.getHeight();
-		sample.center = *bitmap.getPixelPointer(width / 2, height / 2);
+		const int x0 = clamp(requestedRect.x, 0, width);
+		const int y0 = clamp(requestedRect.y, 0, height);
+		const int x1 = clamp(requestedRect.x + requestedRect.width, 0, width);
+		const int y1 = clamp(requestedRect.y + requestedRect.height, 0, height);
+		const int regionWidth = x1 - x0;
+		const int regionHeight = y1 - y0;
+		if (regionWidth <= 0 || regionHeight <= 0)
+			return sample;
+
+		sample.center = *bitmap.getPixelPointer(x0 + regionWidth / 2, y0 + regionHeight / 2);
 		for (int yIndex = 0; yIndex < 8; ++yIndex)
 		{
-			const int y = (height <= 1) ? 0 : (int)(((uint64)yIndex * (uint64)(height - 1)) / 7u);
+			const int y = y0 + ((regionHeight <= 1) ? 0 : (int)(((uint64)yIndex * (uint64)(regionHeight - 1)) / 7u));
 			for (int xIndex = 0; xIndex < 8; ++xIndex)
 			{
-				const int x = (width <= 1) ? 0 : (int)(((uint64)xIndex * (uint64)(width - 1)) / 7u);
+				const int x = x0 + ((regionWidth <= 1) ? 0 : (int)(((uint64)xIndex * (uint64)(regionWidth - 1)) / 7u));
 				const uint32 pixel = *bitmap.getPixelPointer(x, y);
 				if ((pixel & 0x00ffffffu) != 0)
 					++sample.nonBlackSamples;
@@ -198,6 +160,14 @@ namespace
 			}
 		}
 		return sample;
+	}
+
+	BitmapSample sampleBitmap(const Bitmap& bitmap)
+	{
+		if (bitmap.empty())
+			return BitmapSample();
+
+		return sampleBitmapRegion(bitmap, Recti(0, 0, bitmap.getWidth(), bitmap.getHeight()));
 	}
 
 	uint64 hashPointer(uint64 seed, const void* ptr)
@@ -293,7 +263,10 @@ namespace
 				<< " pivot=" << spriteInfo.mPivotOffset.x << "," << spriteInfo.mPivotOffset.y
 				<< " size=" << spriteInfo.mSize.x << "x" << spriteInfo.mSize.y
 				<< " blend=" << (int)spriteInfo.mBlendMode
-				<< " tintA=" << spriteInfo.mTintColor.a
+				<< " priority=" << (spriteInfo.mPriorityFlag ? 1 : 0)
+				<< " globalTint=" << (spriteInfo.mUseGlobalComponentTint ? 1 : 0)
+				<< " tint=" << spriteInfo.mTintColor.r << "," << spriteInfo.mTintColor.g << "," << spriteInfo.mTintColor.b << "," << spriteInfo.mTintColor.a
+				<< " added=" << spriteInfo.mAddedColor.r << "," << spriteInfo.mAddedColor.g << "," << spriteInfo.mAddedColor.b << "," << spriteInfo.mAddedColor.a
 				<< " transformIdentity=" << spriteInfo.mTransformation.isIdentity());
 			++sTraceCount;
 		}
@@ -329,6 +302,7 @@ namespace
 			default:								return "unknown";
 		}
 	}
+
 }
 
 
@@ -391,6 +365,7 @@ void GX2Renderer::clearGameScreen()
 
 void GX2Renderer::renderGameScreen(const std::vector<Geometry*>& geometries)
 {
+	resetNativeBlurProcessingState();
 	static uint32 sRenderFrame = 0;
 	if constexpr (ENABLE_GX2_RENDERER_FRAME_LOGS)
 	{
@@ -462,6 +437,7 @@ void GX2Renderer::renderGameScreen(const std::vector<Geometry*>& geometries)
 
 void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& geometries, const Recti& targetRect)
 {
+	resetNativeBlurProcessingState();
 	static bool sLoggedDirectWindow = false;
 	if (!sLoggedDirectWindow)
 	{
@@ -472,21 +448,122 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 	Drawer& drawer = EngineMain::instance().getDrawer();
 	const Recti viewport = targetRect.empty() ? Recti(0, 0, mGameResolution.x, mGameResolution.y) : targetRect;
 	mCurrentTargetAlreadyHasNativeFrame = false;
-
 	if constexpr (FORCE_SOFTWARE_GAME_RENDERER)
 	{
 		std::vector<Geometry*> softwareGeometries;
 		prepareHybridOverlayGeometries(geometries, softwareGeometries);
 		renderHybridGameScreen(softwareGeometries);
+		DrawerTexture& presentTexture = updateGameScreenPresentTexture();
 		if (!mNativeOverlayGeometries.empty())
 		{
 			mRenderResources.refresh();
 		}
-		updateGameScreenPresentTexture();
+		drawer.setWindowRenderTarget(viewport);
+		resetNativeQueuedState();
+		setNativeBlendMode(drawer, BlendMode::OPAQUE);
+		drawer.setSamplingMode(SamplingMode::POINT);
+		drawer.setWrapMode(TextureWrapMode::CLAMP);
+		drawer.drawRect(viewport, presentTexture);
+		if (!mNativeOverlayGeometries.empty())
+		{
+			bool scissorActive = false;
+			if (mNativeOverlayUsesInitialViewport)
+			{
+				drawer.pushScissor(mNativeOverlayInitialViewport);
+				scissorActive = true;
+			}
+			for (const Geometry* geometry : mNativeOverlayGeometries)
+			{
+				if (nullptr != geometry)
+				{
+					drawNativeGeometry(*geometry, scissorActive);
+				}
+			}
+			if (scissorActive)
+			{
+				drawer.popScissor();
+			}
+		}
+		mCurrentTargetAlreadyHasNativeFrame = true;
 		return;
 	}
 
 	mRenderResources.refresh();
+
+#if defined(PLATFORM_WIIU)
+	if constexpr (ENABLE_GX2_RENDERER_FRAME_LOGS)
+	{
+		static uint32 sDirectSummaryLogCount = 0;
+		if (sDirectSummaryLogCount < 12)
+		{
+			uint32 planeCount = 0;
+			uint32 spriteCount = 0;
+			uint32 vdpSpriteCount = 0;
+			uint32 paletteSpriteCount = 0;
+			uint32 componentSpriteCount = 0;
+			uint32 maskSpriteCount = 0;
+			uint32 rectCount = 0;
+			uint32 texturedRectCount = 0;
+			uint32 blurCount = 0;
+			uint32 viewportCount = 0;
+			uint32 nativeCount = 0;
+			for (const Geometry* geometry : geometries)
+			{
+				if (nullptr == geometry)
+					continue;
+				if (supportsNativeGeometry(*geometry))
+					++nativeCount;
+				switch (geometry->getType())
+				{
+					case Geometry::Type::PLANE:
+						++planeCount;
+						break;
+					case Geometry::Type::SPRITE:
+					{
+						++spriteCount;
+						switch (geometry->as<SpriteGeometry>().mSpriteInfo.getType())
+						{
+							case RenderItem::Type::VDP_SPRITE:		++vdpSpriteCount; break;
+							case RenderItem::Type::PALETTE_SPRITE:	++paletteSpriteCount; break;
+							case RenderItem::Type::COMPONENT_SPRITE:	++componentSpriteCount; break;
+							case RenderItem::Type::SPRITE_MASK:		++maskSpriteCount; break;
+							default: break;
+						}
+						break;
+					}
+					case Geometry::Type::RECT:
+						++rectCount;
+						break;
+					case Geometry::Type::TEXTURED_RECT:
+						++texturedRectCount;
+						break;
+					case Geometry::Type::EFFECT_BLUR:
+						++blurCount;
+						break;
+					case Geometry::Type::VIEWPORT:
+						++viewportCount;
+						break;
+					default:
+						break;
+				}
+			}
+			RMX_LOG_INFO("GX2Renderer: direct frame geometries=" << geometries.size()
+				<< " native=" << nativeCount
+				<< " planes=" << planeCount
+				<< " sprites=" << spriteCount
+				<< " vdp=" << vdpSpriteCount
+				<< " palette=" << paletteSpriteCount
+				<< " component=" << componentSpriteCount
+				<< " mask=" << maskSpriteCount
+				<< " rects=" << rectCount
+				<< " texturedRects=" << texturedRectCount
+				<< " blur=" << blurCount
+				<< " viewports=" << viewportCount
+				<< " target=" << viewport.x << "," << viewport.y << " " << viewport.width << "x" << viewport.height);
+			++sDirectSummaryLogCount;
+		}
+	}
+#endif
 
 	if (!supportsNativeRendering(geometries))
 	{
@@ -514,9 +591,16 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 
 	if (requiresOffscreenNativeRendering(geometries))
 	{
+		static bool sLoggedOffscreenWindowPath = false;
+		if (!sLoggedOffscreenWindowPath)
+		{
+			sLoggedOffscreenWindowPath = true;
+				RMX_LOG_INFO("GX2Renderer: native window path uses 400x224 render target before pixel-perfect TV presentation");
+		}
 		renderNativeGameScreen(geometries);
 		drawer.setWindowRenderTarget(viewport);
-		drawer.setBlendMode(BlendMode::OPAQUE);
+		resetNativeQueuedState();
+		setNativeBlendMode(drawer, BlendMode::OPAQUE);
 		drawer.setSamplingMode(SamplingMode::POINT);
 		drawer.setWrapMode(TextureWrapMode::CLAMP);
 		drawer.drawRect(viewport, mGameScreenTexture);
@@ -528,10 +612,19 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 	mNativeOverlayUsesInitialViewport = false;
 	invalidateNativeRenderTarget();
 	drawer.setWindowRenderTarget(viewport);
-	drawer.setBlendMode(BlendMode::OPAQUE);
+	resetNativeQueuedState();
+	setNativeBlendMode(drawer, BlendMode::OPAQUE);
 	drawer.setSamplingMode(SamplingMode::POINT);
 	drawer.setWrapMode(TextureWrapMode::CLAMP);
-	drawer.drawRect(viewport, mRenderParts.getPaletteManager().getBackdropColor());
+	Color backdropColor = mRenderParts.getPaletteManager().getBackdropColor();
+	backdropColor.a = 1.0f;
+	drawer.drawRect(viewport, backdropColor);
+
+	const bool useBlurProcessing = usesBackgroundBlur(geometries);
+	if (useBlurProcessing)
+	{
+		beginNativeBlurProcessingTarget(drawer, true, viewport);
+	}
 
 	const bool usingSpriteMask = isUsingSpriteMask(geometries);
 	bool scissorActive = false;
@@ -549,6 +642,7 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 					scissorActive = false;
 				}
 				drawer.performRendering();
+				resetNativeQueuedState();
 				copyNativeGameScreenToProcessingTexture(viewport);
 			}
 			drawNativeGeometry(*geometry, scissorActive);
@@ -559,6 +653,8 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 	{
 		drawer.popScissor();
 	}
+	drawer.performRendering();
+	resetNativeQueuedState();
 	mCurrentTargetAlreadyHasNativeFrame = true;
 }
 
@@ -571,9 +667,7 @@ void GX2Renderer::drawPresentedGameScreenToCurrentTarget(const Recti& targetRect
 	}
 
 	DrawerTexture& presentTexture = mGameScreenPresentTextures[mGameScreenPresentTextureIndex];
-	DrawerTexture* texture = presentTexture.getBitmap().empty() ? nullptr : &presentTexture;
-	if (nullptr == texture && mNativeRenderTargetReady)
-		texture = &mGameScreenTexture;
+	DrawerTexture* texture = mNativeRenderTargetReady ? &mGameScreenTexture : (presentTexture.getBitmap().empty() ? nullptr : &presentTexture);
 	if (nullptr == texture)
 		return;
 
@@ -586,7 +680,8 @@ void GX2Renderer::drawPresentedGameScreenToCurrentTarget(const Recti& targetRect
 
 	Drawer& drawer = EngineMain::instance().getDrawer();
 	const Recti viewport = targetRect.empty() ? Recti(0, 0, mGameResolution.x, mGameResolution.y) : targetRect;
-	drawer.setBlendMode(BlendMode::OPAQUE);
+	resetNativeQueuedState();
+	setNativeBlendMode(drawer, BlendMode::OPAQUE);
 	drawer.setSamplingMode(SamplingMode::POINT);
 	drawer.setWrapMode(TextureWrapMode::CLAMP);
 	drawer.drawRect(viewport, *texture);
@@ -663,6 +758,8 @@ bool GX2Renderer::supportsNativeGeometry(const Geometry& geometry) const
 			return PlaneManager::isRenderablePlaneIndex(geometry.as<PlaneGeometry>().mPlaneIndex);
 
 		case Geometry::Type::EFFECT_BLUR:
+			return true;
+
 		default:
 			return false;
 	}
@@ -710,11 +807,16 @@ bool GX2Renderer::supportsNativeSprite(const SpriteGeometry& geometry) const
 
 bool GX2Renderer::requiresOffscreenNativeRendering(const std::vector<Geometry*>& geometries) const
 {
+#if defined(PLATFORM_WIIU)
+	if constexpr (FORCE_NATIVE_WINDOW_GAME_OFFSCREEN)
+		return true;
+#endif
 	return isUsingSpriteMask(geometries);
 }
 
 void GX2Renderer::renderNativeGameScreen(const std::vector<Geometry*>& geometries)
 {
+	resetNativeBlurProcessingState();
 	Drawer& drawer = EngineMain::instance().getDrawer();
 	if (!mNativeRenderTargetReady || mGameScreenTexture.getSize() != mGameResolution)
 	{
@@ -727,10 +829,23 @@ void GX2Renderer::renderNativeGameScreen(const std::vector<Geometry*>& geometrie
 
 	const Recti viewport(0, 0, mGameResolution.x, mGameResolution.y);
 	drawer.setRenderTarget(mGameScreenTexture, viewport);
-	drawer.setBlendMode(BlendMode::OPAQUE);
+	resetNativeQueuedState();
+	setNativeBlendMode(drawer, BlendMode::OPAQUE);
 	drawer.setSamplingMode(SamplingMode::POINT);
 	drawer.setWrapMode(TextureWrapMode::CLAMP);
-	drawer.drawRect(viewport, mRenderParts.getPaletteManager().getBackdropColor());
+	if constexpr (ENABLE_NATIVE_PRIORITY_DEPTH)
+	{
+		drawer.clearGX2Depth();
+	}
+	Color backdropColor = mRenderParts.getPaletteManager().getBackdropColor();
+	backdropColor.a = 1.0f;
+	drawer.drawRect(viewport, backdropColor);
+
+	const bool useBlurProcessing = usesBackgroundBlur(geometries);
+	if (useBlurProcessing)
+	{
+		beginNativeBlurProcessingTarget(drawer, false, viewport);
+	}
 
 	bool scissorActive = false;
 	for (const Geometry* geometry : geometries)
@@ -745,6 +860,7 @@ void GX2Renderer::renderNativeGameScreen(const std::vector<Geometry*>& geometrie
 		drawer.popScissor();
 	}
 	drawer.performRendering();
+	resetNativeQueuedState();
 }
 
 void GX2Renderer::renderHybridGameScreen(const std::vector<Geometry*>& geometries)
@@ -752,32 +868,47 @@ void GX2Renderer::renderHybridGameScreen(const std::vector<Geometry*>& geometrie
 	ensureSoftwareRendererInitialized();
 	mSoftwareRenderer.renderGameScreen(geometries);
 #if defined(PLATFORM_WIIU)
-	static uint32 sSoftwareBitmapLogCount = 0;
-	static uint32 sSoftwareBitmapBlackLogCount = 0;
-	if (!geometries.empty())
+	if constexpr (ENABLE_GX2_FALLBACK_BITMAP_LOGS)
 	{
-		const BitmapSample sample = sampleBitmap(mGameScreenTexture.getBitmap());
-		const bool shouldLog = (sample.nonBlackSamples > 0 && sSoftwareBitmapLogCount < 12)
-			|| (sample.nonBlackSamples == 0 && sSoftwareBitmapBlackLogCount < 3);
-		if (shouldLog)
+		static uint32 sSoftwareBitmapLogCount = 0;
+		static uint32 sSoftwareBitmapBlackLogCount = 0;
+		static uint32 sSoftwareBitmapFrame = 0;
+		++sSoftwareBitmapFrame;
+		if (!geometries.empty())
 		{
-			RMX_LOG_INFO("GX2Renderer: software game bitmap sample"
-				<< " index=" << sSoftwareBitmapLogCount
-				<< " blackIndex=" << sSoftwareBitmapBlackLogCount
-				<< " geometries=" << geometries.size()
-				<< " size=" << mGameScreenTexture.getWidth() << "x" << mGameScreenTexture.getHeight()
-				<< " nonBlack=" << sample.nonBlackSamples
-				<< " alpha=" << sample.alphaSamples
-				<< " xor=" << rmx::hexString(sample.sampleXor, 8)
-				<< " center=" << rmx::hexString(sample.center, 8));
-		}
-		if (sample.nonBlackSamples > 0)
-		{
-			++sSoftwareBitmapLogCount;
-		}
-		else if (sSoftwareBitmapBlackLogCount < 3)
-		{
-			++sSoftwareBitmapBlackLogCount;
+			const Bitmap& gameBitmap = mGameScreenTexture.getBitmap();
+			const int bitmapWidth = gameBitmap.getWidth();
+			const int bitmapHeight = gameBitmap.getHeight();
+			const BitmapSample sample = sampleBitmap(gameBitmap);
+			const BitmapSample leftSample = sampleBitmapRegion(gameBitmap, Recti(0, 0, std::min(bitmapWidth, 160), bitmapHeight));
+			const BitmapSample middleSample = sampleBitmapRegion(gameBitmap, Recti(std::min(bitmapWidth, 160), 0, std::max(0, std::min(bitmapWidth, 240) - std::min(bitmapWidth, 160)), bitmapHeight));
+			const BitmapSample rightSample = sampleBitmapRegion(gameBitmap, Recti(std::min(bitmapWidth, 240), 0, std::max(0, bitmapWidth - std::min(bitmapWidth, 240)), bitmapHeight));
+			const bool shouldLog = (sample.nonBlackSamples > 0 && sSoftwareBitmapLogCount < 12)
+				|| (sample.nonBlackSamples == 0 && sSoftwareBitmapBlackLogCount < 3);
+			if (shouldLog)
+			{
+				RMX_LOG_INFO("GX2Renderer: software game bitmap sample"
+					<< " frame=" << sSoftwareBitmapFrame
+					<< " index=" << sSoftwareBitmapLogCount
+					<< " blackIndex=" << sSoftwareBitmapBlackLogCount
+					<< " geometries=" << geometries.size()
+					<< " size=" << mGameScreenTexture.getWidth() << "x" << mGameScreenTexture.getHeight()
+					<< " nonBlack=" << sample.nonBlackSamples
+					<< " alpha=" << sample.alphaSamples
+					<< " xor=" << rmx::hexString(sample.sampleXor, 8)
+					<< " center=" << rmx::hexString(sample.center, 8)
+					<< " left=" << leftSample.nonBlackSamples << "/" << leftSample.alphaSamples << "/" << rmx::hexString(leftSample.center, 8)
+					<< " middle=" << middleSample.nonBlackSamples << "/" << middleSample.alphaSamples << "/" << rmx::hexString(middleSample.center, 8)
+					<< " right=" << rightSample.nonBlackSamples << "/" << rightSample.alphaSamples << "/" << rmx::hexString(rightSample.center, 8));
+			}
+			if (sample.nonBlackSamples > 0)
+			{
+				++sSoftwareBitmapLogCount;
+			}
+			else if (sSoftwareBitmapBlackLogCount < 3)
+			{
+				++sSoftwareBitmapBlackLogCount;
+			}
 		}
 	}
 	if constexpr (ENABLE_GX2_RENDERER_DIAGNOSTIC_DUMPS)
@@ -812,23 +943,38 @@ DrawerTexture& GX2Renderer::updateGameScreenPresentTexture()
 	texture.bitmapUpdated();
 
 #if defined(PLATFORM_WIIU)
-	static uint32 sPresentTextureLogCount = 0;
-	static uint32 sPresentTextureBlackLogCount = 0;
-	const BitmapSample sample = sampleBitmap(texture.getBitmap());
-	const bool shouldLog = (sample.nonBlackSamples > 0 && sPresentTextureLogCount < 10)
-		|| (sample.nonBlackSamples == 0 && sPresentTextureBlackLogCount < 3);
-	if (shouldLog)
+	if constexpr (ENABLE_GX2_FALLBACK_BITMAP_LOGS)
 	{
-		RMX_LOG_INFO("GX2Renderer: uploaded game present texture index=" << mGameScreenPresentTextureIndex
-			<< " size=" << texture.getWidth() << "x" << texture.getHeight()
-			<< " nonBlack=" << sample.nonBlackSamples
-			<< " alpha=" << sample.alphaSamples
-			<< " xor=" << rmx::hexString(sample.sampleXor, 8)
-			<< " center=" << rmx::hexString(sample.center, 8));
-		if (sample.nonBlackSamples > 0)
-			++sPresentTextureLogCount;
-		else
-			++sPresentTextureBlackLogCount;
+		static uint32 sPresentTextureLogCount = 0;
+		static uint32 sPresentTextureBlackLogCount = 0;
+		static uint32 sPresentTextureFrame = 0;
+		++sPresentTextureFrame;
+		const Bitmap& uploadedBitmap = texture.getBitmap();
+		const int bitmapWidth = uploadedBitmap.getWidth();
+		const int bitmapHeight = uploadedBitmap.getHeight();
+		const BitmapSample sample = sampleBitmap(uploadedBitmap);
+		const BitmapSample leftSample = sampleBitmapRegion(uploadedBitmap, Recti(0, 0, std::min(bitmapWidth, 160), bitmapHeight));
+		const BitmapSample middleSample = sampleBitmapRegion(uploadedBitmap, Recti(std::min(bitmapWidth, 160), 0, std::max(0, std::min(bitmapWidth, 240) - std::min(bitmapWidth, 160)), bitmapHeight));
+		const BitmapSample rightSample = sampleBitmapRegion(uploadedBitmap, Recti(std::min(bitmapWidth, 240), 0, std::max(0, bitmapWidth - std::min(bitmapWidth, 240)), bitmapHeight));
+		const bool shouldLog = (sample.nonBlackSamples > 0 && sPresentTextureLogCount < 10)
+			|| (sample.nonBlackSamples == 0 && sPresentTextureBlackLogCount < 3);
+		if (shouldLog)
+		{
+			RMX_LOG_INFO("GX2Renderer: uploaded game present texture frame=" << sPresentTextureFrame
+				<< " index=" << mGameScreenPresentTextureIndex
+				<< " size=" << texture.getWidth() << "x" << texture.getHeight()
+				<< " nonBlack=" << sample.nonBlackSamples
+				<< " alpha=" << sample.alphaSamples
+				<< " xor=" << rmx::hexString(sample.sampleXor, 8)
+				<< " center=" << rmx::hexString(sample.center, 8)
+				<< " left=" << leftSample.nonBlackSamples << "/" << leftSample.alphaSamples << "/" << rmx::hexString(leftSample.center, 8)
+				<< " middle=" << middleSample.nonBlackSamples << "/" << middleSample.alphaSamples << "/" << rmx::hexString(middleSample.center, 8)
+				<< " right=" << rightSample.nonBlackSamples << "/" << rightSample.alphaSamples << "/" << rmx::hexString(rightSample.center, 8));
+			if (sample.nonBlackSamples > 0)
+				++sPresentTextureLogCount;
+			else
+				++sPresentTextureBlackLogCount;
+		}
 	}
 #endif
 	return texture;
@@ -850,12 +996,69 @@ void GX2Renderer::copyNativeGameScreenToProcessingTexture(const Recti& viewport)
 
 	Drawer& drawer = EngineMain::instance().getDrawer();
 	drawer.setRenderTarget(mProcessingTexture, viewport);
-	drawer.setBlendMode(BlendMode::OPAQUE);
+	resetNativeQueuedState();
+	setNativeBlendMode(drawer, BlendMode::OPAQUE);
 	drawer.setSamplingMode(SamplingMode::POINT);
 	drawer.setWrapMode(TextureWrapMode::CLAMP);
 	drawer.drawRect(viewport, mGameScreenTexture);
 	drawer.performRendering();
+	resetNativeQueuedState();
 	drawer.setRenderTarget(mGameScreenTexture, viewport);
+	resetNativeQueuedState();
+}
+
+void GX2Renderer::resetNativeBlurProcessingState()
+{
+	mNativeBlurProcessingActive = false;
+	mNativeBlurOutputIsWindow = false;
+	mNativeBlurOutputViewport = Recti();
+}
+
+void GX2Renderer::beginNativeBlurProcessingTarget(Drawer& drawer, bool outputIsWindow, const Recti& outputViewport)
+{
+	ensureProcessingTexture();
+
+	mNativeBlurProcessingActive = true;
+	mNativeBlurOutputIsWindow = outputIsWindow;
+	mNativeBlurOutputViewport = outputViewport;
+
+	const Recti processingViewport(0, 0, mGameResolution.x, mGameResolution.y);
+	drawer.setRenderTarget(mProcessingTexture, processingViewport);
+	resetNativeQueuedState();
+	setNativeBlendMode(drawer, BlendMode::OPAQUE);
+	drawer.setSamplingMode(SamplingMode::POINT);
+	drawer.setWrapMode(TextureWrapMode::CLAMP);
+	Color backdropColor = mRenderParts.getPaletteManager().getBackdropColor();
+	backdropColor.a = 1.0f;
+	drawer.drawRect(processingViewport, backdropColor);
+}
+
+void GX2Renderer::restoreNativeBlurOutputTarget(Drawer& drawer)
+{
+	if (mNativeBlurOutputIsWindow)
+	{
+		drawer.setWindowRenderTarget(mNativeBlurOutputViewport);
+	}
+	else
+	{
+		drawer.setRenderTarget(mGameScreenTexture, mNativeBlurOutputViewport);
+	}
+	resetNativeQueuedState();
+}
+
+void GX2Renderer::resetNativeQueuedState()
+{
+	mHasNativeQueuedBlendMode = false;
+}
+
+void GX2Renderer::setNativeBlendMode(Drawer& drawer, BlendMode blendMode)
+{
+	if (!mHasNativeQueuedBlendMode || mNativeQueuedBlendMode != blendMode)
+	{
+		drawer.setBlendMode(blendMode);
+		mNativeQueuedBlendMode = blendMode;
+		mHasNativeQueuedBlendMode = true;
+	}
 }
 
 void GX2Renderer::prepareHybridOverlayGeometries(const std::vector<Geometry*>& geometries, std::vector<Geometry*>& outSoftwareGeometries)
@@ -925,7 +1128,7 @@ void GX2Renderer::prepareHybridOverlayGeometries(const std::vector<Geometry*>& g
 		const bool pinnedOverlay = !hasPauseMenuViewport
 			&& !suffixOverlay
 			&& nullptr != geometry
-			&& canPinNativeOverlayGeometry(*geometry);
+			&& canPinNativeOverlayGeometry(*geometry, allowDepthSensitiveSprites);
 
 		if (!suffixOverlay && !pinnedOverlay)
 		{
@@ -968,7 +1171,7 @@ void GX2Renderer::prepareHybridOverlayGeometries(const std::vector<Geometry*>& g
 	}
 }
 
-bool GX2Renderer::canPinNativeOverlayGeometry(const Geometry& geometry) const
+bool GX2Renderer::canPinNativeOverlayGeometry(const Geometry& geometry, bool allowDepthSensitiveSprites) const
 {
 	if (!canDrawNativeOverlayGeometry(geometry, true))
 		return false;
@@ -982,7 +1185,14 @@ bool GX2Renderer::canPinNativeOverlayGeometry(const Geometry& geometry) const
 			return geometry.mRenderQueue >= 0x8000;
 
 		case Geometry::Type::SPRITE:
-			return false;
+		{
+			const SpriteGeometry& spriteGeometry = geometry.as<SpriteGeometry>();
+			if (geometry.mRenderQueue < 0x8000)
+				return false;
+			if (!allowDepthSensitiveSprites && !spriteGeometry.mSpriteInfo.mPriorityFlag && geometry.mRenderQueue < 0xc000)
+				return false;
+			return true;
+		}
 
 		default:
 			return false;
@@ -1051,7 +1261,7 @@ void GX2Renderer::drawNativeGeometry(const Geometry& geometry, bool& scissorActi
 		case Geometry::Type::RECT:
 		{
 			const RectGeometry& rect = geometry.as<RectGeometry>();
-			drawer.setBlendMode(BlendMode::ALPHA);
+			setNativeBlendMode(drawer, BlendMode::ALPHA);
 			drawer.drawRect(rect.mRect, rect.mColor);
 			break;
 		}
@@ -1059,7 +1269,7 @@ void GX2Renderer::drawNativeGeometry(const Geometry& geometry, bool& scissorActi
 		case Geometry::Type::TEXTURED_RECT:
 		{
 			const TexturedRectGeometry& rect = geometry.as<TexturedRectGeometry>();
-			drawer.setBlendMode(BlendMode::ALPHA);
+			setNativeBlendMode(drawer, BlendMode::ALPHA);
 			drawer.setSamplingMode(SamplingMode::POINT);
 			drawer.setWrapMode(TextureWrapMode::CLAMP);
 			drawer.drawRect(rect.mRect, rect.mDrawerTexture, rect.mTintColor, rect.mAddedColor);
@@ -1072,6 +1282,15 @@ void GX2Renderer::drawNativeGeometry(const Geometry& geometry, bool& scissorActi
 
 		case Geometry::Type::PLANE:
 			drawNativePlane(geometry.as<PlaneGeometry>());
+			break;
+
+		case Geometry::Type::EFFECT_BLUR:
+			if (scissorActive)
+			{
+				drawer.popScissor();
+				scissorActive = false;
+			}
+			drawNativeBlur(geometry.as<EffectBlurGeometry>());
 			break;
 
 		case Geometry::Type::VIEWPORT:
@@ -1127,12 +1346,18 @@ void GX2Renderer::drawNativeVdpSprite(const renderitems::VdpSpriteInfo& spriteIn
 	Color addedColor;
 	applySpriteTint(spriteInfo, tintColor, addedColor);
 
-	drawer.setBlendMode(spriteInfo.mBlendMode);
-	drawer.setSamplingMode(SamplingMode::POINT);
-	drawer.setWrapMode(TextureWrapMode::CLAMP);
+	setNativeBlendMode(drawer, spriteInfo.mBlendMode);
 	const Recti rect(spriteInfo.mInterpolatedPosition, Vec2i(spriteInfo.mSize.x * 8, spriteInfo.mSize.y * 8));
-	const int splitY = RenderParts::instance().getPaletteManager().mSplitPositionY;
-	drawer.drawGX2VdpSprite(rect, spriteInfo.mSize, spriteInfo.mFirstPattern, splitY, tintColor, addedColor, mRenderResources);
+	if constexpr (USE_ATLAS_VDP_SPRITE_SHADER)
+	{
+		const PaletteManager& paletteManager = RenderParts::instance().getPaletteManager();
+		drawer.drawGX2VdpSprite(rect, spriteInfo.mSize, spriteInfo.mFirstPattern, paletteManager.mSplitPositionY, tintColor, addedColor, spriteInfo.mPriorityFlag, paletteManager.useShadowHighlightMode(), mRenderResources);
+	}
+	else
+	{
+		DrawerTexture& texture = mRenderResources.getVdpSpriteTexture(spriteInfo);
+		drawer.drawGX2TextureSprite(rect, texture, tintColor, addedColor, spriteInfo.mPriorityFlag);
+	}
 }
 
 void GX2Renderer::drawNativeComponentSprite(const renderitems::ComponentSpriteInfo& spriteInfo)
@@ -1144,18 +1369,16 @@ void GX2Renderer::drawNativeComponentSprite(const renderitems::ComponentSpriteIn
 	traceNativeSprite("component", spriteInfo);
 
 	DrawerTexture& texture = mRenderResources.getComponentSpriteTexture(spriteInfo);
-	drawer.setBlendMode(spriteInfo.mBlendMode);
-	drawer.setSamplingMode(SamplingMode::POINT);
-	drawer.setWrapMode(TextureWrapMode::CLAMP);
+	setNativeBlendMode(drawer, spriteInfo.mBlendMode);
 	if (spriteInfo.mTransformation.isIdentity())
 	{
-		drawer.drawRect(Recti(spriteInfo.mInterpolatedPosition + spriteInfo.mPivotOffset, spriteInfo.mSize), texture, tintColor, addedColor);
+		drawer.drawGX2TextureSprite(Recti(spriteInfo.mInterpolatedPosition + spriteInfo.mPivotOffset, spriteInfo.mSize), texture, tintColor, addedColor, spriteInfo.mPriorityFlag);
 	}
 	else
 	{
 		std::vector<DrawerMeshVertex> vertices;
 		appendSpriteQuad(vertices, spriteInfo);
-		drawer.drawMesh(vertices, texture, tintColor, addedColor);
+		drawer.drawGX2TextureSprite(vertices, texture, tintColor, addedColor, spriteInfo.mPriorityFlag);
 	}
 }
 
@@ -1170,20 +1393,37 @@ void GX2Renderer::drawNativePaletteSprite(const renderitems::PaletteSpriteInfo& 
 	const PaletteManager& paletteManager = RenderParts::instance().getPaletteManager();
 	const PaletteBase& primaryPalette = (nullptr == spriteInfo.mPrimaryPalette) ? paletteManager.getMainPalette(0) : *spriteInfo.mPrimaryPalette;
 	const PaletteBase& secondaryPalette = (nullptr == spriteInfo.mSecondaryPalette) ? paletteManager.getMainPalette(1) : *spriteInfo.mSecondaryPalette;
-	drawer.setBlendMode(spriteInfo.mBlendMode);
-	drawer.setSamplingMode(SamplingMode::POINT);
-	drawer.setWrapMode(TextureWrapMode::CLAMP);
-	DrawerTexture& dataTexture = mRenderResources.getPaletteSpriteDataTexture(spriteInfo, primaryPalette, secondaryPalette);
-	if (spriteInfo.mTransformation.isIdentity())
+	setNativeBlendMode(drawer, spriteInfo.mBlendMode);
+	if constexpr (USE_INDEXED_PALETTE_SPRITE_SHADER)
 	{
-		const Recti rect(spriteInfo.mInterpolatedPosition + spriteInfo.mPivotOffset, spriteInfo.mSize);
-		drawer.drawGX2PaletteSprite(rect, dataTexture, paletteManager.mSplitPositionY, spriteInfo.mAtex, tintColor, addedColor);
+		DrawerTexture& dataTexture = mRenderResources.getPaletteSpriteDataTexture(spriteInfo, primaryPalette, secondaryPalette);
+		if (spriteInfo.mTransformation.isIdentity())
+		{
+			const Recti rect(spriteInfo.mInterpolatedPosition + spriteInfo.mPivotOffset, spriteInfo.mSize);
+			drawer.drawGX2PaletteSprite(rect, dataTexture, paletteManager.mSplitPositionY, spriteInfo.mAtex, tintColor, addedColor, spriteInfo.mPriorityFlag, paletteManager.useShadowHighlightMode());
+		}
+		else
+		{
+			std::vector<DrawerMeshVertex> vertices;
+			appendPaletteSpriteQuad(vertices, spriteInfo);
+			drawer.drawGX2PaletteSprite(vertices, spriteInfo.mSize, dataTexture, paletteManager.mSplitPositionY, spriteInfo.mAtex, tintColor, addedColor, spriteInfo.mPriorityFlag, paletteManager.useShadowHighlightMode());
+		}
 	}
 	else
 	{
-		std::vector<DrawerMeshVertex> vertices;
-		appendPaletteSpriteQuad(vertices, spriteInfo);
-		drawer.drawGX2PaletteSprite(vertices, spriteInfo.mSize, dataTexture, paletteManager.mSplitPositionY, spriteInfo.mAtex, tintColor, addedColor);
+		(void)secondaryPalette;
+		DrawerTexture& texture = mRenderResources.getPaletteSpriteTexture(spriteInfo, primaryPalette);
+		if (spriteInfo.mTransformation.isIdentity())
+		{
+			const Recti rect(spriteInfo.mInterpolatedPosition + spriteInfo.mPivotOffset, spriteInfo.mSize);
+			drawer.drawGX2TextureSprite(rect, texture, tintColor, addedColor, spriteInfo.mPriorityFlag);
+		}
+		else
+		{
+			std::vector<DrawerMeshVertex> vertices;
+			appendPaletteSpriteQuad(vertices, spriteInfo);
+			drawer.drawGX2TextureSprite(vertices, texture, tintColor, addedColor, spriteInfo.mPriorityFlag);
+		}
 	}
 }
 
@@ -1198,10 +1438,27 @@ void GX2Renderer::drawNativeSpriteMask(const renderitems::SpriteMaskInfo& sprite
 		return;
 
 	Drawer& drawer = EngineMain::instance().getDrawer();
-	drawer.setBlendMode(BlendMode::OPAQUE);
+	setNativeBlendMode(drawer, BlendMode::OPAQUE);
 	drawer.setSamplingMode(SamplingMode::POINT);
 	drawer.setWrapMode(TextureWrapMode::CLAMP);
 	drawer.drawRect(rect, mProcessingTexture, rect, Color::WHITE);
+}
+
+void GX2Renderer::drawNativeBlur(const EffectBlurGeometry& geometry)
+{
+	ensureProcessingTexture();
+	Drawer& drawer = EngineMain::instance().getDrawer();
+	if (mNativeBlurProcessingActive)
+	{
+		drawer.performRendering();
+		resetNativeQueuedState();
+		restoreNativeBlurOutputTarget(drawer);
+		mNativeBlurProcessingActive = false;
+	}
+	setNativeBlendMode(drawer, BlendMode::OPAQUE);
+	drawer.setSamplingMode(SamplingMode::POINT);
+	drawer.setWrapMode(TextureWrapMode::CLAMP);
+	drawer.drawGX2Blur(mProcessingTexture, mGameResolution, getBlurKernel(geometry.mBlurValue));
 }
 
 void GX2Renderer::invalidateNativeRenderTarget()

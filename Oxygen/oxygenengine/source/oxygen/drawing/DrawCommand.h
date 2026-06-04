@@ -60,8 +60,11 @@ public:
 #if defined(PLATFORM_WIIU)
 		GX2_PLANE,
 		GX2_VDP_SPRITE,
-		GX2_PALETTE_SPRITE
-#endif // please let this be the last wii u macro 
+		GX2_PALETTE_SPRITE,
+		GX2_TEXTURE_SPRITE,
+		GX2_BLUR,
+		GX2_CLEAR_DEPTH
+#endif
 	};
 
 public:
@@ -338,15 +341,17 @@ class GX2VdpSpriteDrawCommand final : public DrawCommand
 friend class ObjectPoolBase<GX2VdpSpriteDrawCommand>;
 
 protected:
-	GX2VdpSpriteDrawCommand(GX2RenderResources& resources, const Recti& rect, const Vec2i& sizeInPatterns, const Vec2i& patternAndSplit, const Color& tintColor, const Color& addedColor) :
+	GX2VdpSpriteDrawCommand(GX2RenderResources& resources, const Recti& rect, const Vec2i& sizeInPatterns, const Vec4i& patternSplitPriorityShadow, const Color& tintColor, const Color& addedColor) :
 		DrawCommand(Type::GX2_VDP_SPRITE),
 		mResources(&resources),
 		mRect(rect),
 		mSizeInPatterns(sizeInPatterns),
-		mFirstPattern((uint16)patternAndSplit.x),
-		mSplitY(patternAndSplit.y),
+		mFirstPattern((uint16)patternSplitPriorityShadow.x),
+		mSplitY(patternSplitPriorityShadow.y),
 		mTintColor(tintColor),
-		mAddedColor(addedColor)
+		mAddedColor(addedColor),
+		mPriorityFlag(patternSplitPriorityShadow.z != 0),
+		mShadowHighlightMode(patternSplitPriorityShadow.w != 0)
 	{}
 
 public:
@@ -357,6 +362,8 @@ public:
 	int mSplitY = 0;
 	Color mTintColor = Color::WHITE;
 	Color mAddedColor = Color::TRANSPARENT;
+	bool mPriorityFlag = false;
+	bool mShadowHighlightMode = false;
 };
 
 class GX2PaletteSpriteDrawCommand final : public DrawCommand
@@ -364,26 +371,30 @@ class GX2PaletteSpriteDrawCommand final : public DrawCommand
 friend class ObjectPoolBase<GX2PaletteSpriteDrawCommand>;
 
 protected:
-	GX2PaletteSpriteDrawCommand(const Recti& rect, DrawerTexture& dataTexture, const Vec2i& splitAndAtex, const Color& tintColor, const Color& addedColor) :
+	GX2PaletteSpriteDrawCommand(const Recti& rect, DrawerTexture& dataTexture, const Vec4i& splitAtexPriorityShadow, const Color& tintColor, const Color& addedColor) :
 		DrawCommand(Type::GX2_PALETTE_SPRITE),
 		mRect(rect),
 		mSourceSize(rect.getSize()),
 		mDataTexture(&dataTexture),
-		mSplitY(splitAndAtex.x),
-		mAtex((uint16)splitAndAtex.y),
+		mSplitY(splitAtexPriorityShadow.x),
+		mAtex((uint16)splitAtexPriorityShadow.y),
 		mTintColor(tintColor),
-		mAddedColor(addedColor)
+		mAddedColor(addedColor),
+		mPriorityFlag(splitAtexPriorityShadow.z != 0),
+		mShadowHighlightMode(splitAtexPriorityShadow.w != 0)
 	{}
 
-	GX2PaletteSpriteDrawCommand(const std::vector<DrawerMeshVertex>& triangles, const Vec2i& sourceSize, DrawerTexture& dataTexture, const Vec2i& splitAndAtex, const Color& tintColor, const Color& addedColor) :
+	GX2PaletteSpriteDrawCommand(const std::vector<DrawerMeshVertex>& triangles, const Vec2i& sourceSize, DrawerTexture& dataTexture, const Vec4i& splitAtexPriorityShadow, const Color& tintColor, const Color& addedColor) :
 		DrawCommand(Type::GX2_PALETTE_SPRITE),
 		mTriangles(triangles),
 		mSourceSize(sourceSize),
 		mDataTexture(&dataTexture),
-		mSplitY(splitAndAtex.x),
-		mAtex((uint16)splitAndAtex.y),
+		mSplitY(splitAtexPriorityShadow.x),
+		mAtex((uint16)splitAtexPriorityShadow.y),
 		mTintColor(tintColor),
 		mAddedColor(addedColor),
+		mPriorityFlag(splitAtexPriorityShadow.z != 0),
+		mShadowHighlightMode(splitAtexPriorityShadow.w != 0),
 		mUseMesh(true)
 	{}
 
@@ -396,7 +407,69 @@ public:
 	uint16 mAtex = 0;
 	Color mTintColor = Color::WHITE;
 	Color mAddedColor = Color::TRANSPARENT;
+	bool mPriorityFlag = false;
+	bool mShadowHighlightMode = false;
 	bool mUseMesh = false;
+};
+
+class GX2TextureSpriteDrawCommand final : public DrawCommand
+{
+friend class ObjectPoolBase<GX2TextureSpriteDrawCommand>;
+
+protected:
+	GX2TextureSpriteDrawCommand(const Recti& rect, DrawerTexture& texture, const Color& tintColor, const Color& addedColor, bool priorityFlag) :
+		DrawCommand(Type::GX2_TEXTURE_SPRITE),
+		mRect(rect),
+		mTexture(&texture),
+		mTintColor(tintColor),
+		mAddedColor(addedColor),
+		mPriorityFlag(priorityFlag)
+	{}
+
+	GX2TextureSpriteDrawCommand(const std::vector<DrawerMeshVertex>& triangles, DrawerTexture& texture, const Color& tintColor, const Color& addedColor, bool priorityFlag) :
+		DrawCommand(Type::GX2_TEXTURE_SPRITE),
+		mTriangles(triangles),
+		mTexture(&texture),
+		mTintColor(tintColor),
+		mAddedColor(addedColor),
+		mPriorityFlag(priorityFlag),
+		mUseMesh(true)
+	{}
+
+public:
+	Recti mRect;
+	std::vector<DrawerMeshVertex> mTriangles;
+	DrawerTexture* mTexture = nullptr;
+	Color mTintColor = Color::WHITE;
+	Color mAddedColor = Color::TRANSPARENT;
+	bool mPriorityFlag = false;
+	bool mUseMesh = false;
+};
+
+class GX2BlurDrawCommand final : public DrawCommand
+{
+friend class ObjectPoolBase<GX2BlurDrawCommand>;
+
+protected:
+	GX2BlurDrawCommand(DrawerTexture& processingTexture, const Vec2i& resolution, const Vec4f& kernel) :
+		DrawCommand(Type::GX2_BLUR),
+		mProcessingTexture(&processingTexture),
+		mResolution(resolution),
+		mKernel(kernel)
+	{}
+
+public:
+	DrawerTexture* mProcessingTexture = nullptr;
+	Vec2i mResolution;
+	Vec4f mKernel;
+};
+
+class GX2ClearDepthDrawCommand final : public DrawCommand
+{
+friend class ObjectPoolBase<GX2ClearDepthDrawCommand>;
+
+protected:
+	GX2ClearDepthDrawCommand() : DrawCommand(Type::GX2_CLEAR_DEPTH) {}
 };
 #endif
 
@@ -423,6 +496,9 @@ public:
 	ObjectPool<GX2PlaneDrawCommand>				 mGX2PlaneDrawCommands;
 	ObjectPool<GX2VdpSpriteDrawCommand>			 mGX2VdpSpriteDrawCommands;
 	ObjectPool<GX2PaletteSpriteDrawCommand>		 mGX2PaletteSpriteDrawCommands;
+	ObjectPool<GX2TextureSpriteDrawCommand>		 mGX2TextureSpriteDrawCommands;
+	ObjectPool<GX2BlurDrawCommand>				 mGX2BlurDrawCommands;
+	ObjectPool<GX2ClearDepthDrawCommand>		 mGX2ClearDepthDrawCommands;
 #endif
 
 public:
@@ -449,6 +525,9 @@ public:
 			case DrawCommand::Type::GX2_PLANE:					mGX2PlaneDrawCommands.destroyObject(drawCommand.as<GX2PlaneDrawCommand>());  break;
 			case DrawCommand::Type::GX2_VDP_SPRITE:				mGX2VdpSpriteDrawCommands.destroyObject(drawCommand.as<GX2VdpSpriteDrawCommand>());  break;
 			case DrawCommand::Type::GX2_PALETTE_SPRITE:			mGX2PaletteSpriteDrawCommands.destroyObject(drawCommand.as<GX2PaletteSpriteDrawCommand>());  break;
+			case DrawCommand::Type::GX2_TEXTURE_SPRITE:			mGX2TextureSpriteDrawCommands.destroyObject(drawCommand.as<GX2TextureSpriteDrawCommand>());  break;
+			case DrawCommand::Type::GX2_BLUR:					mGX2BlurDrawCommands.destroyObject(drawCommand.as<GX2BlurDrawCommand>());  break;
+			case DrawCommand::Type::GX2_CLEAR_DEPTH:			mGX2ClearDepthDrawCommands.destroyObject(drawCommand.as<GX2ClearDepthDrawCommand>());  break;
 #endif
 			default:
 				break;	// This should never happen anyways

@@ -19,6 +19,8 @@
 
 namespace
 {
+	constexpr bool ENABLE_WIIU_PLANE_MANAGER_DIAGNOSTICS = false;
+
 	uint16 sanitizePlaneBaseVRAMAddress(uint16 vramAddress, const char* planeName)
 	{
 		const uint16 sanitized = vramAddress & 0xfffe;
@@ -66,12 +68,71 @@ namespace
 		return EmulatorInterface::instance().readVRam16(vramAddress);
 	}
 
-	void copyPlanePatternsWithWrap(uint16* dst, uint16 planeBaseAddress, int numPatterns)
+	struct PlaneFillResult
 	{
+		uint32 mNonZeroEntries = 0;
+		bool mChanged = false;
+	};
+
+	bool copyPlanePatternsWithWrap(uint16* dst, uint16 planeBaseAddress, int numPatterns)
+	{
+		bool changed = false;
 		for (int k = 0; k < numPatterns; ++k)
 		{
-			dst[k] = readVRamWrapped16((uint16)(planeBaseAddress + k * 2));
+			const uint16 value = readVRamWrapped16((uint16)(planeBaseAddress + k * 2));
+			if (dst[k] != value)
+			{
+				dst[k] = value;
+				changed = true;
+			}
 		}
+		return changed;
+	}
+
+	bool hasVRamChangeInBitRange(const BitArray<0x800>& changeBits, size_t firstBit, size_t lastBit)
+	{
+		RMX_ASSERT(firstBit <= lastBit && lastBit < 0x800, "Invalid VRAM change bit range");
+		for (size_t bit = firstBit; bit <= lastBit; )
+		{
+			const size_t chunkIndex = bit >> 6;
+			if (!changeBits.anyBitSetInChunk(chunkIndex))
+			{
+				bit = (chunkIndex + 1) << 6;
+				continue;
+			}
+
+			const size_t chunkEnd = std::min(lastBit, ((chunkIndex + 1) << 6) - 1);
+			for (; bit <= chunkEnd; ++bit)
+			{
+				if (changeBits.isBitSet(bit))
+					return true;
+			}
+		}
+		return false;
+	}
+
+	bool hasVRamRangeChanges(const BitArray<0x800>& changeBits, uint16 vramAddress, size_t bytes)
+	{
+		if (bytes == 0)
+			return false;
+
+		if (bytes >= 0x10000)
+		{
+			for (size_t chunkIndex = 0; chunkIndex < BitArray<0x800>::NUM_CHUNKS; ++chunkIndex)
+			{
+				if (changeBits.anyBitSetInChunk(chunkIndex))
+					return true;
+			}
+			return false;
+		}
+
+		const uint32 firstAddress = vramAddress;
+		const uint32 lastAddress = firstAddress + (uint32)bytes - 1;
+		if (lastAddress < 0x10000)
+			return hasVRamChangeInBitRange(changeBits, firstAddress >> 5, lastAddress >> 5);
+
+		return hasVRamChangeInBitRange(changeBits, firstAddress >> 5, 0x7ff) ||
+			hasVRamChangeInBitRange(changeBits, 0, (lastAddress & 0xffff) >> 5);
 	}
 
 	uint32 countNonZeroPlaneEntries(const uint16* buffer, int numPatterns)
@@ -85,9 +146,21 @@ namespace
 		return nonZeroEntries;
 	}
 
-	uint32 fillBufferByAbstraction(uint16* buffer, const Vec2i& cameraPosition, const Vec2i& screenSize, const Vec2i& playfieldPatterns)
+	uint32 countPriorityPlaneEntries(const uint16* buffer, int numPatterns)
+	{
+		uint32 priorityEntries = 0;
+		for (int k = 0; k < numPatterns; ++k)
+		{
+			if ((buffer[k] & 0x8000) != 0)
+				++priorityEntries;
+		}
+		return priorityEntries;
+	}
+
+	PlaneFillResult fillBufferByAbstraction(uint16* buffer, const Vec2i& cameraPosition, const Vec2i& screenSize, const Vec2i& playfieldPatterns, bool forcePriorityFlag = false)
 	{
 		// TODO: This is entirely S3AIR-specific.
+		PlaneFillResult result;
 		const int cameraX = std::max(0, cameraPosition.x);
 		const int cameraY = std::max(0, cameraPosition.y);
 		const int width = std::max(0, screenSize.x);
@@ -98,7 +171,6 @@ namespace
 		const uint32 maxTileY = std::min((uint32)(cameraY + height + 15) / 16, minTileY + 15);
 		const uint32 planeTileWidth = std::max(1, playfieldPatterns.x / 2);
 		const uint32 planeTileHeight = std::max(1, playfieldPatterns.y / 2);
-		uint32 nonZeroEntries = 0;
 
 		for (uint32 y = minTileY; y <= maxTileY; ++y)
 		{
@@ -133,15 +205,32 @@ namespace
 				const uint16 xorMask = (tile & 0x0c00) << 1;
 
 				// Write 2x2 sprite patterns of this tile
-				lineBase0[0] = EmulatorInterface::instance().readMemory16(tilePatternBaseAddress     + mx + my) ^ xorMask;
-				lineBase0[1] = EmulatorInterface::instance().readMemory16(tilePatternBaseAddress + 2 - mx + my) ^ xorMask;
-				lineBase1[0] = EmulatorInterface::instance().readMemory16(tilePatternBaseAddress + 4 + mx - my) ^ xorMask;
-				lineBase1[1] = EmulatorInterface::instance().readMemory16(tilePatternBaseAddress + 6 - mx - my) ^ xorMask;
+				uint16 value00 = EmulatorInterface::instance().readMemory16(tilePatternBaseAddress     + mx + my) ^ xorMask;
+				uint16 value01 = EmulatorInterface::instance().readMemory16(tilePatternBaseAddress + 2 - mx + my) ^ xorMask;
+				uint16 value10 = EmulatorInterface::instance().readMemory16(tilePatternBaseAddress + 4 + mx - my) ^ xorMask;
+				uint16 value11 = EmulatorInterface::instance().readMemory16(tilePatternBaseAddress + 6 - mx - my) ^ xorMask;
 
-				nonZeroEntries += (lineBase0[0] != 0) + (lineBase0[1] != 0) + (lineBase1[0] != 0) + (lineBase1[1] != 0);
+				if (forcePriorityFlag)
+				{
+					if (value00 != 0)
+						value00 |= 0x8000;
+					if (value01 != 0)
+						value01 |= 0x8000;
+					if (value10 != 0)
+						value10 |= 0x8000;
+					if (value11 != 0)
+						value11 |= 0x8000;
+				}
+
+				result.mChanged |= (lineBase0[0] != value00) || (lineBase0[1] != value01) || (lineBase1[0] != value10) || (lineBase1[1] != value11);
+				lineBase0[0] = value00;
+				lineBase0[1] = value01;
+				lineBase1[0] = value10;
+				lineBase1[1] = value11;
+				result.mNonZeroEntries += (value00 != 0) + (value01 != 0) + (value10 != 0) + (value11 != 0);
 			}
 		}
-		return nonZeroEntries;
+		return result;
 	}
 }
 
@@ -195,9 +284,17 @@ void PlaneManager::refresh()
 				if (isPlaneUsed(index))
 				{
 					const uint16 planeBaseAddress = getPlaneBaseVRAMAddress(index);
-					copyPlanePatternsWithWrap(buffer, planeBaseAddress, numPatterns);
-					mPlanePatternsBufferInitialized[index] = true;
-					++mPlanePatternsChangeCounter[index];
+					const size_t planeBytes = (size_t)numPatterns * sizeof(uint16);
+					const bool shouldCopy = !mPlanePatternsBufferInitialized[index] ||
+						hasVRamRangeChanges(EmulatorInterface::instance().getVRamChangeBits(), planeBaseAddress, planeBytes);
+					if (shouldCopy)
+					{
+						const bool copiedChanged = copyPlanePatternsWithWrap(buffer, planeBaseAddress, numPatterns);
+						const bool changed = !mPlanePatternsBufferInitialized[index] || copiedChanged;
+						mPlanePatternsBufferInitialized[index] = true;
+						if (changed)
+							++mPlanePatternsChangeCounter[index];
+					}
 					if (isDeveloperMode)
 					{
 						for (int k = 0; k < numPatterns; ++k)
@@ -216,41 +313,72 @@ void PlaneManager::refresh()
 	}
 
 #if defined(PLATFORM_WIIU)
+	bool customPlaneBActive = false;
 	bool customPlaneAActive = false;
+	bool customPlaneBPriority = false;
+	bool customPlaneAPriority = false;
 	for (const CustomPlane& customPlane : mCustomPlanes)
 	{
-		if ((customPlane.mSourcePlane & 0x03) == PLANE_A)
+		const int sourcePlane = customPlane.mSourcePlane & 0x03;
+		const bool priorityPlane = ((customPlane.mSourcePlane & 0x10) != 0);
+		if (sourcePlane == PLANE_B)
+		{
+			customPlaneBActive = true;
+			customPlaneBPriority |= priorityPlane;
+		}
+		else if (sourcePlane == PLANE_A)
 		{
 			customPlaneAActive = true;
-			break;
+			customPlaneAPriority |= priorityPlane;
 		}
 	}
+	const uint32 planeBNonZeroBefore = countNonZeroPlaneEntries(mPlanePatternsBuffer[PLANE_B], numPatterns);
 	const uint32 planeANonZeroBefore = countNonZeroPlaneEntries(mPlanePatternsBuffer[PLANE_A], numPatterns);
 	const uint8 gameMode = EmulatorInterface::instance().readMemory8(0xfffff600) & 0x7f;
 	const int8 levelStarted = (int8)EmulatorInterface::instance().readMemory8(0xfffff711);
 	const bool mainLevelActive = (gameMode == 0x0c && levelStarted > 0);
-	const bool planeAIsSparse = (planeANonZeroBefore < 512);
 	const Vec2i screenSize = VideoOut::instance().getScreenSize();
-	if (mainLevelActive && (customPlaneAActive || planeAIsSparse) && screenSize.x > 0 && screenSize.y > 0)
+	if (screenSize.x > 0 && screenSize.y > 0 && (mainLevelActive || customPlaneBActive || customPlaneAActive))
 	{
 		const Vec2i cameraPosition = RenderParts::instance().getSpacesManager().getWorldSpaceOffset();
-		const uint32 nonZeroEntries = fillBufferByAbstraction(mPlanePatternsBuffer[PLANE_A], cameraPosition, screenSize, mPlayfieldSize);
-		mPlanePatternsBufferInitialized[PLANE_A] = true;
-		++mPlanePatternsChangeCounter[PLANE_A];
-
-		static int sLoggedAbstractionFillCount = 0;
-		if (sLoggedAbstractionFillCount < 8)
+		const auto fillSparsePlane = [&](int planeIndex, uint32 nonZeroBefore, bool customPlaneActive, bool forcePriorityFlag, const char* planeName)
 		{
-			++sLoggedAbstractionFillCount;
-			RMX_LOG_INFO("PlaneManager: Wii U abstraction-filled Plane A camera=" << cameraPosition.x << "," << cameraPosition.y
-				<< " screen=" << screenSize.x << "x" << screenSize.y
-				<< " playfield=" << mPlayfieldSize.x << "x" << mPlayfieldSize.y
-				<< " before=" << planeANonZeroBefore
-				<< " nonZero=" << nonZeroEntries
-				<< " gameMode=0x" << rmx::hexString(gameMode, 2)
-				<< " levelStarted=" << (int)levelStarted
-				<< " customPlanes=" << (uint32)mCustomPlanes.size());
-		}
+			const bool planeIsSparse = (nonZeroBefore < 512);
+			const bool shouldFill = planeIsSparse && (mainLevelActive || customPlaneActive);
+			if (!shouldFill)
+				return;
+
+			const PlaneFillResult fillResult = fillBufferByAbstraction(mPlanePatternsBuffer[planeIndex], cameraPosition, screenSize, mPlayfieldSize, forcePriorityFlag);
+			const bool changed = !mPlanePatternsBufferInitialized[planeIndex] || fillResult.mChanged;
+			mPlanePatternsBufferInitialized[planeIndex] = true;
+			if (changed)
+				++mPlanePatternsChangeCounter[planeIndex];
+
+			if constexpr (ENABLE_WIIU_PLANE_MANAGER_DIAGNOSTICS)
+			{
+				static int sLoggedAbstractionFillCount = 0;
+				if (sLoggedAbstractionFillCount < 2)
+				{
+					++sLoggedAbstractionFillCount;
+					const uint32 priorityEntries = countPriorityPlaneEntries(mPlanePatternsBuffer[planeIndex], numPatterns);
+					RMX_LOG_INFO("PlaneManager: Wii U abstraction-filled Plane " << planeName
+						<< " camera=" << cameraPosition.x << "," << cameraPosition.y
+						<< " screen=" << screenSize.x << "x" << screenSize.y
+						<< " playfield=" << mPlayfieldSize.x << "x" << mPlayfieldSize.y
+						<< " before=" << nonZeroBefore
+						<< " nonZero=" << fillResult.mNonZeroEntries
+						<< " changed=" << (changed ? 1 : 0)
+						<< " priorityNonZero=" << priorityEntries
+						<< " gameMode=" << rmx::hexString(gameMode, 2)
+						<< " levelStarted=" << (int)levelStarted
+						<< " forcedPriority=" << (forcePriorityFlag ? 1 : 0)
+						<< " customPlanes=" << (uint32)mCustomPlanes.size());
+				}
+			}
+		};
+
+		fillSparsePlane(PLANE_B, planeBNonZeroBefore, customPlaneBActive, customPlaneBPriority, "B");
+		fillSparsePlane(PLANE_A, planeANonZeroBefore, customPlaneAActive, customPlaneAPriority, "A");
 	}
 #endif
 }
@@ -640,17 +768,82 @@ void PlaneManager::setupCustomPlane(const Recti& rect, uint8 sourcePlane, uint8 
 	plane.mRenderQueue = renderQueue;
 
 #if defined(PLATFORM_WIIU)
-	static int sLoggedCustomPlaneCount = 0;
-	if (sLoggedCustomPlaneCount < 32)
+	if (planeIndex == PLANE_B || planeIndex == PLANE_A)
 	{
-		++sLoggedCustomPlaneCount;
-		RMX_LOG_INFO("PlaneManager: custom plane " << sLoggedCustomPlaneCount
-			<< " rect=(" << rect.x << "," << rect.y << "," << rect.width << "," << rect.height
-			<< ") source=" << rmx::hexString(sourcePlane, 2)
-			<< " plane=" << planeIndex
-			<< " priority=" << (((sourcePlane & 0x10) != 0) ? 1 : 0)
-			<< " scrollOffsets=" << (int)scrollOffsets
-			<< " renderQueue=" << rmx::hexString(renderQueue, 4));
+		const int numPatterns = mPlayfieldSize.x * mPlayfieldSize.y;
+		const uint8 gameMode = EmulatorInterface::instance().readMemory8(0xfffff600) & 0x7f;
+		const int8 levelStarted = (int8)EmulatorInterface::instance().readMemory8(0xfffff711);
+		const bool mainLevelActive = (gameMode == 0x0c && levelStarted > 0);
+		const uint32 nonZeroBefore = countNonZeroPlaneEntries(mPlanePatternsBuffer[planeIndex], numPatterns);
+		const Vec2i screenSize = VideoOut::instance().getScreenSize();
+		if (nonZeroBefore < 512 && screenSize.x > 0 && screenSize.y > 0)
+		{
+			const Vec2i cameraPosition = RenderParts::instance().getSpacesManager().getWorldSpaceOffset();
+			const bool forcePriorityFlag = ((sourcePlane & 0x10) != 0);
+			const PlaneFillResult fillResult = fillBufferByAbstraction(mPlanePatternsBuffer[planeIndex], cameraPosition, screenSize, mPlayfieldSize, forcePriorityFlag);
+			const bool changed = !mPlanePatternsBufferInitialized[planeIndex] || fillResult.mChanged;
+			mPlanePatternsBufferInitialized[planeIndex] = true;
+			if (changed)
+				++mPlanePatternsChangeCounter[planeIndex];
+
+			if constexpr (ENABLE_WIIU_PLANE_MANAGER_DIAGNOSTICS)
+			{
+				static int sLoggedCustomPlaneFillCount = 0;
+				if (sLoggedCustomPlaneFillCount < 2)
+				{
+					++sLoggedCustomPlaneFillCount;
+					const uint32 priorityEntries = countPriorityPlaneEntries(mPlanePatternsBuffer[planeIndex], numPatterns);
+					RMX_LOG_INFO("PlaneManager: Wii U custom-plane fill Plane " << ((planeIndex == PLANE_B) ? "B" : "A")
+						<< " camera=" << cameraPosition.x << "," << cameraPosition.y
+						<< " screen=" << screenSize.x << "x" << screenSize.y
+						<< " playfield=" << mPlayfieldSize.x << "x" << mPlayfieldSize.y
+						<< " before=" << nonZeroBefore
+						<< " nonZero=" << fillResult.mNonZeroEntries
+						<< " changed=" << (changed ? 1 : 0)
+						<< " priorityNonZero=" << priorityEntries
+						<< " source=" << rmx::hexString(sourcePlane, 2)
+						<< " forcedPriority=" << (forcePriorityFlag ? 1 : 0)
+						<< " gameMode=" << rmx::hexString(gameMode, 2)
+						<< " levelStarted=" << (int)levelStarted
+						<< " customPlanes=" << (uint32)mCustomPlanes.size());
+				}
+			}
+		}
+		else
+		{
+			if constexpr (ENABLE_WIIU_PLANE_MANAGER_DIAGNOSTICS)
+			{
+				static int sLoggedCustomPlaneFillSkipCount = 0;
+				if (sLoggedCustomPlaneFillSkipCount < 1)
+				{
+					++sLoggedCustomPlaneFillSkipCount;
+					RMX_LOG_INFO("PlaneManager: Wii U skipped custom-plane fill Plane " << ((planeIndex == PLANE_B) ? "B" : "A")
+						<< " before=" << nonZeroBefore
+						<< " screen=" << screenSize.x << "x" << screenSize.y
+						<< " gameMode=" << rmx::hexString(gameMode, 2)
+						<< " levelStarted=" << (int)levelStarted
+						<< " mainLevelActive=" << (mainLevelActive ? 1 : 0)
+						<< " source=" << rmx::hexString(sourcePlane, 2)
+						<< " customPlanes=" << (uint32)mCustomPlanes.size());
+				}
+			}
+		}
+	}
+
+	if constexpr (ENABLE_WIIU_PLANE_MANAGER_DIAGNOSTICS)
+	{
+		static int sLoggedCustomPlaneCount = 0;
+		if (sLoggedCustomPlaneCount < 4)
+		{
+			++sLoggedCustomPlaneCount;
+			RMX_LOG_INFO("PlaneManager: custom plane " << sLoggedCustomPlaneCount
+				<< " rect=(" << rect.x << "," << rect.y << "," << rect.width << "," << rect.height
+				<< ") source=" << rmx::hexString(sourcePlane, 2)
+				<< " plane=" << planeIndex
+				<< " priority=" << (((sourcePlane & 0x10) != 0) ? 1 : 0)
+				<< " scrollOffsets=" << (int)scrollOffsets
+				<< " renderQueue=" << rmx::hexString(renderQueue, 4));
+		}
 	}
 #endif
 }

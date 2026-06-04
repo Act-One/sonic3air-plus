@@ -6,9 +6,10 @@
 *	Published under the GNU GPLv3 open source software license, see license.txt
 *	or https://www.gnu.org/licenses/gpl-3.0.en.html
 */
-// got a behemoth of a drawer this time, but we DO bounce back into software for some stuff
+// this drawer file literally contains everything, eventually ill split it up but too lazy
 #include "oxygen/pch.h"
 #include "oxygen/drawing/gx2/GX2Drawer.h"
+#include "oxygen/application/Configuration.h"
 #include "oxygen/drawing/DrawCollection.h"
 #include "oxygen/drawing/DrawCommand.h"
 #include "oxygen/drawing/DrawerTexture.h"
@@ -55,6 +56,7 @@ namespace
 	{
 		float x;
 		float y;
+		float z;
 		float u;
 		float v;
 	};
@@ -63,6 +65,7 @@ namespace
 	{
 		float x;
 		float y;
+		float z;
 		float r;
 		float g;
 		float b;
@@ -73,14 +76,16 @@ namespace
 	{
 		float x;
 		float y;
+		float z;
 		float localX;
 		float localY;
 	};
-
+// added depth, hopefully this won't bite me later
 	struct PaletteSpriteVertex
 	{
 		float x;
 		float y;
+		float depth;
 		float localX;
 		float localY;
 		float screenX;
@@ -99,6 +104,8 @@ namespace
 		float sizeY;
 		float firstPattern;
 		float splitY;
+		float shadowHighlight;
+		float configPadding;
 		float tintR;
 		float tintG;
 		float tintB;
@@ -136,7 +143,16 @@ namespace
 
 	static constexpr uint32 FALLBACK_TV_WIDTH = 1280;
 	static constexpr uint32 FALLBACK_TV_HEIGHT = 720;
+	static constexpr uint32 NATIVE_GAME_RENDER_WIDTH = 400;
+	static constexpr uint32 NATIVE_GAME_RENDER_HEIGHT = 224;
+	static constexpr uint32 DRC_SCANOUT_WIDTH = 854;
+	static constexpr uint32 DRC_SCANOUT_HEIGHT = 480;
 	static constexpr uint32 PRESENT_VERTEX_COUNT = 6;
+	static constexpr uint32 SCRATCH_TEXTURE_RING_SIZE = 16;
+	static constexpr uint32 DEPTH_BUFFER_CACHE_SIZE = 4;
+	static constexpr size_t TEXT_TEXTURE_CACHE_LIMIT = 512;
+	static constexpr uint32 TEXT_TEXTURE_CACHE_KEEP_FRAMES = 1800;
+	static constexpr uint32 TEXT_TEXTURE_CACHE_CLEANUP_INTERVAL = 300;
 	static constexpr bool USE_WHB_PRESENT = false;
 	static constexpr bool USE_SOFTWARE_WINDOW_DRAWER = false;
 	static constexpr bool USE_CPU_COLOR_PRESENT = false;
@@ -145,28 +161,41 @@ namespace
 	static constexpr bool FORCE_TEXTURE_PRESENT_PATTERN = false;
 	static constexpr bool FORCE_COLOR_SHADER_TEST_RECT = false;
 	static constexpr bool SKIP_GX2_TEARDOWN_ON_EXIT = true;
-	static constexpr bool WAIT_FOR_SCAN_FLIP = true;
+	static constexpr bool WAIT_FOR_SCAN_FLIP = false;
+	static constexpr bool USE_DIRECT_NATIVE_SCANOUT = false;
+	static constexpr bool USE_GX2_DEPTH_BUFFER = true;
+	static constexpr bool COPY_DRC_SCANOUT = false;
+	static constexpr bool USE_IDENTITY_DATA_TEXTURE_SWIZZLE = false;
+	static constexpr bool FORCE_GENERAL_PLANE_SHADER = true;
 	static constexpr bool PRESENT_LOGS = false;
 	static constexpr uint32 PRESENT_LOG_LIMIT = 8;
 	static constexpr bool ENABLE_GX2_DRAWER_DIAGNOSTICS = false;
+	static constexpr bool ENABLE_GX2_PLANE_DRAW_DIAGNOSTICS = false;
 	static constexpr bool ENABLE_GX2_TEXT_DIAGNOSTICS = false;
+	static constexpr bool ENABLE_GX2_STARTUP_TELEMETRY_LOGS = false;
+	static constexpr bool ENABLE_GX2_PERIODIC_TELEMETRY_LOGS = false;
+	static constexpr bool ENABLE_GX2_HEAVY_TELEMETRY_LOGS = false;
 	static constexpr bool ENABLE_GX2_MENU_COMMAND_TRACE = false;
+	static constexpr bool ENABLE_GX2_PRESENT_MODE_LOGS = false;
+	static constexpr bool ENABLE_GX2_GAME_PRESENT_DRAW_LOGS = false;
 	static constexpr uint32 GX2_BLEND_MASK_NONE = 0x00;
 	static constexpr uint32 GX2_BLEND_MASK_ALL_TARGETS = 0xff;
 	// originally going to be called GX2_COMMAND_BUFFER_SIZE, but there was a naming collision. Oops
 	static constexpr uint32 NATIVE_GX2_COMMAND_BUFFER_SIZE = 0x400000;
 	static constexpr size_t NATIVE_GX2_UNIFORM_BUFFER_MIN_SIZE = 0x40000;
 	static CafeCompiler gCafeCompiler;
+	static bool gSkipGX2TextureDestroy = false;
 
 	static constexpr const char* PRESENT_VS = R"(
 #version 330
 in vec2 aPosition;
+in float aDepth;
 in vec2 aTexCoord;
 out vec2 vTexCoord;
 void main()
 {
 	vTexCoord = aTexCoord;
-	gl_Position = vec4(aPosition, 0.0, 1.0);
+	gl_Position = vec4(aPosition, aDepth, 1.0);
 }
 )";
 
@@ -187,18 +216,49 @@ void main()
 }
 )";
 
-	static constexpr const char* VDP_SPRITE_PS = R"(
+	static constexpr const char* BLUR_PS = R"(
+#version 330
+in vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform BlurUniforms
+{
+	vec4 uTexelOffset;
+	vec4 uKernel;
+};
+void main()
+{
+	vec2 texel = uTexelOffset.xy;
+	vec3 color00 = texture(uTexture, vTexCoord + vec2(-texel.x, -texel.y)).rgb;
+	vec3 color01 = texture(uTexture, vTexCoord + vec2(0.0, -texel.y)).rgb;
+	vec3 color02 = texture(uTexture, vTexCoord + vec2(texel.x, -texel.y)).rgb;
+	vec3 color10 = texture(uTexture, vTexCoord + vec2(-texel.x, 0.0)).rgb;
+	vec3 color11 = texture(uTexture, vTexCoord).rgb;
+	vec3 color12 = texture(uTexture, vTexCoord + vec2(texel.x, 0.0)).rgb;
+	vec3 color20 = texture(uTexture, vTexCoord + vec2(-texel.x, texel.y)).rgb;
+	vec3 color21 = texture(uTexture, vTexCoord + vec2(0.0, texel.y)).rgb;
+	vec3 color22 = texture(uTexture, vTexCoord + vec2(texel.x, texel.y)).rgb;
+	vec3 color = color00 * uKernel.w + color01 * uKernel.z + color02 * uKernel.w
+			   + color10 * uKernel.y + color11 * uKernel.x + color12 * uKernel.y
+			   + color20 * uKernel.w + color21 * uKernel.z + color22 * uKernel.w;
+	gl_FragColor = vec4(color, 1.0);
+}
+)";
+
+static constexpr const char* VDP_SPRITE_PS = R"(
 #version 330
 in vec2 vLocalOffset;
 uniform sampler2D uPlaneDataTexture;
-uniform vec4 uConfig0;
-uniform vec4 uConfig1;
-uniform vec4 uTintColor;
-uniform vec4 uAddedColor;
+uniform VdpSpriteUniforms
+{
+	vec4 uConfig0;
+	vec4 uConfig1;
+	vec4 uTintColor;
+	vec4 uAddedColor;
+};
 
 vec4 samplePlaneData(float x, float y)
 {
-	return texture(uPlaneDataTexture, vec2((x + 0.5) / 256.0, (y + 0.5) / 1040.0));
+	return texelFetch(uPlaneDataTexture, ivec2(int(x), int(y)), 0);
 }
 
 float decodeByte(float value)
@@ -214,6 +274,7 @@ void main()
 	float sizePatternsY = uConfig0.w;
 	float firstPattern = uConfig1.x;
 	float splitY = uConfig1.y;
+	float shadowHighlightMode = uConfig1.z;
 
 	vec2 local = floor(vLocalOffset - vec2(posX, posY) + vec2(0.0001));
 	float tileX = floor(local.x / 8.0);
@@ -235,15 +296,22 @@ void main()
 	float rawPattern = firstPattern + tileY + tileX * sizePatternsY;
 	float patternNumber = mod(rawPattern, 2048.0);
 	float patternPixelIndex = pixelX + pixelY * 8.0;
-	vec4 patternColor = samplePlaneData(mod(patternNumber, 4.0) * 64.0 + patternPixelIndex, floor(patternNumber / 4.0));
+	vec4 patternColor = samplePlaneData(mod(patternNumber, 8.0) * 64.0 + patternPixelIndex, floor(patternNumber / 8.0));
 	float paletteIndex = decodeByte(patternColor.r) + floor(mod(floor(rawPattern / 8192.0), 4.0)) * 16.0;
 	if (mod(paletteIndex, 16.0) < 0.5)
 		discard;
 
+	if (shadowHighlightMode >= 0.5 && paletteIndex >= 62.0 && paletteIndex < 64.0)
+	{
+		float intensity = (paletteIndex >= 63.0) ? 1.0 : 0.0;
+		gl_FragColor = vec4(intensity, intensity, intensity, 0.5);
+		return;
+	}
+
 	float paletteX = mod(paletteIndex, 256.0);
 	float paletteY = floor(paletteIndex / 256.0);
 	float paletteOffset = (vLocalOffset.y < splitY) ? 0.0 : 2.0;
-	vec4 color = samplePlaneData(paletteX, 512.0 + paletteY + paletteOffset);
+	vec4 color = samplePlaneData(paletteX, 256.0 + paletteY + paletteOffset);
 	color = vec4(uAddedColor.rgb, 0.0) + color * uTintColor;
 	if (color.a < 0.01)
 		discard;
@@ -256,12 +324,12 @@ void main()
 in vec2 aPosition;
 in vec2 aLocalOffset;
 in vec4 aConfig0;
-in vec2 aConfig1;
+in vec4 aConfig1;
 in vec4 aTintColor;
 in vec4 aAddedColor;
 out vec2 vLocalOffset;
 out vec4 vConfig0;
-out vec2 vConfig1;
+out vec4 vConfig1;
 out vec4 vTintColor;
 out vec4 vAddedColor;
 void main()
@@ -271,7 +339,7 @@ void main()
 	vConfig1 = aConfig1;
 	vTintColor = aTintColor;
 	vAddedColor = aAddedColor;
-	gl_Position = vec4(aPosition, 0.0, 1.0);
+	gl_Position = vec4(aPosition, (aConfig1.w >= 0.5) ? 0.75 : 0.5, 1.0);
 }
 )";
 
@@ -279,14 +347,14 @@ void main()
 #version 330
 in vec2 vLocalOffset;
 in vec4 vConfig0;
-in vec2 vConfig1;
+in vec4 vConfig1;
 in vec4 vTintColor;
 in vec4 vAddedColor;
 uniform sampler2D uPlaneDataTexture;
 
 vec4 samplePlaneData(float x, float y)
 {
-	return texture(uPlaneDataTexture, vec2((x + 0.5) / 256.0, (y + 0.5) / 1040.0));
+	return texelFetch(uPlaneDataTexture, ivec2(int(x), int(y)), 0);
 }
 
 float decodeByte(float value)
@@ -302,6 +370,7 @@ void main()
 	float sizePatternsY = vConfig0.w;
 	float firstPattern = vConfig1.x;
 	float splitY = vConfig1.y;
+	float shadowHighlightMode = vConfig1.z;
 
 	vec2 local = floor(vLocalOffset - vec2(posX, posY) + vec2(0.0001));
 	float tileX = floor(local.x / 8.0);
@@ -323,15 +392,22 @@ void main()
 	float rawPattern = firstPattern + tileY + tileX * sizePatternsY;
 	float patternNumber = mod(rawPattern, 2048.0);
 	float patternPixelIndex = pixelX + pixelY * 8.0;
-	vec4 patternColor = samplePlaneData(mod(patternNumber, 4.0) * 64.0 + patternPixelIndex, floor(patternNumber / 4.0));
+	vec4 patternColor = samplePlaneData(mod(patternNumber, 8.0) * 64.0 + patternPixelIndex, floor(patternNumber / 8.0));
 	float paletteIndex = decodeByte(patternColor.r) + floor(mod(floor(rawPattern / 8192.0), 4.0)) * 16.0;
 	if (mod(paletteIndex, 16.0) < 0.5)
 		discard;
 
+	if (shadowHighlightMode >= 0.5 && paletteIndex >= 62.0 && paletteIndex < 64.0)
+	{
+		float intensity = (paletteIndex >= 63.0) ? 1.0 : 0.0;
+		gl_FragColor = vec4(intensity, intensity, intensity, 0.5);
+		return;
+	}
+
 	float paletteX = mod(paletteIndex, 256.0);
 	float paletteY = floor(paletteIndex / 256.0);
 	float paletteOffset = (vLocalOffset.y < splitY) ? 0.0 : 2.0;
-	vec4 color = samplePlaneData(paletteX, 512.0 + paletteY + paletteOffset);
+	vec4 color = samplePlaneData(paletteX, 256.0 + paletteY + paletteOffset);
 	color = vec4(vAddedColor.rgb, 0.0) + color * vTintColor;
 	if (color.a < 0.01)
 		discard;
@@ -342,6 +418,7 @@ void main()
 	static constexpr const char* PALETTE_SPRITE_VS = R"(
 #version 330
 in vec2 aPosition;
+in float aDepth;
 in vec2 aLocalOffset;
 in vec2 aScreenPosition;
 out vec2 vLocalOffset;
@@ -350,7 +427,7 @@ void main()
 {
 	vLocalOffset = aLocalOffset;
 	vScreenPosition = aScreenPosition;
-	gl_Position = vec4(aPosition, 0.0, 1.0);
+	gl_Position = vec4(aPosition, aDepth, 1.0);
 }
 )";
 
@@ -359,24 +436,30 @@ void main()
 in vec2 vLocalOffset;
 in vec2 vScreenPosition;
 uniform sampler2D uSpriteDataTexture;
-uniform vec4 uConfig0;
-uniform vec4 uConfig1;
-uniform vec4 uTintColor;
-uniform vec4 uAddedColor;
+uniform PaletteSpriteUniforms
+{
+	vec4 uConfig0;
+	vec4 uConfig1;
+	vec4 uTintColor;
+	vec4 uAddedColor;
+};
 
 float decodeByte(float value)
 {
 	return floor(value * 255.5);
 }
 
+vec4 sampleSpriteData(float x, float y)
+{
+	return texelFetch(uSpriteDataTexture, ivec2(int(x), int(y)), 0);
+}
+
 void main()
 {
 	vec2 rectPos = vec2(uConfig0.x, uConfig0.y);
 	vec2 rectSize = vec2(uConfig0.z, uConfig0.w);
-	vec2 dataSize = vec2(uConfig1.z, uConfig1.w);
 	vec2 local = floor(vLocalOffset - rectPos + vec2(0.0001));
-	vec2 uv = (local + vec2(0.5)) / dataSize;
-	float sourceIndex = decodeByte(texture(uSpriteDataTexture, uv).r);
+	float sourceIndex = decodeByte(sampleSpriteData(local.x, local.y).r);
 	if (mod(sourceIndex, 16.0) < 0.5)
 		discard;
 
@@ -384,7 +467,7 @@ void main()
 	float paletteX = mod(paletteIndex, 256.0);
 	float paletteY = floor(paletteIndex / 256.0);
 	float paletteOffset = (vScreenPosition.y < uConfig1.x) ? 0.0 : 2.0;
-	vec4 color = texture(uSpriteDataTexture, vec2((paletteX + 0.5) / dataSize.x, (rectSize.y + paletteY + paletteOffset + 0.5) / dataSize.y));
+	vec4 color = sampleSpriteData(paletteX, rectSize.y + paletteY + paletteOffset);
 	color = vec4(uAddedColor.rgb, 0.0) + color * uTintColor;
 	if (color.a < 0.01)
 		discard;
@@ -392,15 +475,16 @@ void main()
 }
 )";
 
-	static constexpr const char* COLOR_VS = R"(
+static constexpr const char* COLOR_VS = R"(
 #version 330
 in vec2 aPosition;
+in float aDepth;
 in vec4 aColor;
 out vec4 vColor;
 void main()
 {
 	vColor = aColor;
-	gl_Position = vec4(aPosition, 0.5, 1.0);
+	gl_Position = vec4(aPosition, aDepth, 1.0);
 }
 )";
 
@@ -417,26 +501,43 @@ void main()
 #version 330
 in vec2 aPosition;
 in vec2 aLocalOffset;
+in float aDepth;
 out vec2 vLocalOffset;
 void main()
 {
 	vLocalOffset = aLocalOffset;
-	gl_Position = vec4(aPosition, 0.0, 1.0);
+	gl_Position = vec4(aPosition, aDepth, 1.0);
 }
 )";
 
-	static constexpr const char* PLANE_PS = R"(
+static constexpr const char* PLANE_PS = R"(
 #version 330
+#ifndef GX2_PLANE_HSCROLL_ONLY
+#define GX2_PLANE_HSCROLL_ONLY 0
+#endif
+#ifndef GX2_PLANE_SIMPLE_ONLY
+#define GX2_PLANE_SIMPLE_ONLY 0
+#endif
+#ifndef GX2_PLANE_TEXEL_FETCH
+#define GX2_PLANE_TEXEL_FETCH 0
+#endif
 in vec2 vLocalOffset;
 uniform sampler2D uPlaneDataTexture;
-uniform vec4 uConfig0;
-uniform vec4 uConfig1;
-uniform vec4 uConfig2;
-uniform vec4 uConfig3;
+uniform PlaneUniforms
+{
+	vec4 uConfig0;
+	vec4 uConfig1;
+	vec4 uConfig2;
+	vec4 uConfig3;
+};
 
 vec4 samplePlaneData(float x, float y)
 {
-	return texture(uPlaneDataTexture, vec2((x + 0.5) / 256.0, (y + 0.5) / 1040.0));
+#if GX2_PLANE_TEXEL_FETCH
+	return texelFetch(uPlaneDataTexture, ivec2(int(x), int(y)), 0);
+#else
+	return texture(uPlaneDataTexture, vec2((x + 0.5) / 512.0, (y + 0.5) / 1024.0));
+#endif
 }
 
 float decodeByte(float value)
@@ -444,12 +545,29 @@ float decodeByte(float value)
 	return floor(value * 255.5);
 }
 
+float decodeWord(vec4 value)
+{
+	return decodeByte(value.r) + decodeByte(value.g) * 256.0;
+}
+
+float decodeSignedWord(vec4 value)
+{
+	float word = decodeWord(value);
+	return (word >= 32768.0) ? (word - 65536.0) : word;
+}
+
+vec4 getPaletteColor(float paletteIndex, float paletteOffsetY)
+{
+	float paletteX = mod(paletteIndex, 256.0);
+	float paletteY = floor(paletteIndex / 256.0);
+	return samplePlaneData(paletteX, 256.0 + paletteY + paletteOffsetY * 4.0);
+}
+
 void main()
 {
 	float playfieldPixelsX = uConfig0.x;
 	float playfieldPixelsY = uConfig0.y;
 	float playfieldPatternsX = uConfig0.z;
-	float playfieldPatternsY = uConfig0.w;
 	float priorityFlag = uConfig1.x;
 	float paletteOffset = uConfig1.y;
 	float vScrollOffsetBias = uConfig1.z;
@@ -463,22 +581,32 @@ void main()
 
 	float ix = floor(vLocalOffset.x + 0.0001);
 	float iy = floor(vLocalOffset.y + 0.0001);
-	if (useHorizontalScrolling > 0.5)
+	float scrollOffsetLookupX = scrollOffsetX;
+#if GX2_PLANE_SIMPLE_ONLY
+#elif GX2_PLANE_HSCROLL_ONLY
+	scrollOffsetLookupX = decodeSignedWord(samplePlaneData(mod(iy, 256.0), 512.0 + scrollIndex));
+#else
+	if (useHorizontalScrolling >= 0.5)
 	{
-		float scrollY = mod(iy, 256.0);
-		vec4 scrollColor = samplePlaneData(scrollY, 1028.0 + scrollIndex);
-		scrollOffsetX = decodeByte(scrollColor.r) + decodeByte(scrollColor.g) * 256.0;
+		scrollOffsetLookupX = decodeSignedWord(samplePlaneData(mod(iy, 256.0), 512.0 + scrollIndex));
 	}
-	if (useVerticalScrolling > 0.5)
+#endif
+	float scrollOffsetLookupY = scrollOffsetY;
+#if !GX2_PLANE_SIMPLE_ONLY && !GX2_PLANE_HSCROLL_ONLY
+	if (useVerticalScrolling >= 0.5)
 	{
-		float scrollX = floor(mod(ix - vScrollOffsetBias, 512.0) / 16.0);
-		vec4 scrollColor = samplePlaneData(scrollX, 1033.0 + scrollIndex);
-		scrollOffsetY = decodeByte(scrollColor.r) + decodeByte(scrollColor.g) * 256.0;
+		float vx = ix - vScrollOffsetBias;
+		vx = floor(mod(vx, 512.0) / 16.0);
+		scrollOffsetLookupY = decodeSignedWord(samplePlaneData(vx, 520.0 + scrollIndex));
 	}
+#endif
 
-	ix = mod(ix + scrollOffsetX, 4096.0);
-	iy = mod(iy + scrollOffsetY, playfieldPixelsY);
-	if (noRepeat > 0.5)
+	ix = mod(ix + scrollOffsetLookupX, 4096.0);
+	iy = mod(iy + scrollOffsetLookupY, playfieldPixelsY);
+#if GX2_PLANE_SIMPLE_ONLY || GX2_PLANE_HSCROLL_ONLY
+	ix = mod(ix, playfieldPixelsX);
+#else
+	if (noRepeat >= 0.5)
 	{
 		if (ix >= playfieldPixelsX)
 			discard;
@@ -487,33 +615,28 @@ void main()
 	{
 		ix = mod(ix, playfieldPixelsX);
 	}
+#endif
 
 	float patternX = floor(ix / 8.0);
 	float patternY = floor(iy / 8.0);
 	float localX = ix - patternX * 8.0;
 	float localY = iy - patternY * 8.0;
-	vec4 indexColor = samplePlaneData(patternX, 516.0 + planeIndex * 128.0 + patternY);
-	float patternIndexLow = decodeByte(indexColor.r);
-	float patternIndexHigh = decodeByte(indexColor.g);
-	if ((patternIndexHigh >= 128.0) != (priorityFlag >= 0.5))
+	float patternIndex = decodeWord(samplePlaneData(planeIndex * 128.0 + patternX, 384.0 + patternY));
+	if ((patternIndex >= 32768.0) != (priorityFlag >= 0.5))
 		discard;
 
-	float atex = floor(mod(patternIndexHigh, 128.0) / 32.0) * 16.0;
-	if (mod(patternIndexHigh, 16.0) >= 8.0)
+	float atex = floor(mod(floor(patternIndex / 8192.0), 4.0)) * 16.0;
+	if (mod(floor(patternIndex / 2048.0), 2.0) >= 1.0)
 		localX = 7.0 - localX;
-	if (mod(patternIndexHigh, 32.0) >= 16.0)
+	if (mod(floor(patternIndex / 4096.0), 2.0) >= 1.0)
 		localY = 7.0 - localY;
-
-	float patternNumber = patternIndexLow + mod(patternIndexHigh, 8.0) * 256.0;
+	float patternNumber = mod(patternIndex, 2048.0);
 	float patternPixelIndex = localX + localY * 8.0;
-	vec4 patternColor = samplePlaneData(mod(patternNumber, 4.0) * 64.0 + patternPixelIndex, floor(patternNumber / 4.0));
+	vec4 patternColor = samplePlaneData(mod(patternNumber, 8.0) * 64.0 + patternPixelIndex, floor(patternNumber / 8.0));
 	float paletteIndex = decodeByte(patternColor.r) + atex;
 	if (mod(paletteIndex, 16.0) < 0.5)
 		discard;
-
-	float paletteX = mod(paletteIndex, 256.0);
-	float paletteY = floor(paletteIndex / 256.0);
-	vec4 color = samplePlaneData(paletteX, 512.0 + paletteY + paletteOffset * 4.0);
+	vec4 color = getPaletteColor(paletteIndex, paletteOffset);
 	if (color.a < 0.01)
 		discard;
 	gl_FragColor = color;
@@ -526,6 +649,20 @@ void main()
 			| ((value & 0x0000ff00u) << 8)
 			| ((value & 0x00ff0000u) >> 8)
 			| ((value & 0xff000000u) >> 24);
+	}
+
+	uint64 hashCombine64(uint64 seed, uint64 value)
+	{
+		return seed ^ (value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2));
+	}
+
+	uint64 hashStringReader(const StringReader& text)
+	{
+		if (text.mLength == 0)
+			return 0;
+		if (nullptr != text.mString)
+			return rmx::getMurmur2_64((const uint8*)text.mString, text.mLength * sizeof(char));
+		return rmx::getMurmur2_64((const uint8*)text.mWString, text.mLength * sizeof(wchar_t));
 	}
 
 	void* gx2Alloc(uint32 size, uint32 alignment)
@@ -573,12 +710,16 @@ void main()
 		const OSDynLoad_Error result = OSDynLoad_FindExport(module, OS_DYNLOAD_EXPORT_FUNC, name, out);
 		if (result != OS_DYNLOAD_OK)
 		{
-			RMX_LOG_WARNING("CafeGLSL: missing export " << name
-				<< " result=" << rmx::hexString((uint32)result, 8)
-				<< " " << dynLoadErrorName(result));
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+			{
+				RMX_LOG_WARNING("CafeGLSL: missing export " << name
+					<< " result=" << rmx::hexString((uint32)result, 8)
+					<< " " << dynLoadErrorName(result));
+			}
 			return false;
 		}
-		RMX_LOG_INFO("CafeGLSL: resolved export " << name << " at " << *out);
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+			RMX_LOG_INFO("CafeGLSL: resolved export " << name << " at " << *out);
 		return true;
 	}
 
@@ -613,32 +754,40 @@ void main()
 			"/vol/external01/glslcompiler.rpl",
 		};
 
-		RMX_LOG_INFO("CafeGLSL: runtime compiler lookup begin, candidates=" << (uint32)(sizeof(paths) / sizeof(paths[0])));
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+			RMX_LOG_INFO("CafeGLSL: runtime compiler lookup begin, candidates=" << (uint32)(sizeof(paths) / sizeof(paths[0])));
 		for (const char* path : paths)
 		{
 			OSDynLoad_Module module = nullptr;
 			const OSDynLoad_Error result = OSDynLoad_Acquire(path, &module);
 			if (result != OS_DYNLOAD_OK)
 			{
-				RMX_LOG_WARNING("CafeGLSL: acquire failed path='" << path
-					<< "' result=" << rmx::hexString((uint32)result, 8)
-					<< " " << dynLoadErrorName(result));
+				if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				{
+					RMX_LOG_WARNING("CafeGLSL: acquire failed path='" << path
+						<< "' result=" << rmx::hexString((uint32)result, 8)
+						<< " " << dynLoadErrorName(result));
+				}
 				continue;
 			}
 
-			RMX_LOG_INFO("CafeGLSL: acquired path='" << path << "' module=" << module);
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				RMX_LOG_INFO("CafeGLSL: acquired path='" << path << "' module=" << module);
 			if (loadCafeExports(module))
 			{
 				gCafeCompiler.module = module;
-				RMX_LOG_INFO("CafeGLSL: calling InitGLSLCompiler for path='" << path << "'");
+				if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+					RMX_LOG_INFO("CafeGLSL: calling InitGLSLCompiler for path='" << path << "'");
 				gCafeCompiler.init();
 				gCafeCompiler.ready = true;
-				RMX_LOG_INFO("CafeGLSL: initialized runtime compiler from path='" << path << "'");
+				if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+					RMX_LOG_INFO("CafeGLSL: initialized runtime compiler from path='" << path << "'");
 				return true;
 			}
 
 			OSDynLoad_Release(module);
-			RMX_LOG_WARNING("CafeGLSL: released path='" << path << "' because required exports were missing");
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				RMX_LOG_WARNING("CafeGLSL: released path='" << path << "' because required exports were missing");
 		}
 
 		RMX_ERROR("CafeGLSL: glslcompiler.rpl was not found", return false);
@@ -648,11 +797,14 @@ void main()
 	{
 		if (!gCafeCompiler.ready)
 			return;
-		RMX_LOG_INFO("CafeGLSL: shutting down runtime compiler");
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+			RMX_LOG_INFO("CafeGLSL: shutting down runtime compiler");
 		gCafeCompiler.done();
-		RMX_LOG_INFO("CafeGLSL: runtime compiler destroyed");
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+			RMX_LOG_INFO("CafeGLSL: runtime compiler destroyed");
 		OSDynLoad_Release(gCafeCompiler.module);
-		RMX_LOG_INFO("CafeGLSL: runtime compiler module released");
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+			RMX_LOG_INFO("CafeGLSL: runtime compiler module released");
 		gCafeCompiler = CafeCompiler();
 	}
 
@@ -710,9 +862,14 @@ void main()
 		return (r << 24) | (g << 16) | (b << 8) | a;
 	}
 
-	PresentVertex makePresentVertex(float x, float y, float u, float v)
+	PresentVertex makePresentVertex(float x, float y, float u, float v, float depth = 0.0f)
 	{
-		return { x, y, u, v };
+		return { x, y, depth, u, v };
+	}
+
+	float spriteDepth(bool priorityFlag)
+	{
+		return priorityFlag ? 0.75f : 0.5f;
 	}
 
 	struct NativeTVConfig
@@ -721,7 +878,6 @@ void main()
 		uint32 height = FALLBACK_TV_HEIGHT;
 		GX2TVRenderMode renderMode = GX2_TV_RENDER_MODE_WIDE_720P;
 	};
-// this was too hard to figure out on the drc, so the values are just hard coded for now. The size of it never changes anyway, so it's not a big deal.
 	NativeTVConfig queryNativeTVConfig()
 	{
 		NativeTVConfig config;
@@ -782,6 +938,94 @@ void main()
 		return Vec2i((int)FALLBACK_TV_WIDTH, (int)FALLBACK_TV_HEIGHT);
 	}
 
+	Recti getLetterBoxRect(const Vec2i& sourceSize, const Vec2i& targetSize)
+	{
+		if (sourceSize.x <= 0 || sourceSize.y <= 0 || targetSize.x <= 0 || targetSize.y <= 0)
+			return Recti(0, 0, targetSize.x, targetSize.y);
+
+		Recti rect(0, 0, targetSize.x, targetSize.y);
+		const float sourceAspect = (float)sourceSize.x / (float)sourceSize.y;
+		const float targetAspect = (float)targetSize.x / (float)targetSize.y;
+		if (targetAspect < sourceAspect)
+		{
+			const int newHeight = roundToInt((float)targetSize.x / sourceAspect);
+			rect.y = (targetSize.y - newHeight) / 2;
+			rect.height = newHeight;
+		}
+		else
+		{
+			const int newWidth = roundToInt((float)targetSize.y * sourceAspect);
+			rect.x = (targetSize.x - newWidth) / 2;
+			rect.width = newWidth;
+		}
+		return rect;
+	}
+
+	Recti getIntegerLetterBoxRect(const Vec2i& sourceSize, const Vec2i& targetSize)
+	{
+		Recti rect = getLetterBoxRect(sourceSize, targetSize);
+		if (sourceSize.x <= 0 || sourceSize.y <= 0)
+			return rect;
+
+		const int scale = rect.height / sourceSize.y;
+		if (scale >= 1)
+		{
+			rect.width = sourceSize.x * scale;
+			rect.height = sourceSize.y * scale;
+			rect.x = (targetSize.x - rect.width) / 2;
+			rect.y = (targetSize.y - rect.height) / 2;
+		}
+		return rect;
+	}
+
+	Recti getScaleToFillRect(const Vec2i& sourceSize, const Vec2i& targetSize)
+	{
+		if (sourceSize.x <= 0 || sourceSize.y <= 0 || targetSize.x <= 0 || targetSize.y <= 0)
+			return Recti(0, 0, targetSize.x, targetSize.y);
+
+		Recti rect(0, 0, targetSize.x, targetSize.y);
+		const float sourceAspect = (float)sourceSize.x / (float)sourceSize.y;
+		const float targetAspect = (float)targetSize.x / (float)targetSize.y;
+		if (targetAspect > sourceAspect)
+		{
+			const int newHeight = roundToInt((float)targetSize.x / sourceAspect);
+			rect.y = (targetSize.y - newHeight) / 2;
+			rect.height = newHeight;
+		}
+		else
+		{
+			const int newWidth = roundToInt((float)targetSize.y * sourceAspect);
+			rect.x = (targetSize.x - newWidth) / 2;
+			rect.width = newWidth;
+		}
+		return rect;
+	}
+
+	Recti getConfiguredScanoutRect(const Vec2i& sourceSize, const Vec2i& targetSize)
+	{
+		switch (Configuration::instance().mUpscaling)
+		{
+			case 1:
+				return getIntegerLetterBoxRect(sourceSize, targetSize);
+			case 2:
+			{
+				const Recti fitted = getLetterBoxRect(sourceSize, targetSize);
+				return Recti(
+					(fitted.x + 0) / 2,
+					(fitted.y + 0) / 2,
+					(fitted.width + targetSize.x) / 2,
+					(fitted.height + targetSize.y) / 2);
+			}
+			case 3:
+				return Recti(0, 0, targetSize.x, targetSize.y);
+			case 4:
+				return getScaleToFillRect(sourceSize, targetSize);
+			case 0:
+			default:
+				return getLetterBoxRect(sourceSize, targetSize);
+		}
+	}
+
 	uint32 getSamplerLocation(const WHBGfxShaderGroup& shaderGroup)
 	{
 		if (nullptr != shaderGroup.pixelShader && shaderGroup.pixelShader->samplerVarCount > 0)
@@ -804,7 +1048,8 @@ void main()
 				}
 			}
 		}
-		RMX_LOG_WARNING("GX2Drawer: sampler '" << name << "' not found");
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+			RMX_LOG_WARNING("GX2Drawer: sampler '" << name << "' not found");
 		return UINT32_MAX;
 	}
 
@@ -883,12 +1128,15 @@ void main()
 				attrib.type = GX2_ATTRIB_INDEX_PER_VERTEX;
 				attrib.mask = attribMaskForFormat(format);
 				attrib.endianSwap = GX2_ENDIAN_SWAP_DEFAULT;
-				RMX_LOG_INFO("GX2Drawer: bound attrib '" << name
-					<< "' location=" << attrib.location
-					<< " buffer=" << attrib.buffer
-					<< " offset=" << attrib.offset
-					<< " format=" << rmx::hexString((uint32)attrib.format, 8)
-					<< " mask=" << rmx::hexString(attrib.mask, 8));
+				if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				{
+					RMX_LOG_INFO("GX2Drawer: bound attrib '" << name
+						<< "' location=" << attrib.location
+						<< " buffer=" << attrib.buffer
+						<< " offset=" << attrib.offset
+						<< " format=" << rmx::hexString((uint32)attrib.format, 8)
+						<< " mask=" << rmx::hexString(attrib.mask, 8));
+				}
 				return true;
 			}
 		}
@@ -915,9 +1163,12 @@ void main()
 		// Wii U cache stuff, do not remove unless you enjoy invisible bugs.
 		DCFlushRange(shaderGroup.fetchShaderProgram, size);
 		GX2Invalidate(GX2_INVALIDATE_MODE_CPU_SHADER, shaderGroup.fetchShaderProgram, size);
-		RMX_LOG_INFO("GX2Drawer: fetch shader ready attribs=" << shaderGroup.numAttributes
-			<< " size=" << size
-			<< " program=" << shaderGroup.fetchShaderProgram);
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			RMX_LOG_INFO("GX2Drawer: fetch shader ready attribs=" << shaderGroup.numAttributes
+				<< " size=" << size
+				<< " program=" << shaderGroup.fetchShaderProgram);
+		}
 		return true;
 	}
 
@@ -950,12 +1201,15 @@ void main()
 			return false;
 
 		char log[2048] = {};
-		RMX_LOG_INFO("CafeGLSL: compiling '" << name
-			<< "' vsBytes=" << strlen(vs)
-			<< " vsHash=" << rmx::hexString(hashShaderSource(vs), 8)
-			<< " psBytes=" << strlen(ps)
-			<< " psHash=" << rmx::hexString(hashShaderSource(ps), 8)
-			<< " flags=0");
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			RMX_LOG_INFO("CafeGLSL: compiling '" << name
+				<< "' vsBytes=" << strlen(vs)
+				<< " vsHash=" << rmx::hexString(hashShaderSource(vs), 8)
+				<< " psBytes=" << strlen(ps)
+				<< " psHash=" << rmx::hexString(hashShaderSource(ps), 8)
+				<< " flags=0");
+		}
 		shaderGroup.vertexShader = gCafeCompiler.compileVS(vs, log, sizeof(log), 0);
 		if (nullptr == shaderGroup.vertexShader)
 		{
@@ -963,7 +1217,10 @@ void main()
 		}
 		if (log[0] != '\0')
 			RMX_LOG_INFO("CafeGLSL: vertex compiler log for '" << name << "': " << log);
-		logVertexShaderInfo(name, shaderGroup.vertexShader);
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			logVertexShaderInfo(name, shaderGroup.vertexShader);
+		}
 
 		memset(log, 0, sizeof(log));
 		shaderGroup.pixelShader = gCafeCompiler.compilePS(ps, log, sizeof(log), 0);
@@ -973,10 +1230,32 @@ void main()
 		}
 		if (log[0] != '\0')
 			RMX_LOG_INFO("CafeGLSL: pixel compiler log for '" << name << "': " << log);
-		logPixelShaderInfo(name, shaderGroup.pixelShader);
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			logPixelShaderInfo(name, shaderGroup.pixelShader);
+		}
 
-		RMX_LOG_INFO("CafeGLSL: compiled '" << name << "'");
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			RMX_LOG_INFO("CafeGLSL: compiled '" << name << "'");
+		}
 		return true;
+	}
+
+	std::string insertShaderDefines(const char* source, const char* defines)
+	{
+		std::string result(source);
+		const char marker[] = "#version 330\n";
+		const size_t markerPos = result.find(marker);
+		const size_t insertPos = (markerPos == std::string::npos) ? 0 : markerPos + strlen(marker);
+		result.insert(insertPos, defines);
+		return result;
+	}
+
+	bool compilePixelShaderVariant(WHBGfxShaderGroup& shaderGroup, const char* name, const char* vs, const char* ps, const char* pixelDefines)
+	{
+		const std::string variantSource = insertShaderDefines(ps, pixelDefines);
+		return compileShaderPair(shaderGroup, name, vs, variantSource.c_str());
 	}
 // CafeGLSL needs this
 	void setCafeGLSLUniformBlockShaderMode(const WHBGfxShaderGroup& shaderGroup)
@@ -986,6 +1265,12 @@ void main()
 			mode = shaderGroup.vertexShader->mode;
 		else if (nullptr != shaderGroup.pixelShader)
 			mode = shaderGroup.pixelShader->mode;
+		if (nullptr != shaderGroup.pixelShader
+			&& shaderGroup.pixelShader->uniformVarCount > 0
+			&& shaderGroup.pixelShader->uniformBlockCount == 0)
+		{
+			mode = GX2_SHADER_MODE_UNIFORM_REGISTER;
+		}
 		GX2SetShaderMode(mode);
 	}
 
@@ -1039,6 +1324,27 @@ void main()
 		{
 			if ((pixels[i] & 0xff000000) != 0xff000000)
 				return true;
+		}
+		return false;
+	}
+
+	bool bitmapRegionContainsTransparentPixels(const Bitmap& bitmap, const Recti& inputRect)
+	{
+		if (bitmap.empty())
+			return false;
+
+		const Recti rect = Recti::getIntersection(inputRect, Recti(0, 0, bitmap.getWidth(), bitmap.getHeight()));
+		if (rect.empty())
+			return false;
+
+		for (int y = 0; y < rect.height; ++y)
+		{
+			const uint32* pixels = bitmap.getPixelPointer(rect.x, rect.y + y);
+			for (int x = 0; x < rect.width; ++x)
+			{
+				if ((pixels[x] & 0xff000000) != 0xff000000)
+					return true;
+			}
 		}
 		return false;
 	}
@@ -1119,31 +1425,24 @@ void main()
 		return true;
 	}
 
-	void uploadBitmapToTexture(GX2Texture& texture, const Bitmap& bitmap)
+	void invalidateCpuTextureRegion(const GX2Texture& texture, const Recti& rect, uint32 pitchBytes)
 	{
-		if (bitmap.empty() || nullptr == texture.surface.image)
+		if (nullptr == texture.surface.image || rect.empty() || pitchBytes == 0)
 			return;
 
-		uint8* dstBase = static_cast<uint8*>(GX2RLockSurfaceEx(&texture.surface, 0, GX2R_RESOURCE_USAGE_CPU_WRITE));
-		if (nullptr == dstBase)
+		uint8* image = static_cast<uint8*>(texture.surface.image);
+		const size_t rowBytes = (size_t)rect.width * sizeof(uint32);
+		if (rowBytes == pitchBytes)
 		{
-			RMX_ERROR("GX2Drawer: failed to lock GX2R texture upload surface", return);
-		}
-		const uint32 dstPitchBytes = texture.surface.pitch * 4;
-		const int width = std::min<int>(bitmap.getWidth(), texture.surface.width);
-		const int height = std::min<int>(bitmap.getHeight(), texture.surface.height);
-
-		for (int y = 0; y < height; ++y)
-		{
-			const uint32* src = bitmap.getPixelPointer(0, y);
-			uint8* dst = dstBase + (size_t)y * dstPitchBytes;
-			memcpy(dst, src, (size_t)width * sizeof(uint32));
+			GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, image + (size_t)rect.y * pitchBytes, (uint32)((size_t)rect.height * pitchBytes));
+			return;
 		}
 
-		GX2RUnlockSurfaceEx(&texture.surface, 0, GX2R_RESOURCE_USAGE_CPU_WRITE);
-		GX2RInvalidateSurface(&texture.surface, 0, cpuWriteToGpuReadFlags());
-		GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, texture.surface.image, texture.surface.imageSize);
-		GX2Invalidate(GX2_INVALIDATE_MODE_TEXTURE, texture.surface.image, texture.surface.imageSize);
+		for (int y = 0; y < rect.height; ++y)
+		{
+			uint8* row = image + (size_t)(rect.y + y) * pitchBytes + (size_t)rect.x * sizeof(uint32);
+			GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, row, (uint32)rowBytes);
+		}
 	}
 
 	void uploadBitmapRegionToTexture(GX2Texture& texture, const Bitmap& bitmap, const Recti& inputRect)
@@ -1157,9 +1456,7 @@ void main()
 
 		uint8* dstBase = static_cast<uint8*>(GX2RLockSurfaceEx(&texture.surface, 0, GX2R_RESOURCE_USAGE_CPU_WRITE));
 		if (nullptr == dstBase)
-		{
-			RMX_ERROR("GX2Drawer: failed to lock GX2R texture region upload surface", return);
-		}
+			return;
 
 		const uint32 dstPitchBytes = texture.surface.pitch * 4;
 		for (int y = 0; y < rect.height; ++y)
@@ -1170,9 +1467,74 @@ void main()
 		}
 
 		GX2RUnlockSurfaceEx(&texture.surface, 0, GX2R_RESOURCE_USAGE_CPU_WRITE);
+		invalidateCpuTextureRegion(texture, rect, dstPitchBytes);
+	}
+
+	void uploadBitmapRegionsToTexture(GX2Texture& texture, const Bitmap& bitmap, const std::vector<Recti>& inputRects)
+	{
+		if (bitmap.empty() || nullptr == texture.surface.image || inputRects.empty())
+			return;
+
+		const Recti bounds(0, 0, std::min<int>(bitmap.getWidth(), texture.surface.width), std::min<int>(bitmap.getHeight(), texture.surface.height));
+		std::vector<Recti> rects;
+		rects.reserve(inputRects.size());
+		for (const Recti& inputRect : inputRects)
+		{
+			const Recti rect = Recti::getIntersection(inputRect, bounds);
+			if (!rect.empty())
+			{
+				rects.push_back(rect);
+			}
+		}
+		if (rects.empty())
+			return;
+
+		uint8* dstBase = static_cast<uint8*>(GX2RLockSurfaceEx(&texture.surface, 0, GX2R_RESOURCE_USAGE_CPU_WRITE));
+		if (nullptr == dstBase)
+			return;
+
+		const uint32 dstPitchBytes = texture.surface.pitch * 4;
+		for (const Recti& rect : rects)
+		{
+			for (int y = 0; y < rect.height; ++y)
+			{
+				const uint32* src = bitmap.getPixelPointer(rect.x, rect.y + y);
+				uint8* dst = dstBase + (size_t)(rect.y + y) * dstPitchBytes + (size_t)rect.x * sizeof(uint32);
+				memcpy(dst, src, (size_t)rect.width * sizeof(uint32));
+			}
+		}
+
+		GX2RUnlockSurfaceEx(&texture.surface, 0, GX2R_RESOURCE_USAGE_CPU_WRITE);
+		for (const Recti& rect : rects)
+		{
+			invalidateCpuTextureRegion(texture, rect, dstPitchBytes);
+		}
+	}
+
+	void uploadBitmapToTexture(GX2Texture& texture, const Bitmap& bitmap)
+	{
+		if (bitmap.empty() || nullptr == texture.surface.image)
+			return;
+
+		const Vec2i copySize(std::min<int>(bitmap.getWidth(), texture.surface.width), std::min<int>(bitmap.getHeight(), texture.surface.height));
+		if (copySize.x <= 0 || copySize.y <= 0)
+			return;
+
+		uint8* dstBase = static_cast<uint8*>(GX2RLockSurfaceEx(&texture.surface, 0, GX2R_RESOURCE_USAGE_CPU_WRITE));
+		if (nullptr == dstBase)
+			return;
+
+		const uint32 dstPitchBytes = texture.surface.pitch * 4;
+		for (int y = 0; y < copySize.y; ++y)
+		{
+			const uint32* src = bitmap.getPixelPointer(0, y);
+			uint8* dst = dstBase + (size_t)y * dstPitchBytes;
+			memcpy(dst, src, (size_t)copySize.x * sizeof(uint32));
+		}
+
+		GX2RUnlockSurfaceEx(&texture.surface, 0, GX2R_RESOURCE_USAGE_CPU_WRITE);
 		GX2RInvalidateSurface(&texture.surface, 0, cpuWriteToGpuReadFlags());
 		GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, texture.surface.image, texture.surface.imageSize);
-		GX2Invalidate(GX2_INVALIDATE_MODE_TEXTURE, texture.surface.image, texture.surface.imageSize);
 	}
 
 	void invalidateSurfaceAfterColorWrite(const GX2Surface& surface)
@@ -1216,6 +1578,41 @@ void main()
 		colorBuffer.aaBuffer = nullptr;
 		colorBuffer.aaSize = 0;
 		GX2InitColorBufferRegs(&colorBuffer);
+		return true;
+	}
+
+	bool initializeDepthBuffer(GX2DepthBuffer& depthBuffer, const Vec2i& size)
+	{
+		if (size.x <= 0 || size.y <= 0)
+			return false;
+
+		memset(&depthBuffer, 0, sizeof(depthBuffer));
+		depthBuffer.surface.dim = GX2_SURFACE_DIM_TEXTURE_2D;
+		depthBuffer.surface.width = (uint32)size.x;
+		depthBuffer.surface.height = (uint32)size.y;
+		depthBuffer.surface.depth = 1;
+		depthBuffer.surface.mipLevels = 1;
+		depthBuffer.surface.format = GX2_SURFACE_FORMAT_FLOAT_D24_S8;
+		depthBuffer.surface.aa = GX2_AA_MODE1X;
+		depthBuffer.surface.use = GX2_SURFACE_USE_DEPTH_BUFFER;
+		depthBuffer.surface.tileMode = GX2_TILE_MODE_DEFAULT;
+		depthBuffer.surface.swizzle = 0;
+		GX2CalcSurfaceSizeAndAlignment(&depthBuffer.surface);
+		depthBuffer.surface.image = gx2Alloc(depthBuffer.surface.imageSize, depthBuffer.surface.alignment);
+		if (nullptr == depthBuffer.surface.image)
+			return false;
+
+		memset(depthBuffer.surface.image, 0, depthBuffer.surface.imageSize);
+		GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, depthBuffer.surface.image, depthBuffer.surface.imageSize);
+		depthBuffer.viewMip = 0;
+		depthBuffer.viewFirstSlice = 0;
+		depthBuffer.viewNumSlices = 1;
+		depthBuffer.hiZPtr = nullptr;
+		depthBuffer.hiZSize = 0;
+		depthBuffer.depthClear = 0.0f;
+		depthBuffer.stencilClear = 0;
+		GX2InitDepthBufferRegs(&depthBuffer);
+		GX2InitDepthBufferHiZEnable(&depthBuffer, FALSE);
 		return true;
 	}
 
@@ -1269,7 +1666,7 @@ void main()
 				mSize = size;
 			}
 			uploadBitmapToTexture(mTexture, bitmap);
-			mContainsTransparentPixels = bitmapContainsTransparentPixels(bitmap);
+			mContainsTransparentPixels = mContentKnownOpaque ? false : bitmapContainsTransparentPixels(bitmap);
 			++mChangeCounter;
 		}
 
@@ -1282,7 +1679,11 @@ void main()
 				return;
 			}
 			uploadBitmapRegionToTexture(mTexture, bitmap, rect);
-			if (!mContainsTransparentPixels)
+			if (mContentKnownOpaque)
+			{
+				mContainsTransparentPixels = false;
+			}
+			else if (!mContainsTransparentPixels)
 			{
 				const Recti clampedRect = Recti::getIntersection(rect, Recti(0, 0, bitmap.getWidth(), bitmap.getHeight()));
 				for (int y = 0; y < clampedRect.height && !mContainsTransparentPixels; ++y)
@@ -1299,6 +1700,42 @@ void main()
 				}
 			}
 			++mChangeCounter;
+		}
+
+		void updateFromBitmapRegions(const Bitmap& bitmap, const std::vector<Recti>& rects) override
+		{
+			const Vec2i size = bitmap.getSize();
+			if (mSize != size || nullptr == mTexture.surface.image || mRenderTarget)
+			{
+				updateFromBitmap(bitmap);
+				return;
+			}
+			uploadBitmapRegionsToTexture(mTexture, bitmap, rects);
+			if (mContentKnownOpaque)
+			{
+				mContainsTransparentPixels = false;
+			}
+			else if (!mContainsTransparentPixels)
+			{
+				for (const Recti& rect : rects)
+				{
+					if (bitmapRegionContainsTransparentPixels(bitmap, rect))
+					{
+						mContainsTransparentPixels = true;
+						break;
+					}
+				}
+			}
+			++mChangeCounter;
+		}
+
+		void setContentKnownOpaque(bool knownOpaque) override
+		{
+			mContentKnownOpaque = knownOpaque;
+			if (knownOpaque)
+			{
+				mContainsTransparentPixels = false;
+			}
 		}
 
 		void setupAsRenderTarget(const Vec2i& size) override
@@ -1340,6 +1777,15 @@ void main()
 
 		void destroy()
 		{
+			if (gSkipGX2TextureDestroy)
+			{
+				memset(&mColorBuffer, 0, sizeof(mColorBuffer));
+				memset(&mTexture, 0, sizeof(mTexture));
+				mOwnsTextureImage = false;
+				mRenderTarget = false;
+				mSize.clear();
+				return;
+			}
 			if (nullptr != mColorBuffer.surface.image)
 			{
 				GX2DrawDone();
@@ -1359,6 +1805,7 @@ void main()
 		bool mRenderTarget = false;
 		bool mOwnsTextureImage = false;
 		bool mContainsTransparentPixels = false;
+		bool mContentKnownOpaque = false;
 		SamplingMode mSamplingMode = SamplingMode::POINT;
 		TextureWrapMode mWrapMode = TextureWrapMode::CLAMP;
 		uint32 mChangeCounter = 0;
@@ -1374,6 +1821,62 @@ public:
 		uint32 mSpriteChangeCounter = 0xffffffff;
 		uint16 mPaletteChangeCounter = 0xffff;
 		Vec2i mSourceSize;
+	};
+
+	struct CachedTextKey
+	{
+		uintptr_t mFontPtr = 0;
+		uint32 mFontChangeCounter = 0;
+		uint64 mTextHash = 0;
+		uint32 mTextLength = 0;
+		int16 mSpacing = 0;
+		bool mWideText = false;
+
+		bool operator==(const CachedTextKey& other) const
+		{
+			return mFontPtr == other.mFontPtr
+				&& mFontChangeCounter == other.mFontChangeCounter
+				&& mTextHash == other.mTextHash
+				&& mTextLength == other.mTextLength
+				&& mSpacing == other.mSpacing
+				&& mWideText == other.mWideText;
+		}
+	};
+
+	struct CachedTextKeyHasher
+	{
+		size_t operator()(const CachedTextKey& key) const
+		{
+			uint64 hash = hashCombine64((uint64)key.mFontPtr, key.mFontChangeCounter);
+			hash = hashCombine64(hash, key.mTextHash);
+			hash = hashCombine64(hash, key.mTextLength);
+			hash = hashCombine64(hash, (uint16)key.mSpacing);
+			hash = hashCombine64(hash, key.mWideText ? 1 : 0);
+			return (size_t)hash;
+		}
+	};
+
+	struct CachedTextTexture
+	{
+		GX2Texture mTexture = {};
+		Vec2i mSize;
+		Recti mInnerRect;
+		bool mContainsTransparentPixels = false;
+		uint32 mLastUsedFrame = 0;
+	};
+
+	struct ScratchTextureSlot
+	{
+		GX2Texture mTexture = {};
+		Vec2i mSize;
+		bool mUsedThisFrame = false;
+	};
+
+	struct DepthBufferSlot
+	{
+		GX2DepthBuffer mBuffer = {};
+		Vec2i mSize;
+		uint32 mLastUsedFrame = 0;
 	};
 
 	Internal()
@@ -1396,6 +1899,12 @@ public:
 			RMX_LOG_ERROR("GX2Drawer: color shader setup failed");
 			showStartupFailureColor(1.0f, 0.0f, 1.0f);
 			return;
+		}
+
+		if (!initializeBlurShader())
+		{
+			RMX_LOG_WARNING("GX2Drawer: blur shader setup failed; blur command will be skipped");
+			freeCompiledShaderGroup(mBlurShaderGroup);
 		}
 
 		if (!initializePlaneShader())
@@ -1443,11 +1952,27 @@ public:
 		if constexpr (SKIP_GX2_TEARDOWN_ON_EXIT)
 		{
 			RMX_LOG_INFO("GX2Drawer: leaving GX2 resources for process teardown");
+			gSkipGX2TextureDestroy = true;
 			return;
 		}
 		destroyCpuColorBuffer();
+		destroyDepthBuffers();
+		destroyScanoutColorBuffer(mNativeResolveColorBuffer, mNativeResolveColorBufferSize);
+		memset(&mNativeColorTextureView, 0, sizeof(mNativeColorTextureView));
+		destroyScanoutColorBuffer(mTvScanoutColorBuffer, mTvScanoutColorBufferSize);
+		destroyScanoutColorBuffer(mDrcScanoutColorBuffer, mDrcScanoutColorBufferSize);
 		destroyTexture();
-		destroyTextureStorage(mScratchTexture, true);
+		for (auto& pair : mTextTextures)
+		{
+			destroyCachedTextTexture(pair.second);
+		}
+		mTextTextures.clear();
+		for (ScratchTextureSlot& slot : mScratchTextures)
+		{
+			destroyTextureStorage(slot.mTexture, true);
+			slot.mSize.clear();
+			slot.mUsedThisFrame = false;
+		}
 		if (nullptr != mDynamicVertexBuffer)
 		{
 			gx2Free(mDynamicVertexBuffer);
@@ -1475,10 +2000,25 @@ public:
 			freeCompiledShaderGroup(mColorShaderGroup);
 			mColorShaderReady = false;
 		}
+		if (mBlurShaderReady)
+		{
+			freeCompiledShaderGroup(mBlurShaderGroup);
+			mBlurShaderReady = false;
+		}
 		if (mPlaneShaderReady)
 		{
 			freeCompiledShaderGroup(mPlaneShaderGroup);
 			mPlaneShaderReady = false;
+		}
+		if (mPlaneSimpleShaderReady)
+		{
+			freeCompiledShaderGroup(mPlaneSimpleShaderGroup);
+			mPlaneSimpleShaderReady = false;
+		}
+		if (mPlaneHScrollShaderReady)
+		{
+			freeCompiledShaderGroup(mPlaneHScrollShaderGroup);
+			mPlaneHScrollShaderReady = false;
 		}
 		if (mVdpSpriteShaderReady)
 		{
@@ -1581,9 +2121,10 @@ public:
 			return false;
 		GX2Invalidate(GX2_INVALIDATE_MODE_CPU, mTvScanBuffer, tvScanBufferSize);
 		GX2SetTVBuffer(mTvScanBuffer, tvScanBufferSize, tvConfig.renderMode, GX2_SURFACE_FORMAT_UNORM_R8_G8_B8_A8, GX2_BUFFERING_MODE_DOUBLE);
+		mTvScanoutSize = Vec2i((int)tvConfig.width, (int)tvConfig.height);
 		GX2SetTVScale(tvConfig.width, tvConfig.height);
 		GX2SetTVEnable(TRUE);
-		mNativeDrawableSize = Vec2i((int)tvConfig.width, (int)tvConfig.height);
+		mNativeDrawableSize = mTvScanoutSize;
 
 		uint32 drcScanBufferSize = 0;
 		uint32 drcUnknown = 0;
@@ -1593,8 +2134,9 @@ public:
 		{
 			GX2Invalidate(GX2_INVALIDATE_MODE_CPU, mDrcScanBuffer, drcScanBufferSize);
 			GX2SetDRCBuffer(mDrcScanBuffer, drcScanBufferSize, GX2_DRC_RENDER_MODE_SINGLE, GX2_SURFACE_FORMAT_UNORM_R8_G8_B8_A8, GX2_BUFFERING_MODE_DOUBLE);
-			GX2SetDRCScale(854, 480);
+			GX2SetDRCScale(DRC_SCANOUT_WIDTH, DRC_SCANOUT_HEIGHT);
 			GX2SetDRCEnable(TRUE);
+			mDrcScanoutSize = Vec2i((int)DRC_SCANOUT_WIDTH, (int)DRC_SCANOUT_HEIGHT);
 		}
 
 		mNativeContext = static_cast<GX2ContextState*>(gx2Alloc(sizeof(GX2ContextState), GX2_CONTEXT_STATE_ALIGNMENT));
@@ -1602,12 +2144,14 @@ public:
 			return false;
 		GX2SetupContextStateEx(mNativeContext, FALSE);
 		GX2SetContextState(mNativeContext);
-		GX2SetSwapInterval(1);
-		RMX_LOG_INFO("GX2Drawer: swap interval set to 1");
+		GX2SetSwapInterval(0);
+		RMX_LOG_INFO("GX2Drawer: swap interval set to 0");
 		GX2SetViewport(0.0f, 0.0f, (float)mNativeDrawableSize.x, (float)mNativeDrawableSize.y, 0.0f, 1.0f);
 		GX2SetScissor(0, 0, (uint32)mNativeDrawableSize.x, (uint32)mNativeDrawableSize.y);
 
-		RMX_LOG_INFO("GX2Drawer: initialized owned GX2 display tv=" << mNativeDrawableSize.x << "x" << mNativeDrawableSize.y
+		RMX_LOG_INFO("GX2Drawer: initialized owned GX2 display native=" << mNativeDrawableSize.x << "x" << mNativeDrawableSize.y
+			<< " tv=" << mTvScanoutSize.x << "x" << mTvScanoutSize.y
+			<< " drc=" << mDrcScanoutSize.x << "x" << mDrcScanoutSize.y
 			<< " tvScanBytes=" << tvScanBufferSize
 			<< " drcScanBytes=" << drcScanBufferSize);
 		return true;
@@ -1654,6 +2198,97 @@ public:
 			memset(&mCpuColorBuffer, 0, sizeof(mCpuColorBuffer));
 			mCpuColorBufferSize.clear();
 		}
+		memset(&mNativeColorTextureView, 0, sizeof(mNativeColorTextureView));
+	}
+
+	void destroyDepthBuffer(DepthBufferSlot& slot)
+	{
+		if (nullptr != slot.mBuffer.surface.image)
+		{
+			GX2DrawDone();
+			gx2Free(slot.mBuffer.surface.image);
+			memset(&slot.mBuffer, 0, sizeof(slot.mBuffer));
+			slot.mSize.clear();
+			slot.mLastUsedFrame = 0;
+		}
+	}
+
+	void destroyDepthBuffers()
+	{
+		for (DepthBufferSlot& slot : mDepthBuffers)
+		{
+			destroyDepthBuffer(slot);
+		}
+		mCurrentDepthBuffer = nullptr;
+	}
+
+	GX2DepthBuffer* ensureDepthBuffer(const Vec2i& size)
+	{
+		for (DepthBufferSlot& slot : mDepthBuffers)
+		{
+			if (slot.mSize == size && nullptr != slot.mBuffer.surface.image)
+			{
+				slot.mLastUsedFrame = mPresentCount;
+				return &slot.mBuffer;
+			}
+		}
+
+		DepthBufferSlot* selected = nullptr;
+		for (DepthBufferSlot& slot : mDepthBuffers)
+		{
+			if (nullptr == slot.mBuffer.surface.image)
+			{
+				selected = &slot;
+				break;
+			}
+			if (nullptr == selected || slot.mLastUsedFrame < selected->mLastUsedFrame)
+			{
+				selected = &slot;
+			}
+		}
+		if (nullptr == selected)
+			return nullptr;
+
+		destroyDepthBuffer(*selected);
+		if (!initializeDepthBuffer(selected->mBuffer, size))
+		{
+			RMX_LOG_ERROR("GX2Drawer: depth buffer allocation failed for " << size.x << "x" << size.y);
+			return nullptr;
+		}
+
+		selected->mSize = size;
+		selected->mLastUsedFrame = mPresentCount;
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			RMX_LOG_INFO("GX2Drawer: depth buffer " << size.x << " x " << size.y
+				<< " pitch=" << selected->mBuffer.surface.pitch
+				<< " bytes=" << selected->mBuffer.surface.imageSize);
+		}
+		return &selected->mBuffer;
+	}
+
+	bool bindDepthBufferForCurrentTarget()
+	{
+		if constexpr (!USE_GX2_DEPTH_BUFFER)
+			return false;
+		if (nullptr == mCurrentColorBuffer)
+			return false;
+		const Vec2i size((int)mCurrentColorBuffer->surface.width, (int)mCurrentColorBuffer->surface.height);
+		GX2DepthBuffer* depthBuffer = ensureDepthBuffer(size);
+		if (nullptr == depthBuffer)
+			return false;
+		mCurrentDepthBuffer = depthBuffer;
+		GX2SetDepthBuffer(depthBuffer);
+		return true;
+	}
+
+	void clearCurrentDepthBuffer()
+	{
+		if constexpr (!USE_GX2_DEPTH_BUFFER)
+			return;
+		if (!bindDepthBufferForCurrentTarget())
+			return;
+		mDepthActiveForTarget = drawDepthClearRect();
 	}
 
 	bool ensureCpuColorBuffer(const Vec2i& size)
@@ -1691,9 +2326,69 @@ public:
 		GX2InitColorBufferRegs(&mCpuColorBuffer);
 
 		mCpuColorBufferSize = size;
-		RMX_LOG_INFO("GX2Drawer: GPU-present color buffer " << size.x << " x " << size.y
-			<< " pitch=" << mCpuColorBuffer.surface.pitch
-			<< " bytes=" << mCpuColorBuffer.surface.imageSize);
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			RMX_LOG_INFO("GX2Drawer: GPU-present color buffer " << size.x << " x " << size.y
+				<< " pitch=" << mCpuColorBuffer.surface.pitch
+				<< " bytes=" << mCpuColorBuffer.surface.imageSize);
+		}
+		return true;
+	}
+
+	void destroyScanoutColorBuffer(GX2ColorBuffer& colorBuffer, Vec2i& colorBufferSize)
+	{
+		if (nullptr != colorBuffer.surface.image)
+		{
+			GX2DrawDone();
+			gx2Free(colorBuffer.surface.image);
+			memset(&colorBuffer, 0, sizeof(colorBuffer));
+			colorBufferSize.clear();
+		}
+	}
+
+	bool ensureScanoutColorBuffer(GX2ColorBuffer& colorBuffer, Vec2i& colorBufferSize, const Vec2i& size, const char* label)
+	{
+		if (colorBufferSize == size && nullptr != colorBuffer.surface.image)
+			return true;
+
+		destroyScanoutColorBuffer(colorBuffer, colorBufferSize);
+		if (!initializeColorBuffer(colorBuffer, size, GX2_SURFACE_USE_TEXTURE_COLOR_BUFFER_TV))
+		{
+			RMX_LOG_ERROR("GX2Drawer: " << label << " scanout color buffer allocation failed for " << size.x << "x" << size.y);
+			return false;
+		}
+
+		colorBufferSize = size;
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			RMX_LOG_INFO("GX2Drawer: " << label << " scanout color buffer " << size.x << " x " << size.y
+				<< " pitch=" << colorBuffer.surface.pitch
+				<< " bytes=" << colorBuffer.surface.imageSize);
+		}
+		return true;
+	}
+
+	bool ensureNativeResolveColorBuffer(const Vec2i& size)
+	{
+		if (mNativeResolveColorBufferSize == size && nullptr != mNativeResolveColorBuffer.surface.image)
+			return true;
+
+		destroyScanoutColorBuffer(mNativeResolveColorBuffer, mNativeResolveColorBufferSize);
+		memset(&mNativeColorTextureView, 0, sizeof(mNativeColorTextureView));
+		const GX2SurfaceUse useFlags = (GX2SurfaceUse)(GX2_SURFACE_USE_TEXTURE | GX2_SURFACE_USE_COLOR_BUFFER);
+		if (!initializeColorBuffer(mNativeResolveColorBuffer, size, useFlags))
+		{
+			RMX_LOG_ERROR("GX2Drawer: native resolve color buffer allocation failed for " << size.x << "x" << size.y);
+			return false;
+		}
+
+		mNativeResolveColorBufferSize = size;
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			RMX_LOG_INFO("GX2Drawer: native resolve color buffer " << size.x << " x " << size.y
+				<< " pitch=" << mNativeResolveColorBuffer.surface.pitch
+				<< " bytes=" << mNativeResolveColorBuffer.surface.imageSize);
+		}
 		return true;
 	}
 
@@ -1704,6 +2399,10 @@ public:
 		if (!addAttrib(mShaderGroup, "aPosition", 0, offsetof(PresentVertex, x), GX2_ATTRIB_FORMAT_FLOAT_32_32))
 		{
 			RMX_ERROR("GX2Drawer: failed to initialize position", freeCompiledShaderGroup(mShaderGroup); return false);
+		}
+		if (!addAttrib(mShaderGroup, "aDepth", 0, offsetof(PresentVertex, z), GX2_ATTRIB_FORMAT_FLOAT_32))
+		{
+			RMX_ERROR("GX2Drawer: failed to initialize depth", freeCompiledShaderGroup(mShaderGroup); return false);
 		}
 		if (!addAttrib(mShaderGroup, "aTexCoord", 0, offsetof(PresentVertex, u), GX2_ATTRIB_FORMAT_FLOAT_32_32))
 		{
@@ -1728,37 +2427,40 @@ public:
 			}
 		}
 		initializePixelUniformBlock();
-		RMX_LOG_INFO("GX2Drawer: texture shader samplers="
-			<< (nullptr != mShaderGroup.pixelShader ? (uint32)mShaderGroup.pixelShader->samplerVarCount : 0)
-			<< " samplerLocation=" << mSamplerLocation
-			<< " tintOffset=" << mTintUniform.offset
-			<< " tintBlock=" << mTintUniform.block
-			<< " addedOffset=" << mAddedUniform.offset
-			<< " addedBlock=" << mAddedUniform.block);
-		if (nullptr != mShaderGroup.pixelShader)
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
 		{
-			for (uint32 i = 0; i < mShaderGroup.pixelShader->uniformBlockCount; ++i)
+			RMX_LOG_INFO("GX2Drawer: texture shader samplers="
+				<< (nullptr != mShaderGroup.pixelShader ? (uint32)mShaderGroup.pixelShader->samplerVarCount : 0)
+				<< " samplerLocation=" << mSamplerLocation
+				<< " tintOffset=" << mTintUniform.offset
+				<< " tintBlock=" << mTintUniform.block
+				<< " addedOffset=" << mAddedUniform.offset
+				<< " addedBlock=" << mAddedUniform.block);
+			if (nullptr != mShaderGroup.pixelShader)
 			{
-				const GX2UniformBlock& block = mShaderGroup.pixelShader->uniformBlocks[i];
-				RMX_LOG_INFO("GX2Drawer: pixel uniform block[" << i << "] name="
-					<< (nullptr != block.name ? block.name : "(null)")
-					<< " location=" << block.offset
-					<< " size=" << block.size);
-			}
-			for (uint32 i = 0; i < mShaderGroup.pixelShader->uniformVarCount; ++i)
-			{
-				const GX2UniformVar& uniform = mShaderGroup.pixelShader->uniformVars[i];
-				RMX_LOG_INFO("GX2Drawer: pixel uniform[" << i << "] name="
-					<< (nullptr != uniform.name ? uniform.name : "(null)")
-					<< " offset=" << uniform.offset
-					<< " block=" << uniform.block);
-			}
-			for (uint32 i = 0; i < mShaderGroup.pixelShader->samplerVarCount; ++i)
-			{
-				const GX2SamplerVar& sampler = mShaderGroup.pixelShader->samplerVars[i];
-				RMX_LOG_INFO("GX2Drawer: sampler[" << i << "] name="
-					<< (nullptr != sampler.name ? sampler.name : "(null)")
-					<< " location=" << sampler.location);
+				for (uint32 i = 0; i < mShaderGroup.pixelShader->uniformBlockCount; ++i)
+				{
+					const GX2UniformBlock& block = mShaderGroup.pixelShader->uniformBlocks[i];
+					RMX_LOG_INFO("GX2Drawer: pixel uniform block[" << i << "] name="
+						<< (nullptr != block.name ? block.name : "(null)")
+						<< " location=" << block.offset
+						<< " size=" << block.size);
+				}
+				for (uint32 i = 0; i < mShaderGroup.pixelShader->uniformVarCount; ++i)
+				{
+					const GX2UniformVar& uniform = mShaderGroup.pixelShader->uniformVars[i];
+					RMX_LOG_INFO("GX2Drawer: pixel uniform[" << i << "] name="
+						<< (nullptr != uniform.name ? uniform.name : "(null)")
+						<< " offset=" << uniform.offset
+						<< " block=" << uniform.block);
+				}
+				for (uint32 i = 0; i < mShaderGroup.pixelShader->samplerVarCount; ++i)
+				{
+					const GX2SamplerVar& sampler = mShaderGroup.pixelShader->samplerVars[i];
+					RMX_LOG_INFO("GX2Drawer: sampler[" << i << "] name="
+						<< (nullptr != sampler.name ? sampler.name : "(null)")
+						<< " location=" << sampler.location);
+				}
 			}
 		}
 		mShaderReady = true;
@@ -1773,6 +2475,10 @@ public:
 		{
 			RMX_ERROR("GX2Drawer: failed to initialize color position", freeCompiledShaderGroup(mColorShaderGroup); return false);
 		}
+		if (!addAttrib(mColorShaderGroup, "aDepth", 0, offsetof(ColorVertex, z), GX2_ATTRIB_FORMAT_FLOAT_32))
+		{
+			RMX_ERROR("GX2Drawer: failed to initialize color depth", freeCompiledShaderGroup(mColorShaderGroup); return false);
+		}
 		if (!addAttrib(mColorShaderGroup, "aColor", 0, offsetof(ColorVertex, r), GX2_ATTRIB_FORMAT_FLOAT_32_32_32_32))
 		{
 			RMX_ERROR("GX2Drawer: failed to initialize color attribute", freeCompiledShaderGroup(mColorShaderGroup); return false);
@@ -1785,77 +2491,244 @@ public:
 		return true;
 	}
 
-	bool initializePlaneShader()
+	bool initializeBlurShader()
 	{
-		if (!compileShaderPair(mPlaneShaderGroup, "plane", PLANE_VS, PLANE_PS))
+		if (!compileShaderPair(mBlurShaderGroup, "blur", PRESENT_VS, BLUR_PS))
 			return false;
-		if (!addAttrib(mPlaneShaderGroup, "aPosition", 0, offsetof(PlaneVertex, x), GX2_ATTRIB_FORMAT_FLOAT_32_32))
+		if (!addAttrib(mBlurShaderGroup, "aPosition", 0, offsetof(PresentVertex, x), GX2_ATTRIB_FORMAT_FLOAT_32_32))
 		{
-			RMX_ERROR("GX2Drawer: failed to initialize plane position", freeCompiledShaderGroup(mPlaneShaderGroup); return false);
+			RMX_ERROR("GX2Drawer: failed to initialize blur position", freeCompiledShaderGroup(mBlurShaderGroup); return false);
 		}
-		if (!addAttrib(mPlaneShaderGroup, "aLocalOffset", 0, offsetof(PlaneVertex, localX), GX2_ATTRIB_FORMAT_FLOAT_32_32))
+		if (!addAttrib(mBlurShaderGroup, "aDepth", 0, offsetof(PresentVertex, z), GX2_ATTRIB_FORMAT_FLOAT_32))
 		{
-			RMX_ERROR("GX2Drawer: failed to initialize plane local offset", freeCompiledShaderGroup(mPlaneShaderGroup); return false);
+			RMX_ERROR("GX2Drawer: failed to initialize blur depth", freeCompiledShaderGroup(mBlurShaderGroup); return false);
 		}
-		if (!makeFetchShader(mPlaneShaderGroup))
+		if (!addAttrib(mBlurShaderGroup, "aTexCoord", 0, offsetof(PresentVertex, u), GX2_ATTRIB_FORMAT_FLOAT_32_32))
 		{
-			RMX_ERROR("GX2Drawer: failed to initialize plane fetch shader", freeCompiledShaderGroup(mPlaneShaderGroup); return false);
+			RMX_ERROR("GX2Drawer: failed to initialize blur texcoord", freeCompiledShaderGroup(mBlurShaderGroup); return false);
+		}
+		if (!makeFetchShader(mBlurShaderGroup))
+		{
+			RMX_ERROR("GX2Drawer: failed to initialize blur fetch shader", freeCompiledShaderGroup(mBlurShaderGroup); return false);
 		}
 
-		mPlaneSamplerLocations[0] = getSamplerLocation(mPlaneShaderGroup, "uPlaneDataTexture");
-		if (mPlaneSamplerLocations[0] == UINT32_MAX && nullptr != mPlaneShaderGroup.pixelShader && mPlaneShaderGroup.pixelShader->samplerVarCount >= 1)
+		mBlurSamplerLocation = getSamplerLocation(mBlurShaderGroup, "uTexture");
+		if (mBlurSamplerLocation == UINT32_MAX && nullptr != mBlurShaderGroup.pixelShader && mBlurShaderGroup.pixelShader->samplerVarCount >= 1)
 		{
-			mPlaneSamplerLocations[0] = mPlaneShaderGroup.pixelShader->samplerVars[0].location;
-			RMX_LOG_INFO("GX2Drawer: plane sampler name unavailable; using declaration-order location");
+			mBlurSamplerLocation = mBlurShaderGroup.pixelShader->samplerVars[0].location;
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				RMX_LOG_INFO("GX2Drawer: blur sampler name unavailable; using declaration-order location");
 		}
-		RMX_LOG_INFO("GX2Drawer: plane sampler location data=" << mPlaneSamplerLocations[0]);
-		mPlaneConfigUniforms[0] = getPixelUniformSlot(mPlaneShaderGroup, "uConfig0");
-		mPlaneConfigUniforms[1] = getPixelUniformSlot(mPlaneShaderGroup, "uConfig1");
-		mPlaneConfigUniforms[2] = getPixelUniformSlot(mPlaneShaderGroup, "uConfig2");
-		mPlaneConfigUniforms[3] = getPixelUniformSlot(mPlaneShaderGroup, "uConfig3");
+
+		mBlurUniforms[0] = getPixelUniformSlot(mBlurShaderGroup, "uTexelOffset");
+		mBlurUniforms[1] = getPixelUniformSlot(mBlurShaderGroup, "uKernel");
+		mBlurUniformBlockLocation = UINT32_MAX;
+		mBlurUniformBlockSize = 0;
+		uint32 blurUniformBlockIndex = 0;
+		if (getPixelUniformBlockIndex(mBlurShaderGroup, "BlurUniforms", blurUniformBlockIndex)
+			&& nullptr != mBlurShaderGroup.pixelShader
+			&& blurUniformBlockIndex < mBlurShaderGroup.pixelShader->uniformBlockCount)
+		{
+			const GX2UniformBlock& block = mBlurShaderGroup.pixelShader->uniformBlocks[blurUniformBlockIndex];
+			mBlurUniformBlockLocation = block.offset;
+			mBlurUniformBlockSize = std::max<uint32>(block.size, 32);
+			mBlurUniforms[0].offset = 0;
+			mBlurUniforms[0].block = (int32)blurUniformBlockIndex;
+			mBlurUniforms[1].offset = 16;
+			mBlurUniforms[1].block = (int32)blurUniformBlockIndex;
+		}
+		if ((mBlurUniforms[0].offset == UINT32_MAX || mBlurUniforms[1].offset == UINT32_MAX)
+			&& nullptr != mBlurShaderGroup.pixelShader && mBlurShaderGroup.pixelShader->uniformVarCount >= 2)
+		{
+			for (uint32 index = 0; index < 2; ++index)
+			{
+				const GX2UniformVar& uniform = mBlurShaderGroup.pixelShader->uniformVars[index];
+				mBlurUniforms[index].offset = uniform.offset;
+				mBlurUniforms[index].block = uniform.block;
+			}
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				RMX_LOG_INFO("GX2Drawer: blur uniform names unavailable; using declaration-order locations");
+		}
+
+		mBlurShaderReady = (mBlurSamplerLocation != UINT32_MAX
+			&& mBlurUniforms[0].offset != UINT32_MAX
+			&& mBlurUniforms[1].offset != UINT32_MAX);
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			RMX_LOG_INFO("GX2Drawer: blur shader ready=" << (mBlurShaderReady ? 1 : 0)
+				<< " sampler=" << mBlurSamplerLocation
+				<< " texelOffset=" << mBlurUniforms[0].offset
+				<< " texelBlock=" << mBlurUniforms[0].block
+				<< " kernel=" << mBlurUniforms[1].offset
+				<< " kernelBlock=" << mBlurUniforms[1].block
+				<< " uniformBlockLocation=" << mBlurUniformBlockLocation
+				<< " uniformBlockSize=" << mBlurUniformBlockSize);
+		}
+		return mBlurShaderReady;
+	}
+
+	bool initializePlaneShaderProgram(
+		WHBGfxShaderGroup& shaderGroup,
+		std::array<uint32, 5>& samplerLocations,
+		PixelUniformSlot (&configUniforms)[4],
+		uint32& uniformBlockLocation,
+		uint32& uniformBlockSize,
+		const char* name,
+		const char* pixelShader,
+		const char* pixelDefines = nullptr)
+	{
+		if (nullptr != pixelDefines && pixelDefines[0] != '\0')
+		{
+			if (!compilePixelShaderVariant(shaderGroup, name, PLANE_VS, pixelShader, pixelDefines))
+				return false;
+		}
+		else if (!compileShaderPair(shaderGroup, name, PLANE_VS, pixelShader))
+		{
+			return false;
+		}
+
+		if (!addAttrib(shaderGroup, "aPosition", 0, offsetof(PlaneVertex, x), GX2_ATTRIB_FORMAT_FLOAT_32_32))
+		{
+			RMX_ERROR("GX2Drawer: failed to initialize " << name << " position", freeCompiledShaderGroup(shaderGroup); return false);
+		}
+		if (!addAttrib(shaderGroup, "aDepth", 0, offsetof(PlaneVertex, z), GX2_ATTRIB_FORMAT_FLOAT_32))
+		{
+			RMX_ERROR("GX2Drawer: failed to initialize " << name << " depth", freeCompiledShaderGroup(shaderGroup); return false);
+		}
+		if (!addAttrib(shaderGroup, "aLocalOffset", 0, offsetof(PlaneVertex, localX), GX2_ATTRIB_FORMAT_FLOAT_32_32))
+		{
+			RMX_ERROR("GX2Drawer: failed to initialize " << name << " local offset", freeCompiledShaderGroup(shaderGroup); return false);
+		}
+		if (!makeFetchShader(shaderGroup))
+		{
+			RMX_ERROR("GX2Drawer: failed to initialize " << name << " fetch shader", freeCompiledShaderGroup(shaderGroup); return false);
+		}
+
+		samplerLocations.fill(UINT32_MAX);
+		samplerLocations[0] = getSamplerLocation(shaderGroup, "uPlaneDataTexture");
+		if (samplerLocations[0] == UINT32_MAX && nullptr != shaderGroup.pixelShader && shaderGroup.pixelShader->samplerVarCount >= 1)
+		{
+			samplerLocations[0] = shaderGroup.pixelShader->samplerVars[0].location;
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				RMX_LOG_INFO("GX2Drawer: " << name << " sampler name unavailable; using declaration-order location");
+		}
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+			RMX_LOG_INFO("GX2Drawer: " << name << " sampler location data=" << samplerLocations[0]);
+		configUniforms[0] = getPixelUniformSlot(shaderGroup, "uConfig0");
+		configUniforms[1] = getPixelUniformSlot(shaderGroup, "uConfig1");
+		configUniforms[2] = getPixelUniformSlot(shaderGroup, "uConfig2");
+		configUniforms[3] = getPixelUniformSlot(shaderGroup, "uConfig3");
+		uniformBlockLocation = UINT32_MAX;
+		uniformBlockSize = 0;
+		uint32 planeUniformBlockIndex = 0;
+		if (getPixelUniformBlockIndex(shaderGroup, "PlaneUniforms", planeUniformBlockIndex)
+			&& nullptr != shaderGroup.pixelShader
+			&& planeUniformBlockIndex < shaderGroup.pixelShader->uniformBlockCount)
+		{
+			const GX2UniformBlock& block = shaderGroup.pixelShader->uniformBlocks[planeUniformBlockIndex];
+			uniformBlockLocation = block.offset;
+			uniformBlockSize = std::max<uint32>(block.size, 64);
+			configUniforms[0].offset = 0;
+			configUniforms[0].block = (int32)planeUniformBlockIndex;
+			configUniforms[1].offset = 16;
+			configUniforms[1].block = (int32)planeUniformBlockIndex;
+			configUniforms[2].offset = 32;
+			configUniforms[2].block = (int32)planeUniformBlockIndex;
+			configUniforms[3].offset = 48;
+			configUniforms[3].block = (int32)planeUniformBlockIndex;
+		}
 		bool missingNamedUniform = false;
-		for (const PixelUniformSlot& uniform : mPlaneConfigUniforms)
+		for (const PixelUniformSlot& uniform : configUniforms)
 		{
 			missingNamedUniform = missingNamedUniform || uniform.offset == UINT32_MAX;
 		}
-		if (missingNamedUniform && nullptr != mPlaneShaderGroup.pixelShader && mPlaneShaderGroup.pixelShader->uniformVarCount >= 4)
+		if (missingNamedUniform && nullptr != shaderGroup.pixelShader && shaderGroup.pixelShader->uniformVarCount >= 4)
 		{
 			for (uint32 index = 0; index < 4; ++index)
 			{
-				const GX2UniformVar& uniform = mPlaneShaderGroup.pixelShader->uniformVars[index];
-				mPlaneConfigUniforms[index].offset = uniform.offset;
-				mPlaneConfigUniforms[index].block = uniform.block;
+				const GX2UniformVar& uniform = shaderGroup.pixelShader->uniformVars[index];
+				configUniforms[index].offset = uniform.offset;
+				configUniforms[index].block = uniform.block;
 			}
-			RMX_LOG_INFO("GX2Drawer: plane uniform names unavailable; using declaration-order locations");
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				RMX_LOG_INFO("GX2Drawer: " << name << " uniform names unavailable; using declaration-order locations");
 		}
-		if (nullptr != mPlaneShaderGroup.pixelShader)
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
 		{
-			for (uint32 i = 0; i < mPlaneShaderGroup.pixelShader->uniformVarCount; ++i)
+			if (nullptr != shaderGroup.pixelShader)
 			{
-				const GX2UniformVar& uniform = mPlaneShaderGroup.pixelShader->uniformVars[i];
-				RMX_LOG_INFO("GX2Drawer: plane uniform[" << i << "] name="
-					<< (nullptr != uniform.name ? uniform.name : "(null)")
-					<< " offset=" << uniform.offset
-					<< " block=" << uniform.block);
-			}
-			for (uint32 i = 0; i < mPlaneShaderGroup.pixelShader->samplerVarCount; ++i)
-			{
-				const GX2SamplerVar& sampler = mPlaneShaderGroup.pixelShader->samplerVars[i];
-				RMX_LOG_INFO("GX2Drawer: plane sampler[" << i << "] name="
-					<< (nullptr != sampler.name ? sampler.name : "(null)")
-					<< " location=" << sampler.location);
+				for (uint32 i = 0; i < shaderGroup.pixelShader->uniformBlockCount; ++i)
+				{
+					const GX2UniformBlock& block = shaderGroup.pixelShader->uniformBlocks[i];
+					RMX_LOG_INFO("GX2Drawer: " << name << " uniform block[" << i << "] name="
+						<< (nullptr != block.name ? block.name : "(null)")
+						<< " location=" << block.offset
+						<< " size=" << block.size);
+				}
+				for (uint32 i = 0; i < shaderGroup.pixelShader->uniformVarCount; ++i)
+				{
+					const GX2UniformVar& uniform = shaderGroup.pixelShader->uniformVars[i];
+					RMX_LOG_INFO("GX2Drawer: " << name << " uniform[" << i << "] name="
+						<< (nullptr != uniform.name ? uniform.name : "(null)")
+						<< " offset=" << uniform.offset
+						<< " block=" << uniform.block);
+				}
+				for (uint32 i = 0; i < shaderGroup.pixelShader->samplerVarCount; ++i)
+				{
+					const GX2SamplerVar& sampler = shaderGroup.pixelShader->samplerVars[i];
+					RMX_LOG_INFO("GX2Drawer: " << name << " sampler[" << i << "] name="
+						<< (nullptr != sampler.name ? sampler.name : "(null)")
+						<< " location=" << sampler.location);
+				}
 			}
 		}
-		RMX_LOG_INFO("GX2Drawer: plane uniform locations config0=" << mPlaneConfigUniforms[0].offset
-			<< " block0=" << mPlaneConfigUniforms[0].block
-			<< " config1=" << mPlaneConfigUniforms[1].offset
-			<< " block1=" << mPlaneConfigUniforms[1].block
-			<< " config2=" << mPlaneConfigUniforms[2].offset
-			<< " block2=" << mPlaneConfigUniforms[2].block
-			<< " config3=" << mPlaneConfigUniforms[3].offset
-			<< " block3=" << mPlaneConfigUniforms[3].block);
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			RMX_LOG_INFO("GX2Drawer: " << name << " uniform locations config0=" << configUniforms[0].offset
+				<< " block0=" << configUniforms[0].block
+				<< " config1=" << configUniforms[1].offset
+				<< " block1=" << configUniforms[1].block
+				<< " config2=" << configUniforms[2].offset
+				<< " block2=" << configUniforms[2].block
+				<< " config3=" << configUniforms[3].offset
+				<< " block3=" << configUniforms[3].block
+				<< " uniformBlockLocation=" << uniformBlockLocation
+				<< " uniformBlockSize=" << uniformBlockSize);
+		}
+		return true;
+	}
+
+	bool initializePlaneShader()
+	{
+		if (!initializePlaneShaderProgram(mPlaneShaderGroup, mPlaneSamplerLocations, mPlaneConfigUniforms, mPlaneUniformBlockLocation, mPlaneUniformBlockSize, "plane", PLANE_PS))
+			return false;
 		mPlaneShaderReady = true;
-		RMX_LOG_INFO("GX2Drawer: plane shader ready");
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+			RMX_LOG_INFO("GX2Drawer: plane shader ready sampler=" << mPlaneSamplerLocations[0]);
+
+		if (initializePlaneShaderProgram(mPlaneSimpleShaderGroup, mPlaneSimpleSamplerLocations, mPlaneSimpleConfigUniforms, mPlaneSimpleUniformBlockLocation, mPlaneSimpleUniformBlockSize, "plane_simple", PLANE_PS, "#define GX2_PLANE_SIMPLE_ONLY 1\n#define GX2_PLANE_TEXEL_FETCH 1\n"))
+		{
+			mPlaneSimpleShaderReady = true;
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				RMX_LOG_INFO("GX2Drawer: simple plane shader ready sampler=" << mPlaneSimpleSamplerLocations[0]);
+		}
+		else
+		{
+			RMX_LOG_WARNING("GX2Drawer: simple plane shader unavailable; using general plane shader");
+			freeCompiledShaderGroup(mPlaneSimpleShaderGroup);
+		}
+
+		if (initializePlaneShaderProgram(mPlaneHScrollShaderGroup, mPlaneHScrollSamplerLocations, mPlaneHScrollConfigUniforms, mPlaneHScrollUniformBlockLocation, mPlaneHScrollUniformBlockSize, "plane_hscroll", PLANE_PS, "#define GX2_PLANE_HSCROLL_ONLY 1\n#define GX2_PLANE_TEXEL_FETCH 1\n"))
+		{
+			mPlaneHScrollShaderReady = true;
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				RMX_LOG_INFO("GX2Drawer: hscroll plane shader ready sampler=" << mPlaneHScrollSamplerLocations[0]);
+		}
+		else
+		{
+			RMX_LOG_WARNING("GX2Drawer: hscroll plane shader unavailable; using general plane shader");
+			freeCompiledShaderGroup(mPlaneHScrollShaderGroup);
+		}
 		return true;
 	}
 
@@ -1867,6 +2740,10 @@ public:
 		{
 			RMX_ERROR("GX2Drawer: failed to initialize VDP sprite position", freeCompiledShaderGroup(mVdpSpriteShaderGroup); return false);
 		}
+		if (!addAttrib(mVdpSpriteShaderGroup, "aDepth", 0, offsetof(PlaneVertex, z), GX2_ATTRIB_FORMAT_FLOAT_32))
+		{
+			RMX_ERROR("GX2Drawer: failed to initialize VDP sprite depth", freeCompiledShaderGroup(mVdpSpriteShaderGroup); return false);
+		}
 		if (!addAttrib(mVdpSpriteShaderGroup, "aLocalOffset", 0, offsetof(PlaneVertex, localX), GX2_ATTRIB_FORMAT_FLOAT_32_32))
 		{
 			RMX_ERROR("GX2Drawer: failed to initialize VDP sprite local offset", freeCompiledShaderGroup(mVdpSpriteShaderGroup); return false);
@@ -1876,22 +2753,45 @@ public:
 			RMX_ERROR("GX2Drawer: failed to initialize VDP sprite fetch shader", freeCompiledShaderGroup(mVdpSpriteShaderGroup); return false);
 		}
 
+		mVdpSpriteSamplerLocations.fill(UINT32_MAX);
 		mVdpSpriteSamplerLocations[0] = getSamplerLocation(mVdpSpriteShaderGroup, "uPlaneDataTexture");
 		if (mVdpSpriteSamplerLocations[0] == UINT32_MAX && nullptr != mVdpSpriteShaderGroup.pixelShader && mVdpSpriteShaderGroup.pixelShader->samplerVarCount >= 1)
 		{
 			mVdpSpriteSamplerLocations[0] = mVdpSpriteShaderGroup.pixelShader->samplerVars[0].location;
-			RMX_LOG_INFO("GX2Drawer: VDP sprite sampler name unavailable; using declaration-order location");
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				RMX_LOG_INFO("GX2Drawer: VDP sprite sampler name unavailable; using declaration-order location");
 		}
 		mVdpSpriteUniforms[0] = getPixelUniformSlot(mVdpSpriteShaderGroup, "uConfig0");
 		mVdpSpriteUniforms[1] = getPixelUniformSlot(mVdpSpriteShaderGroup, "uConfig1");
 		mVdpSpriteUniforms[2] = getPixelUniformSlot(mVdpSpriteShaderGroup, "uTintColor");
 		mVdpSpriteUniforms[3] = getPixelUniformSlot(mVdpSpriteShaderGroup, "uAddedColor");
+		mVdpSpriteUniformBlockLocation = UINT32_MAX;
+		mVdpSpriteUniformBlockSize = 0;
+		uint32 vdpUniformBlockIndex = 0;
+		if (getPixelUniformBlockIndex(mVdpSpriteShaderGroup, "VdpSpriteUniforms", vdpUniformBlockIndex)
+			&& nullptr != mVdpSpriteShaderGroup.pixelShader
+			&& vdpUniformBlockIndex < mVdpSpriteShaderGroup.pixelShader->uniformBlockCount)
+		{
+			const GX2UniformBlock& block = mVdpSpriteShaderGroup.pixelShader->uniformBlocks[vdpUniformBlockIndex];
+			mVdpSpriteUniformBlockLocation = block.offset;
+			mVdpSpriteUniformBlockSize = std::max<uint32>(block.size, 64);
+			for (uint32 index = 0; index < 4; ++index)
+			{
+				mVdpSpriteUniforms[index].offset = index * 16;
+				mVdpSpriteUniforms[index].block = (int32)vdpUniformBlockIndex;
+			}
+		}
 		mVdpSpriteShaderReady = true;
-		RMX_LOG_INFO("GX2Drawer: VDP sprite shader ready sampler=" << mVdpSpriteSamplerLocations[0]
-			<< " config0=" << mVdpSpriteUniforms[0].offset
-			<< " config1=" << mVdpSpriteUniforms[1].offset
-			<< " tint=" << mVdpSpriteUniforms[2].offset
-			<< " added=" << mVdpSpriteUniforms[3].offset);
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			RMX_LOG_INFO("GX2Drawer: VDP sprite shader ready sampler=" << mVdpSpriteSamplerLocations[0]
+				<< " config0=" << mVdpSpriteUniforms[0].offset
+				<< " config1=" << mVdpSpriteUniforms[1].offset
+				<< " tint=" << mVdpSpriteUniforms[2].offset
+				<< " added=" << mVdpSpriteUniforms[3].offset
+				<< " uniformBlockLocation=" << mVdpSpriteUniformBlockLocation
+				<< " uniformBlockSize=" << mVdpSpriteUniformBlockSize);
+		}
 		return true;
 	}
 
@@ -1911,7 +2811,7 @@ public:
 		{
 			RMX_ERROR("GX2Drawer: failed to initialize VDP batch config0", freeCompiledShaderGroup(mVdpSpriteBatchShaderGroup); return false);
 		}
-		if (!addAttrib(mVdpSpriteBatchShaderGroup, "aConfig1", 0, offsetof(VdpSpriteBatchVertex, firstPattern), GX2_ATTRIB_FORMAT_FLOAT_32_32))
+		if (!addAttrib(mVdpSpriteBatchShaderGroup, "aConfig1", 0, offsetof(VdpSpriteBatchVertex, firstPattern), GX2_ATTRIB_FORMAT_FLOAT_32_32_32_32))
 		{
 			RMX_ERROR("GX2Drawer: failed to initialize VDP batch config1", freeCompiledShaderGroup(mVdpSpriteBatchShaderGroup); return false);
 		}
@@ -1928,14 +2828,17 @@ public:
 			RMX_ERROR("GX2Drawer: failed to initialize VDP batch fetch shader", freeCompiledShaderGroup(mVdpSpriteBatchShaderGroup); return false);
 		}
 
+		mVdpSpriteBatchSamplerLocations.fill(UINT32_MAX);
 		mVdpSpriteBatchSamplerLocations[0] = getSamplerLocation(mVdpSpriteBatchShaderGroup, "uPlaneDataTexture");
 		if (mVdpSpriteBatchSamplerLocations[0] == UINT32_MAX && nullptr != mVdpSpriteBatchShaderGroup.pixelShader && mVdpSpriteBatchShaderGroup.pixelShader->samplerVarCount >= 1)
 		{
 			mVdpSpriteBatchSamplerLocations[0] = mVdpSpriteBatchShaderGroup.pixelShader->samplerVars[0].location;
-			RMX_LOG_INFO("GX2Drawer: VDP batch sampler name unavailable; using declaration-order location");
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				RMX_LOG_INFO("GX2Drawer: VDP batch sampler name unavailable; using declaration-order location");
 		}
 		mVdpSpriteBatchShaderReady = true;
-		RMX_LOG_INFO("GX2Drawer: VDP sprite batch shader ready sampler=" << mVdpSpriteBatchSamplerLocations[0]);
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+			RMX_LOG_INFO("GX2Drawer: VDP sprite batch shader ready sampler=" << mVdpSpriteBatchSamplerLocations[0]);
 		return true;
 	}
 
@@ -1946,6 +2849,10 @@ public:
 		if (!addAttrib(mPaletteSpriteShaderGroup, "aPosition", 0, offsetof(PaletteSpriteVertex, x), GX2_ATTRIB_FORMAT_FLOAT_32_32))
 		{
 			RMX_ERROR("GX2Drawer: failed to initialize palette sprite position", freeCompiledShaderGroup(mPaletteSpriteShaderGroup); return false);
+		}
+		if (!addAttrib(mPaletteSpriteShaderGroup, "aDepth", 0, offsetof(PaletteSpriteVertex, depth), GX2_ATTRIB_FORMAT_FLOAT_32))
+		{
+			RMX_ERROR("GX2Drawer: failed to initialize palette sprite depth", freeCompiledShaderGroup(mPaletteSpriteShaderGroup); return false);
 		}
 		if (!addAttrib(mPaletteSpriteShaderGroup, "aLocalOffset", 0, offsetof(PaletteSpriteVertex, localX), GX2_ATTRIB_FORMAT_FLOAT_32_32))
 		{
@@ -1965,18 +2872,40 @@ public:
 			&& nullptr != mPaletteSpriteShaderGroup.pixelShader && mPaletteSpriteShaderGroup.pixelShader->samplerVarCount >= 1)
 		{
 			mPaletteSpriteSamplerLocations[0] = mPaletteSpriteShaderGroup.pixelShader->samplerVars[0].location;
-			RMX_LOG_INFO("GX2Drawer: palette sprite sampler names unavailable; using declaration-order locations");
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+				RMX_LOG_INFO("GX2Drawer: palette sprite sampler names unavailable; using declaration-order locations");
 		}
 		mPaletteSpriteUniforms[0] = getPixelUniformSlot(mPaletteSpriteShaderGroup, "uConfig0");
 		mPaletteSpriteUniforms[1] = getPixelUniformSlot(mPaletteSpriteShaderGroup, "uConfig1");
 		mPaletteSpriteUniforms[2] = getPixelUniformSlot(mPaletteSpriteShaderGroup, "uTintColor");
 		mPaletteSpriteUniforms[3] = getPixelUniformSlot(mPaletteSpriteShaderGroup, "uAddedColor");
+		mPaletteSpriteUniformBlockLocation = UINT32_MAX;
+		mPaletteSpriteUniformBlockSize = 0;
+		uint32 paletteUniformBlockIndex = 0;
+		if (getPixelUniformBlockIndex(mPaletteSpriteShaderGroup, "PaletteSpriteUniforms", paletteUniformBlockIndex)
+			&& nullptr != mPaletteSpriteShaderGroup.pixelShader
+			&& paletteUniformBlockIndex < mPaletteSpriteShaderGroup.pixelShader->uniformBlockCount)
+		{
+			const GX2UniformBlock& block = mPaletteSpriteShaderGroup.pixelShader->uniformBlocks[paletteUniformBlockIndex];
+			mPaletteSpriteUniformBlockLocation = block.offset;
+			mPaletteSpriteUniformBlockSize = std::max<uint32>(block.size, 64);
+			for (uint32 index = 0; index < 4; ++index)
+			{
+				mPaletteSpriteUniforms[index].offset = index * 16;
+				mPaletteSpriteUniforms[index].block = (int32)paletteUniformBlockIndex;
+			}
+		}
 		mPaletteSpriteShaderReady = true;
-		RMX_LOG_INFO("GX2Drawer: palette sprite shader ready dataSampler=" << mPaletteSpriteSamplerLocations[0]
-			<< " config0=" << mPaletteSpriteUniforms[0].offset
-			<< " config1=" << mPaletteSpriteUniforms[1].offset
-			<< " tint=" << mPaletteSpriteUniforms[2].offset
-			<< " added=" << mPaletteSpriteUniforms[3].offset);
+		if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+		{
+			RMX_LOG_INFO("GX2Drawer: palette sprite shader ready dataSampler=" << mPaletteSpriteSamplerLocations[0]
+				<< " config0=" << mPaletteSpriteUniforms[0].offset
+				<< " config1=" << mPaletteSpriteUniforms[1].offset
+				<< " tint=" << mPaletteSpriteUniforms[2].offset
+				<< " added=" << mPaletteSpriteUniforms[3].offset
+				<< " uniformBlockLocation=" << mPaletteSpriteUniformBlockLocation
+				<< " uniformBlockSize=" << mPaletteSpriteUniformBlockSize);
+		}
 		return true;
 	}
 
@@ -2000,12 +2929,15 @@ public:
 		if (nullptr != mPixelUniformBlock)
 		{
 			memset(mPixelUniformBlock, 0, mPixelUniformBlockSize);
-			RMX_LOG_INFO("GX2Drawer: pixel uniform block location=" << mPixelUniformBlockLocation
-				<< " size=" << mPixelUniformBlockSize
-				<< " tintBlock=" << mTintUniform.block
-				<< " tintOffset=" << mTintUniform.offset
-				<< " addedBlock=" << mAddedUniform.block
-				<< " addedOffset=" << mAddedUniform.offset);
+			if constexpr (ENABLE_GX2_STARTUP_TELEMETRY_LOGS)
+			{
+				RMX_LOG_INFO("GX2Drawer: pixel uniform block location=" << mPixelUniformBlockLocation
+					<< " size=" << mPixelUniformBlockSize
+					<< " tintBlock=" << mTintUniform.block
+					<< " tintOffset=" << mTintUniform.offset
+					<< " addedBlock=" << mAddedUniform.block
+					<< " addedOffset=" << mAddedUniform.offset);
+			}
 		}
 	}
 
@@ -2077,13 +3009,15 @@ public:
 	VertexType* allocateDynamicVertices(uint32 count)
 	{
 		const size_t bytes = (size_t)count * sizeof(VertexType);
-		size_t alignedOffset = (mDynamicVertexWriteOffset + 0x3f) & ~(size_t)0x3f;
-		if (!ensureDynamicVertexBuffer(alignedOffset + bytes))
+		if (!ensureDynamicVertexBuffer(bytes))
 			return nullptr;
+		size_t alignedOffset = (mDynamicVertexWriteOffset + 0x3f) & ~(size_t)0x3f;
 		if (alignedOffset + bytes > mDynamicVertexCapacity)
 		{
+			GX2Flush();
 			GX2DrawDone();
 			alignedOffset = 0;
+			mDynamicVertexWriteOffset = 0;
 		}
 		VertexType* vertices = reinterpret_cast<VertexType*>(mDynamicVertexBuffer + alignedOffset);
 		mDynamicVertexWriteOffset = alignedOffset + bytes;
@@ -2115,31 +3049,48 @@ public:
 		return mPixelToViewSpaceTransform.y + y * mPixelToViewSpaceTransform.w;
 	}
 
-	void fillRectVertices(PresentVertex* vertices, const Recti& rect, const Vec2f& uv0, const Vec2f& uv1) const
+	void fillRectVertices(PresentVertex* vertices, const Recti& rect, const Vec2f& uv0, const Vec2f& uv1, float depth = 0.0f) const
 	{
 		const float x0 = toClipX((float)rect.x);
 		const float x1 = toClipX((float)(rect.x + rect.width));
 		const float y0 = toClipY((float)rect.y);
 		const float y1 = toClipY((float)(rect.y + rect.height));
 
-		vertices[0] = makePresentVertex(x0, y0, uv0.x, uv0.y);
-		vertices[1] = makePresentVertex(x0, y1, uv0.x, uv1.y);
-		vertices[2] = makePresentVertex(x1, y1, uv1.x, uv1.y);
-		vertices[3] = makePresentVertex(x1, y1, uv1.x, uv1.y);
-		vertices[4] = makePresentVertex(x1, y0, uv1.x, uv0.y);
-		vertices[5] = makePresentVertex(x0, y0, uv0.x, uv0.y);
+		vertices[0] = makePresentVertex(x0, y0, uv0.x, uv0.y, depth);
+		vertices[1] = makePresentVertex(x0, y1, uv0.x, uv1.y, depth);
+		vertices[2] = makePresentVertex(x1, y1, uv1.x, uv1.y, depth);
+		vertices[3] = makePresentVertex(x1, y1, uv1.x, uv1.y, depth);
+		vertices[4] = makePresentVertex(x1, y0, uv1.x, uv0.y, depth);
+		vertices[5] = makePresentVertex(x0, y0, uv0.x, uv0.y, depth);
 	}
 
-	void fillColorRectVertices(ColorVertex* vertices, const Recti& rect, const Color& color) const
+	void fillTargetRectVertices(PresentVertex* vertices, const Recti& rect, uint32 targetWidth, uint32 targetHeight) const
+	{
+		const float invWidth = 1.0f / (float)std::max<uint32>(1, targetWidth);
+		const float invHeight = 1.0f / (float)std::max<uint32>(1, targetHeight);
+		const float x0 = -1.0f + 2.0f * (float)rect.x * invWidth;
+		const float x1 = -1.0f + 2.0f * (float)(rect.x + rect.width) * invWidth;
+		const float y0 = 1.0f - 2.0f * (float)rect.y * invHeight;
+		const float y1 = 1.0f - 2.0f * (float)(rect.y + rect.height) * invHeight;
+
+		vertices[0] = makePresentVertex(x0, y1, 0.0f, 1.0f);
+		vertices[1] = makePresentVertex(x1, y1, 1.0f, 1.0f);
+		vertices[2] = makePresentVertex(x0, y0, 0.0f, 0.0f);
+		vertices[3] = makePresentVertex(x0, y0, 0.0f, 0.0f);
+		vertices[4] = makePresentVertex(x1, y1, 1.0f, 1.0f);
+		vertices[5] = makePresentVertex(x1, y0, 1.0f, 0.0f);
+	}
+
+	void fillColorRectVertices(ColorVertex* vertices, const Recti& rect, const Color& color, float depth = 0.5f) const
 	{
 		const float x0 = toClipX((float)rect.x);
 		const float x1 = toClipX((float)(rect.x + rect.width));
 		const float y0 = toClipY((float)rect.y);
 		const float y1 = toClipY((float)(rect.y + rect.height));
-		const ColorVertex v0 = { x0, y0, color.r, color.g, color.b, color.a };
-		const ColorVertex v1 = { x0, y1, color.r, color.g, color.b, color.a };
-		const ColorVertex v2 = { x1, y1, color.r, color.g, color.b, color.a };
-		const ColorVertex v3 = { x1, y0, color.r, color.g, color.b, color.a };
+		const ColorVertex v0 = { x0, y0, depth, color.r, color.g, color.b, color.a };
+		const ColorVertex v1 = { x0, y1, depth, color.r, color.g, color.b, color.a };
+		const ColorVertex v2 = { x1, y1, depth, color.r, color.g, color.b, color.a };
+		const ColorVertex v3 = { x1, y0, depth, color.r, color.g, color.b, color.a };
 		vertices[0] = v0;
 		vertices[1] = v1;
 		vertices[2] = v2;
@@ -2148,7 +3099,7 @@ public:
 		vertices[5] = v0;
 	}
 
-	void fillPlaneVertices(PlaneVertex* vertices, const Recti& rect) const
+	void fillPlaneVertices(PlaneVertex* vertices, const Recti& rect, float depth = 0.0f) const
 	{
 		const float x0 = toClipX((float)rect.x);
 		const float x1 = toClipX((float)(rect.x + rect.width));
@@ -2159,15 +3110,15 @@ public:
 		const float ly0 = (float)rect.y;
 		const float ly1 = (float)(rect.y + rect.height);
 
-		vertices[0] = { x0, y0, lx0, ly0 };
-		vertices[1] = { x0, y1, lx0, ly1 };
-		vertices[2] = { x1, y1, lx1, ly1 };
-		vertices[3] = { x1, y1, lx1, ly1 };
-		vertices[4] = { x1, y0, lx1, ly0 };
-		vertices[5] = { x0, y0, lx0, ly0 };
+		vertices[0] = { x0, y0, depth, lx0, ly0 };
+		vertices[1] = { x0, y1, depth, lx0, ly1 };
+		vertices[2] = { x1, y1, depth, lx1, ly1 };
+		vertices[3] = { x1, y1, depth, lx1, ly1 };
+		vertices[4] = { x1, y0, depth, lx1, ly0 };
+		vertices[5] = { x0, y0, depth, lx0, ly0 };
 	}
 
-	void fillPaletteSpriteRectVertices(PaletteSpriteVertex* vertices, const Recti& rect) const
+	void fillPaletteSpriteRectVertices(PaletteSpriteVertex* vertices, const Recti& rect, float depth = 0.0f) const
 	{
 		const float x0 = toClipX((float)rect.x);
 		const float x1 = toClipX((float)(rect.x + rect.width));
@@ -2178,15 +3129,15 @@ public:
 		const float sy0 = (float)rect.y;
 		const float sy1 = (float)(rect.y + rect.height);
 
-		vertices[0] = { x0, y0, sx0, sy0, sx0, sy0 };
-		vertices[1] = { x0, y1, sx0, sy1, sx0, sy1 };
-		vertices[2] = { x1, y1, sx1, sy1, sx1, sy1 };
-		vertices[3] = { x1, y1, sx1, sy1, sx1, sy1 };
-		vertices[4] = { x1, y0, sx1, sy0, sx1, sy0 };
-		vertices[5] = { x0, y0, sx0, sy0, sx0, sy0 };
+		vertices[0] = { x0, y0, depth, sx0, sy0, sx0, sy0 };
+		vertices[1] = { x0, y1, depth, sx0, sy1, sx0, sy1 };
+		vertices[2] = { x1, y1, depth, sx1, sy1, sx1, sy1 };
+		vertices[3] = { x1, y1, depth, sx1, sy1, sx1, sy1 };
+		vertices[4] = { x1, y0, depth, sx1, sy0, sx1, sy0 };
+		vertices[5] = { x0, y0, depth, sx0, sy0, sx0, sy0 };
 	}
 
-	void fillPaletteSpriteMeshVertices(PaletteSpriteVertex* vertices, const std::vector<DrawerMeshVertex>& triangles) const
+	void fillPaletteSpriteMeshVertices(PaletteSpriteVertex* vertices, const std::vector<DrawerMeshVertex>& triangles, float depth = 0.0f) const
 	{
 		for (size_t i = 0; i < triangles.size(); ++i)
 		{
@@ -2195,6 +3146,7 @@ public:
 			{
 				toClipX(src.mPosition.x),
 				toClipY(src.mPosition.y),
+				depth,
 				src.mTexcoords.x,
 				src.mTexcoords.y,
 				src.mPosition.x,
@@ -2205,12 +3157,21 @@ public:
 
 	void setupViewport(const Recti& viewport, bool windowTarget)
 	{
-		(void)windowTarget;
 		mCurrentViewport = viewport;
-		mPixelToViewSpaceTransform.x = -1.0f;
-		mPixelToViewSpaceTransform.y = 1.0f;
-		mPixelToViewSpaceTransform.z = 2.0f / (float)std::max(1, viewport.width);
-		mPixelToViewSpaceTransform.w = -2.0f / (float)std::max(1, viewport.height);
+		const int targetWidth = (nullptr != mCurrentColorBuffer) ? (int)mCurrentColorBuffer->surface.width : viewport.width;
+		const int targetHeight = (nullptr != mCurrentColorBuffer) ? (int)mCurrentColorBuffer->surface.height : viewport.height;
+		mCurrentViewportTargetRect = Recti(0, 0, targetWidth, targetHeight);
+		if (windowTarget && viewport.width > 0 && viewport.height > 0)
+		{
+			mCurrentViewportTargetRect = getIntegerLetterBoxRect(viewport.getSize(), Vec2i(targetWidth, targetHeight));
+		}
+
+		const float scaleX = (float)mCurrentViewportTargetRect.width / (float)std::max(1, viewport.width);
+		const float scaleY = (float)mCurrentViewportTargetRect.height / (float)std::max(1, viewport.height);
+		mPixelToViewSpaceTransform.x = -1.0f + 2.0f * ((float)mCurrentViewportTargetRect.x - (float)viewport.x * scaleX) / (float)std::max(1, targetWidth);
+		mPixelToViewSpaceTransform.y = 1.0f - 2.0f * ((float)mCurrentViewportTargetRect.y - (float)viewport.y * scaleY) / (float)std::max(1, targetHeight);
+		mPixelToViewSpaceTransform.z = 2.0f * scaleX / (float)std::max(1, targetWidth);
+		mPixelToViewSpaceTransform.w = -2.0f * scaleY / (float)std::max(1, targetHeight);
 	}
 
 	void applyScissor()
@@ -2230,12 +3191,12 @@ public:
 			return;
 		}
 
-		const float scaleX = (float)mCurrentColorBuffer->surface.width / (float)std::max(1, mCurrentViewport.width);
-		const float scaleY = (float)mCurrentColorBuffer->surface.height / (float)std::max(1, mCurrentViewport.height);
-		const int x0 = roundToInt((float)(scissorRect.x - mCurrentViewport.x) * scaleX);
-		const int y0 = roundToInt((float)(scissorRect.y - mCurrentViewport.y) * scaleY);
-		const int x1 = roundToInt((float)(scissorRect.x + scissorRect.width - mCurrentViewport.x) * scaleX);
-		const int y1 = roundToInt((float)(scissorRect.y + scissorRect.height - mCurrentViewport.y) * scaleY);
+		const float scaleX = (float)mCurrentViewportTargetRect.width / (float)std::max(1, mCurrentViewport.width);
+		const float scaleY = (float)mCurrentViewportTargetRect.height / (float)std::max(1, mCurrentViewport.height);
+		const int x0 = mCurrentViewportTargetRect.x + roundToInt((float)(scissorRect.x - mCurrentViewport.x) * scaleX);
+		const int y0 = mCurrentViewportTargetRect.y + roundToInt((float)(scissorRect.y - mCurrentViewport.y) * scaleY);
+		const int x1 = mCurrentViewportTargetRect.x + roundToInt((float)(scissorRect.x + scissorRect.width - mCurrentViewport.x) * scaleX);
+		const int y1 = mCurrentViewportTargetRect.y + roundToInt((float)(scissorRect.y + scissorRect.height - mCurrentViewport.y) * scaleY);
 		const int targetWidth = (int)mCurrentColorBuffer->surface.width;
 		const int targetHeight = (int)mCurrentColorBuffer->surface.height;
 		const int clippedX0 = clamp(x0, 0, targetWidth);
@@ -2249,6 +3210,81 @@ public:
 	{
 		mInvalidScissorRegion = false;
 		GX2SetScissor(0, 0, width, height);
+	}
+
+	void setTargetChannelMask(GX2ChannelMask mask)
+	{
+		GX2SetTargetChannelMasks(
+			mask,
+			(GX2ChannelMask)0,
+			(GX2ChannelMask)0,
+			(GX2ChannelMask)0,
+			(GX2ChannelMask)0,
+			(GX2ChannelMask)0,
+			(GX2ChannelMask)0,
+			(GX2ChannelMask)0);
+	}
+
+	void applyDepthDisabled()
+	{
+		GX2SetDepthOnlyControl(FALSE, FALSE, GX2_COMPARE_FUNC_ALWAYS);
+	}
+
+	bool drawDepthClearRect()
+	{
+		if (nullptr == mCurrentColorBuffer || nullptr == mCurrentDepthBuffer || !mColorShaderReady)
+			return false;
+
+		const uint32 width = mCurrentColorBuffer->surface.width;
+		const uint32 height = mCurrentColorBuffer->surface.height;
+		ColorVertex* gpuVertices = allocateColorVertices(PRESENT_VERTEX_COUNT);
+		if (nullptr == gpuVertices)
+			return false;
+
+		fillColorRectVertices(gpuVertices, Recti(0, 0, (int)width, (int)height), Color::TRANSPARENT, 0.0f);
+		const uint32 vertexDataSize = sizeof(ColorVertex) * PRESENT_VERTEX_COUNT;
+		DCFlushRange(gpuVertices, vertexDataSize);
+		GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, gpuVertices, vertexDataSize);
+
+		bindColorState(width, height);
+		GX2SetDepthBuffer(mCurrentDepthBuffer);
+		setTargetChannelMask((GX2ChannelMask)0);
+		GX2SetDepthOnlyControl(TRUE, TRUE, GX2_COMPARE_FUNC_ALWAYS);
+		applyFullTargetScissor(width, height);
+		GX2SetAttribBuffer(0, vertexDataSize, sizeof(ColorVertex), gpuVertices);
+		GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, PRESENT_VERTEX_COUNT, 0, 1);
+
+		setTargetChannelMask(GX2_CHANNEL_MASK_RGBA);
+		applyDepthDisabled();
+		applyScissor();
+		applyBlendMode();
+		return true;
+	}
+
+	void applyPriorityPlaneDepthWrite()
+	{
+		if constexpr (!USE_GX2_DEPTH_BUFFER)
+		{
+			applyDepthDisabled();
+			return;
+		}
+		if (mDepthActiveForTarget && bindDepthBufferForCurrentTarget())
+			GX2SetDepthOnlyControl(TRUE, TRUE, GX2_COMPARE_FUNC_ALWAYS);
+		else
+			applyDepthDisabled();
+	}
+
+	void applySpriteDepthTest()
+	{
+		if constexpr (!USE_GX2_DEPTH_BUFFER)
+		{
+			applyDepthDisabled();
+			return;
+		}
+		if (mDepthActiveForTarget && bindDepthBufferForCurrentTarget())
+			GX2SetDepthOnlyControl(TRUE, FALSE, GX2_COMPARE_FUNC_GEQUAL);
+		else
+			applyDepthDisabled();
 	}
 
 	void applyBlendMode()
@@ -2306,7 +3342,7 @@ public:
 			case BlendMode::ONE_BIT:
 			{
 				GX2SetAlphaTest(TRUE, GX2_COMPARE_FUNC_GREATER, 0.0f);
-				GX2SetColorControl(GX2_LOGIC_OP_COPY, GX2_BLEND_MASK_NONE, FALSE, TRUE);
+				GX2SetColorControl(GX2_LOGIC_OP_COPY, GX2_BLEND_MASK_ALL_TARGETS, FALSE, TRUE);
 				GX2SetBlendControl(GX2_RENDER_TARGET_0, GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ZERO, GX2_BLEND_COMBINE_MODE_ADD, GX2_DISABLE,
 					GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ZERO, GX2_BLEND_COMBINE_MODE_ADD);
 				break;
@@ -2332,11 +3368,13 @@ public:
 			GX2SetContextState(mNativeContext);
 		}
 		mCurrentColorBuffer = &colorBuffer;
+		mDepthActiveForTarget = false;
 		GX2SetColorBuffer(&colorBuffer, GX2_RENDER_TARGET_0);
 		GX2SetViewport(0.0f, 0.0f, (float)colorBuffer.surface.width, (float)colorBuffer.surface.height, 0.0f, 1.0f);
 		setupViewport(viewport, windowTarget);
 		mScissorStack.clear();
 		applyScissor();
+		applyDepthDisabled();
 		applyBlendMode();
 		return true;
 	}
@@ -2349,8 +3387,6 @@ public:
 			return true;
 
 		mFrameActive = true;
-		mDynamicVertexWriteOffset = 0;
-		mDynamicUniformWriteOffset = 0;
 		mCurrentBlendMode = BlendMode::OPAQUE;
 		mCurrentSamplingMode = SamplingMode::POINT;
 		mCurrentWrapMode = TextureWrapMode::CLAMP;
@@ -2359,19 +3395,30 @@ public:
 		mWindowTargetBound = false;
 		mWindowTargetCleared = false;
 		mCurrentColorBuffer = nullptr;
-		mScratchUploadPending = false;
+		mDepthActiveForTarget = false;
+		mScratchTextureCursor = 0;
+		for (ScratchTextureSlot& slot : mScratchTextures)
+		{
+			slot.mUsedThisFrame = false;
+		}
 		return true;
 	}
 
 	void finishFrame()
 	{
+		cleanupTextTextureCache();
 		mFrameActive = false;
 		mCurrentColorBuffer = nullptr;
 		mScissorStack.clear();
 		mInvalidScissorRegion = false;
 		mWindowTargetBound = false;
 		mWindowTargetCleared = false;
-		mScratchUploadPending = false;
+		mDepthActiveForTarget = false;
+		mScratchTextureCursor = 0;
+		for (ScratchTextureSlot& slot : mScratchTextures)
+		{
+			slot.mUsedThisFrame = false;
+		}
 	}
 
 	bool bindWindowTarget(const Recti& viewport)
@@ -2429,6 +3476,32 @@ public:
 		}
 	}
 
+	void writeUniformBlockVec4Bytes(uint8* uniformBlock, uint32 uniformBlockSize, const PixelUniformSlot& slot, const Vec4f& value)
+	{
+		if (nullptr == uniformBlock || slot.block < 0 || slot.offset + 16 > uniformBlockSize)
+			return;
+
+		const float data[4] = { value.x, value.y, value.z, value.w };
+		uint8* dst = uniformBlock + slot.offset;
+		for (int i = 0; i < 4; ++i)
+		{
+			uint32 bits;
+			memcpy(&bits, &data[i], sizeof(bits));
+			bits = toGpuLittleEndian32(bits);
+			memcpy(dst + i * sizeof(uint32), &bits, sizeof(bits));
+		}
+	}
+
+	void writeGpuFloat4(uint32* outData, const float* data)
+	{
+		for (int i = 0; i < 4; ++i)
+		{
+			uint32 bits;
+			memcpy(&bits, &data[i], sizeof(bits));
+			outData[i] = toGpuLittleEndian32(bits);
+		}
+	}
+
 	void setPixelUniformColor(const PixelUniformSlot& slot, const Color& color)
 	{
 		if (slot.offset == UINT32_MAX)
@@ -2436,7 +3509,9 @@ public:
 		if (slot.block >= 0)
 			return;
 		const float data[4] = { color.r, color.g, color.b, color.a };
-		GX2SetPixelUniformReg(slot.offset, 4, data);
+		uint32 gpuData[4];
+		writeGpuFloat4(gpuData, data);
+		GX2SetPixelUniformReg(slot.offset, 4, gpuData);
 	}
 
 	void setPixelUniformVec4(const PixelUniformSlot& slot, const Vec4f& value)
@@ -2444,7 +3519,9 @@ public:
 		if (slot.offset == UINT32_MAX || slot.block >= 0)
 			return;
 		const float data[4] = { value.x, value.y, value.z, value.w };
-		GX2SetPixelUniformReg(slot.offset, 4, data);
+		uint32 gpuData[4];
+		writeGpuFloat4(gpuData, data);
+		GX2SetPixelUniformReg(slot.offset, 4, gpuData);
 	}
 
 	bool ensureDynamicUniformBuffer(size_t requiredBytes)
@@ -2471,13 +3548,15 @@ public:
 		if (size == 0)
 			return nullptr;
 
-		size_t alignedOffset = (mDynamicUniformWriteOffset + (GX2_UNIFORM_BLOCK_ALIGNMENT - 1)) & ~(size_t)(GX2_UNIFORM_BLOCK_ALIGNMENT - 1);
-		if (!ensureDynamicUniformBuffer(alignedOffset + size))
+		if (!ensureDynamicUniformBuffer(size))
 			return nullptr;
+		size_t alignedOffset = (mDynamicUniformWriteOffset + (GX2_UNIFORM_BLOCK_ALIGNMENT - 1)) & ~(size_t)(GX2_UNIFORM_BLOCK_ALIGNMENT - 1);
 		if (alignedOffset + size > mDynamicUniformCapacity)
 		{
+			GX2Flush();
 			GX2DrawDone();
 			alignedOffset = 0;
+			mDynamicUniformWriteOffset = 0;
 		}
 		uint8* uniformBlock = mDynamicUniformBuffer + alignedOffset;
 		mDynamicUniformWriteOffset = alignedOffset + size;
@@ -2503,6 +3582,68 @@ public:
 		setPixelUniformColor(mAddedUniform, addedColor);
 	}
 
+	void setFourVec4PixelUniforms(PixelUniformSlot* slots, uint32 blockLocation, uint32 blockSize, const Vec4f& config0, const Vec4f& config1, const Vec4f& config2, const Vec4f& config3)
+	{
+		if (blockLocation != UINT32_MAX && blockSize >= 64)
+		{
+			uint8* uniformBlock = allocateUniformBlock(blockSize);
+			if (nullptr == uniformBlock)
+				return;
+			memset(uniformBlock, 0, blockSize);
+			writeUniformBlockVec4Bytes(uniformBlock, blockSize, slots[0], config0);
+			writeUniformBlockVec4Bytes(uniformBlock, blockSize, slots[1], config1);
+			writeUniformBlockVec4Bytes(uniformBlock, blockSize, slots[2], config2);
+			writeUniformBlockVec4Bytes(uniformBlock, blockSize, slots[3], config3);
+			GX2Invalidate((GX2InvalidateMode)(GX2_INVALIDATE_MODE_CPU | GX2_INVALIDATE_MODE_UNIFORM_BLOCK), uniformBlock, blockSize);
+			GX2SetPixelUniformBlock(blockLocation, blockSize, uniformBlock);
+			return;
+		}
+
+		setPixelUniformVec4(slots[0], config0);
+		setPixelUniformVec4(slots[1], config1);
+		setPixelUniformVec4(slots[2], config2);
+		setPixelUniformVec4(slots[3], config3);
+	}
+
+	void setTwoVec4PixelUniforms(PixelUniformSlot* slots, uint32 blockLocation, uint32 blockSize, const Vec4f& config0, const Vec4f& config1)
+	{
+		if (blockLocation != UINT32_MAX && blockSize >= 32)
+		{
+			uint8* uniformBlock = allocateUniformBlock(blockSize);
+			if (nullptr == uniformBlock)
+				return;
+			memset(uniformBlock, 0, blockSize);
+			writeUniformBlockVec4Bytes(uniformBlock, blockSize, slots[0], config0);
+			writeUniformBlockVec4Bytes(uniformBlock, blockSize, slots[1], config1);
+			GX2Invalidate((GX2InvalidateMode)(GX2_INVALIDATE_MODE_CPU | GX2_INVALIDATE_MODE_UNIFORM_BLOCK), uniformBlock, blockSize);
+			GX2SetPixelUniformBlock(blockLocation, blockSize, uniformBlock);
+			return;
+		}
+
+		setPixelUniformVec4(slots[0], config0);
+		setPixelUniformVec4(slots[1], config1);
+	}
+
+	void setPlaneUniforms(PixelUniformSlot* configUniforms, uint32 uniformBlockLocation, uint32 uniformBlockSize, const Vec4f& config0, const Vec4f& config1, const Vec4f& config2, const Vec4f& config3)
+	{
+		setFourVec4PixelUniforms(configUniforms, uniformBlockLocation, uniformBlockSize, config0, config1, config2, config3);
+	}
+
+	void setVdpSpriteUniforms(const Vec4f& config0, const Vec4f& config1, const Vec4f& tintColor, const Vec4f& addedColor)
+	{
+		setFourVec4PixelUniforms(mVdpSpriteUniforms, mVdpSpriteUniformBlockLocation, mVdpSpriteUniformBlockSize, config0, config1, tintColor, addedColor);
+	}
+
+	void setPaletteSpriteUniforms(const Vec4f& config0, const Vec4f& config1, const Vec4f& tintColor, const Vec4f& addedColor)
+	{
+		setFourVec4PixelUniforms(mPaletteSpriteUniforms, mPaletteSpriteUniformBlockLocation, mPaletteSpriteUniformBlockSize, config0, config1, tintColor, addedColor);
+	}
+
+	void setBlurUniforms(const Vec4f& texelOffset, const Vec4f& kernel)
+	{
+		setTwoVec4PixelUniforms(mBlurUniforms, mBlurUniformBlockLocation, mBlurUniformBlockSize, texelOffset, kernel);
+	}
+
 	void setVertexUniformTransform(const PixelUniformSlot& slot, const Vec4f& transform)
 	{
 		if (slot.offset == UINT32_MAX)
@@ -2510,10 +3651,12 @@ public:
 		if (slot.block >= 0)
 			return;
 		const float data[4] = { transform.x, transform.y, transform.z, transform.w };
-		GX2SetVertexUniformReg(slot.offset, 4, data);
+		uint32 gpuData[4];
+		writeGpuFloat4(gpuData, data);
+		GX2SetVertexUniformReg(slot.offset, 4, gpuData);
 	}
 
-	bool submitTextureVertices(GX2Texture& texture, PresentVertex* gpuVertices, uint32 vertexCount, SamplingMode samplingMode, TextureWrapMode wrapMode, const Color& tintColor = Color::WHITE, const Color& addedColor = Color::TRANSPARENT)
+	bool submitTextureVertices(GX2Texture& texture, PresentVertex* gpuVertices, uint32 vertexCount, SamplingMode samplingMode, TextureWrapMode wrapMode, const Color& tintColor = Color::WHITE, const Color& addedColor = Color::TRANSPARENT, bool useSpriteDepth = false)
 	{
 		if (!mayRenderAnything() || !mShaderReady || nullptr == texture.surface.image || nullptr == gpuVertices || vertexCount == 0)
 			return false;
@@ -2524,6 +3667,8 @@ public:
 
 		bindState(mCurrentColorBuffer->surface.width, mCurrentColorBuffer->surface.height, texture, getSampler(samplingMode, wrapMode));
 		setPixelUniformColors(tintColor, addedColor);
+		if (useSpriteDepth)
+			applySpriteDepthTest();
 		applyBlendMode();
 		applyScissor();
 		GX2SetAttribBuffer(0, vertexDataSize, sizeof(PresentVertex), gpuVertices);
@@ -2549,7 +3694,7 @@ public:
 		return result;
 	}
 
-	bool drawTextureVertices(GX2Texture& texture, const PresentVertex* cpuVertices, uint32 vertexCount, SamplingMode samplingMode, TextureWrapMode wrapMode, const Color& tintColor = Color::WHITE, const Color& addedColor = Color::TRANSPARENT)
+	bool drawTextureVertices(GX2Texture& texture, const PresentVertex* cpuVertices, uint32 vertexCount, SamplingMode samplingMode, TextureWrapMode wrapMode, const Color& tintColor = Color::WHITE, const Color& addedColor = Color::TRANSPARENT, bool useSpriteDepth = false)
 	{
 		if (nullptr == cpuVertices || vertexCount == 0)
 			return false;
@@ -2559,39 +3704,50 @@ public:
 			return false;
 
 		memcpy(gpuVertices, cpuVertices, (size_t)vertexCount * sizeof(PresentVertex));
-		return submitTextureVertices(texture, gpuVertices, vertexCount, samplingMode, wrapMode, tintColor, addedColor);
+		return submitTextureVertices(texture, gpuVertices, vertexCount, samplingMode, wrapMode, tintColor, addedColor, useSpriteDepth);
 	}
 
-	bool drawTexturedRect(const Recti& rect, GX2Texture& texture, const Vec2f& uv0, const Vec2f& uv1, SamplingMode samplingMode, TextureWrapMode wrapMode, const Color& tintColor = Color::WHITE, const Color& addedColor = Color::TRANSPARENT)
+	bool drawTexturedRect(const Recti& rect, GX2Texture& texture, const Vec2f& uv0, const Vec2f& uv1, SamplingMode samplingMode, TextureWrapMode wrapMode, const Color& tintColor = Color::WHITE, const Color& addedColor = Color::TRANSPARENT, bool useSpriteDepth = false, float depth = 0.0f)
 	{
 		PresentVertex vertices[PRESENT_VERTEX_COUNT];
-		fillRectVertices(vertices, rect, uv0, uv1);
-		return drawTextureVertices(texture, vertices, PRESENT_VERTEX_COUNT, samplingMode, wrapMode, tintColor, addedColor);
+		fillRectVertices(vertices, rect, uv0, uv1, depth);
+		return drawTextureVertices(texture, vertices, PRESENT_VERTEX_COUNT, samplingMode, wrapMode, tintColor, addedColor, useSpriteDepth);
 	}
 
-	bool uploadScratchBitmap(const Bitmap& bitmap)
+	void prepareRenderTargetTextureForRead(GX2DrawerTextureImplementation& implementation)
+	{
+		GX2Flush();
+		invalidateSurfaceAfterColorWrite(implementation.mColorBuffer.surface);
+	}
+
+	GX2Texture* uploadScratchBitmap(const Bitmap& bitmap)
 	{
 		if (bitmap.empty())
-			return false;
-		if (mScratchUploadPending)
+			return nullptr;
+
+		ScratchTextureSlot& slot = mScratchTextures[mScratchTextureCursor % SCRATCH_TEXTURE_RING_SIZE];
+		mScratchTextureCursor = (mScratchTextureCursor + 1) % SCRATCH_TEXTURE_RING_SIZE;
+		if (slot.mUsedThisFrame)
 		{
 			GX2DrawDone();
-			mScratchUploadPending = false;
+			slot.mUsedThisFrame = false;
 		}
-		if (mScratchTextureSize != bitmap.getSize() || nullptr == mScratchTexture.surface.image)
+		if (slot.mSize != bitmap.getSize() || nullptr == slot.mTexture.surface.image)
 		{
-			destroyTextureStorage(mScratchTexture, true);
-			if (!initializeTextureStorage(mScratchTexture, bitmap.getSize()))
-				return false;
-			mScratchTextureSize = bitmap.getSize();
+			destroyTextureStorage(slot.mTexture, true);
+			if (!initializeTextureStorage(slot.mTexture, bitmap.getSize()))
+				return nullptr;
+			slot.mSize = bitmap.getSize();
 		}
-		uploadBitmapToTexture(mScratchTexture, bitmap);
-		return true;
+		uploadBitmapToTexture(slot.mTexture, bitmap);
+		slot.mUsedThisFrame = true;
+		return &slot.mTexture;
 	}
 
 	bool drawScratchBitmap(const Recti& rect, const Bitmap& bitmap, SamplingMode samplingMode = SamplingMode::POINT, TextureWrapMode wrapMode = TextureWrapMode::CLAMP, const Color& tintColor = Color::WHITE, const Color& addedColor = Color::TRANSPARENT)
 	{
-		if (!uploadScratchBitmap(bitmap))
+		GX2Texture* scratchTexture = uploadScratchBitmap(bitmap);
+		if (nullptr == scratchTexture)
 			return false;
 		const bool containsTransparentPixels = bitmapContainsTransparentPixels(bitmap);
 		if constexpr (ENABLE_GX2_DRAWER_DIAGNOSTICS)
@@ -2608,9 +3764,8 @@ public:
 		}
 		const bool result = drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(containsTransparentPixels, tintColor, addedColor), [&]()
 		{
-			return drawTexturedRect(rect, mScratchTexture, Vec2f(0.0f, 0.0f), Vec2f(1.0f, 1.0f), samplingMode, wrapMode, tintColor, addedColor);
+			return drawTexturedRect(rect, *scratchTexture, Vec2f(0.0f, 0.0f), Vec2f(1.0f, 1.0f), samplingMode, wrapMode, tintColor, addedColor);
 		});
-		mScratchUploadPending = result;
 		return result;
 	}
 
@@ -2643,20 +3798,41 @@ public:
 		return true;
 	}
 
-	bool drawDrawerTextureRect(const Recti& rect, DrawerTexture& texture, const Color& tintColor, const Color& addedColor, const Vec2f& uv0, const Vec2f& uv1)
+	bool drawDrawerTextureRect(const Recti& rect, DrawerTexture& texture, const Color& tintColor, const Color& addedColor, const Vec2f& uv0, const Vec2f& uv1, bool useSpriteDepth = false, float depth = 0.0f)
 	{
 		GX2DrawerTextureImplementation* implementation = texture.getImplementation<GX2DrawerTextureImplementation>();
 		if (nullptr == implementation)
 			return false;
 
+		const bool logGamePresentDraw = texture.getWidth() == (int)NATIVE_GAME_RENDER_WIDTH
+			&& texture.getHeight() == (int)NATIVE_GAME_RENDER_HEIGHT
+			&& rect.x == 0 && rect.y == 0
+			&& rect.width == (int)NATIVE_GAME_RENDER_WIDTH
+			&& rect.height == (int)NATIVE_GAME_RENDER_HEIGHT;
+		static uint32 sGamePresentDrawLogCount = 0;
+		const bool shouldLogGamePresentDraw = ENABLE_GX2_GAME_PRESENT_DRAW_LOGS && logGamePresentDraw && sGamePresentDrawLogCount < 16;
+
 		if (implementation->mRenderTarget)
 		{
-			GX2DrawDone();
-			invalidateSurfaceAfterColorWrite(implementation->mColorBuffer.surface);
-			return drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(implementation->mContainsTransparentPixels, tintColor, addedColor), [&]()
+			prepareRenderTargetTextureForRead(*implementation);
+			const bool result = drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(implementation->mContainsTransparentPixels, tintColor, addedColor), [&]()
 			{
-				return drawTexturedRect(rect, implementation->mTexture, uv0, uv1, mCurrentSamplingMode, mCurrentWrapMode, tintColor, addedColor);
+				return drawTexturedRect(rect, implementation->mTexture, uv0, uv1, mCurrentSamplingMode, mCurrentWrapMode, tintColor, addedColor, useSpriteDepth, depth);
 			});
+			if (shouldLogGamePresentDraw)
+			{
+				RMX_LOG_INFO("GX2Drawer: game present render-target draw"
+					<< " result=" << (result ? 1 : 0)
+					<< " change=" << implementation->mChangeCounter
+					<< " transparent=" << (implementation->mContainsTransparentPixels ? 1 : 0)
+					<< " blend=" << (int)mCurrentBlendMode
+					<< " depth=" << (useSpriteDepth ? 1 : 0)
+					<< " viewport=" << mCurrentViewport.x << "," << mCurrentViewport.y << " " << mCurrentViewport.width << "x" << mCurrentViewport.height
+					<< " mapped=" << mCurrentViewportTargetRect.x << "," << mCurrentViewportTargetRect.y << " " << mCurrentViewportTargetRect.width << "x" << mCurrentViewportTargetRect.height
+					<< " scissorInvalid=" << (mInvalidScissorRegion ? 1 : 0));
+				++sGamePresentDrawLogCount;
+			}
+			return result;
 		}
 
 		if (nullptr == implementation->mTexture.surface.image && !texture.getBitmap().empty())
@@ -2666,10 +3842,27 @@ public:
 		if (nullptr == implementation->mTexture.surface.image)
 			return false;
 
-		return drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(implementation->mContainsTransparentPixels, tintColor, addedColor), [&]()
+		const bool result = drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(implementation->mContainsTransparentPixels, tintColor, addedColor), [&]()
 		{
-			return drawTexturedRect(rect, implementation->mTexture, uv0, uv1, mCurrentSamplingMode, mCurrentWrapMode, tintColor, addedColor);
+			return drawTexturedRect(rect, implementation->mTexture, uv0, uv1, mCurrentSamplingMode, mCurrentWrapMode, tintColor, addedColor, useSpriteDepth, depth);
 		});
+		if (shouldLogGamePresentDraw)
+		{
+			RMX_LOG_INFO("GX2Drawer: game present bitmap draw"
+				<< " result=" << (result ? 1 : 0)
+				<< " image=" << (nullptr != implementation->mTexture.surface.image ? 1 : 0)
+				<< " pitch=" << implementation->mTexture.surface.pitch
+				<< " bytes=" << implementation->mTexture.surface.imageSize
+				<< " change=" << implementation->mChangeCounter
+				<< " transparent=" << (implementation->mContainsTransparentPixels ? 1 : 0)
+				<< " blend=" << (int)mCurrentBlendMode
+				<< " depth=" << (useSpriteDepth ? 1 : 0)
+				<< " viewport=" << mCurrentViewport.x << "," << mCurrentViewport.y << " " << mCurrentViewport.width << "x" << mCurrentViewport.height
+				<< " mapped=" << mCurrentViewportTargetRect.x << "," << mCurrentViewportTargetRect.y << " " << mCurrentViewportTargetRect.width << "x" << mCurrentViewportTargetRect.height
+				<< " scissorInvalid=" << (mInvalidScissorRegion ? 1 : 0));
+			++sGamePresentDrawLogCount;
+		}
+		return result;
 	}
 
 	bool drawMesh(const MeshDrawCommand& dc)
@@ -2682,8 +3875,7 @@ public:
 
 		if (implementation->mRenderTarget)
 		{
-			GX2DrawDone();
-			invalidateSurfaceAfterColorWrite(implementation->mColorBuffer.surface);
+			prepareRenderTargetTextureForRead(*implementation);
 		}
 
 		PresentVertex* vertices = allocateVertices((uint32)dc.mTriangles.size());
@@ -2693,11 +3885,62 @@ public:
 		for (size_t i = 0; i < dc.mTriangles.size(); ++i)
 		{
 			const DrawerMeshVertex& src = dc.mTriangles[i];
-			vertices[i] = { toClipX(src.mPosition.x), toClipY(src.mPosition.y), src.mTexcoords.x, src.mTexcoords.y };
+			vertices[i] = makePresentVertex(toClipX(src.mPosition.x), toClipY(src.mPosition.y), src.mTexcoords.x, src.mTexcoords.y);
 		}
 		return drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(implementation->mContainsTransparentPixels, dc.mTintColor, dc.mAddedColor), [&]()
 		{
 			return submitTextureVertices(implementation->mTexture, vertices, (uint32)dc.mTriangles.size(), mCurrentSamplingMode, mCurrentWrapMode, dc.mTintColor, dc.mAddedColor);
+		});
+	}
+
+	bool drawGX2TextureSprite(const GX2TextureSpriteDrawCommand& dc)
+	{
+		if (nullptr == dc.mTexture)
+			return false;
+
+		if (!dc.mUseMesh)
+		{
+			if (dc.mRect.empty())
+				return false;
+			return drawDrawerTextureRect(dc.mRect, *dc.mTexture, dc.mTintColor, dc.mAddedColor, Vec2f(0.0f, 0.0f), Vec2f(1.0f, 1.0f), true, spriteDepth(dc.mPriorityFlag));
+		}
+
+		if (dc.mTriangles.empty())
+			return false;
+
+		GX2DrawerTextureImplementation* implementation = dc.mTexture->getImplementation<GX2DrawerTextureImplementation>();
+		if (nullptr == implementation)
+		{
+			dc.mTexture->ensureValidity();
+			implementation = dc.mTexture->getImplementation<GX2DrawerTextureImplementation>();
+		}
+		if (nullptr == implementation)
+			return false;
+
+		if (implementation->mRenderTarget)
+		{
+			prepareRenderTargetTextureForRead(*implementation);
+		}
+		else if (nullptr == implementation->mTexture.surface.image && !dc.mTexture->getBitmap().empty())
+		{
+			implementation->updateFromBitmap(dc.mTexture->getBitmap());
+		}
+		if (nullptr == implementation->mTexture.surface.image)
+			return false;
+
+		PresentVertex* vertices = allocateVertices((uint32)dc.mTriangles.size());
+		if (nullptr == vertices)
+			return false;
+
+		for (size_t i = 0; i < dc.mTriangles.size(); ++i)
+		{
+			const DrawerMeshVertex& src = dc.mTriangles[i];
+			vertices[i] = makePresentVertex(toClipX(src.mPosition.x), toClipY(src.mPosition.y), src.mTexcoords.x, src.mTexcoords.y, spriteDepth(dc.mPriorityFlag));
+		}
+
+		return drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(implementation->mContainsTransparentPixels, dc.mTintColor, dc.mAddedColor), [&]()
+		{
+			return submitTextureVertices(implementation->mTexture, vertices, (uint32)dc.mTriangles.size(), mCurrentSamplingMode, mCurrentWrapMode, dc.mTintColor, dc.mAddedColor, true);
 		});
 	}
 
@@ -2717,6 +3960,7 @@ public:
 			{
 				toClipX(src.mPosition.x),
 				toClipY(src.mPosition.y),
+				0.5f,
 				src.mColor.r,
 				src.mColor.g,
 				src.mColor.b,
@@ -2752,14 +3996,85 @@ public:
 		return (nullptr != implementation->mTexture.surface.image) ? &implementation->mTexture : nullptr;
 	}
 
-	void bindPlaneState(uint32 targetWidth, uint32 targetHeight, GX2Texture& planeDataTexture)
+	void bindBlurState(uint32 targetWidth, uint32 targetHeight, GX2Texture& texture)
 	{
 		if (nullptr != mCurrentColorBuffer)
 			GX2SetColorBuffer(mCurrentColorBuffer, GX2_RENDER_TARGET_0);
-		GX2SetFetchShader(&mPlaneShaderGroup.fetchShader);
-		GX2SetVertexShader(mPlaneShaderGroup.vertexShader);
-		GX2SetPixelShader(mPlaneShaderGroup.pixelShader);
-		setCafeGLSLUniformBlockShaderMode(mPlaneShaderGroup);
+		GX2SetFetchShader(&mBlurShaderGroup.fetchShader);
+		GX2SetVertexShader(mBlurShaderGroup.vertexShader);
+		GX2SetPixelShader(mBlurShaderGroup.pixelShader);
+		setCafeGLSLUniformBlockShaderMode(mBlurShaderGroup);
+		GX2SetStreamOutEnable(FALSE);
+
+		GX2SetViewport(0.0f, 0.0f, (float)targetWidth, (float)targetHeight, 0.0f, 1.0f);
+		GX2SetTargetChannelMasks(
+			GX2_CHANNEL_MASK_RGBA,
+			(GX2ChannelMask)0,
+			(GX2ChannelMask)0,
+			(GX2ChannelMask)0,
+			(GX2ChannelMask)0,
+			(GX2ChannelMask)0,
+			(GX2ChannelMask)0,
+			(GX2ChannelMask)0);
+		applyDepthDisabled();
+		GX2SetCullOnlyControl(GX2_FRONT_FACE_CCW, FALSE, FALSE);
+		GX2SetAlphaTest(FALSE, GX2_COMPARE_FUNC_ALWAYS, 0.0f);
+
+		GX2Sampler& sampler = getSampler(SamplingMode::POINT, TextureWrapMode::CLAMP);
+		GX2SetPixelTexture(&texture, mBlurSamplerLocation);
+		GX2SetPixelSampler(&sampler, mBlurSamplerLocation);
+	}
+
+	bool drawGX2Blur(const GX2BlurDrawCommand& dc)
+	{
+		if (nullptr == dc.mProcessingTexture || !mayRenderAnything() || !mBlurShaderReady || nullptr == mVertexBuffer)
+			return false;
+
+		GX2DrawerTextureImplementation* implementation = dc.mProcessingTexture->getImplementation<GX2DrawerTextureImplementation>();
+		if (nullptr != implementation && implementation->mRenderTarget)
+		{
+			prepareRenderTargetTextureForRead(*implementation);
+		}
+
+		GX2Texture* texture = getNativeTexture(*dc.mProcessingTexture);
+		if (nullptr == texture || nullptr == texture->surface.image || dc.mResolution.x <= 0 || dc.mResolution.y <= 0)
+			return false;
+
+		bindBlurState(mCurrentColorBuffer->surface.width, mCurrentColorBuffer->surface.height, *texture);
+		setBlurUniforms(
+			Vec4f(1.0f / (float)dc.mResolution.x, 1.0f / (float)dc.mResolution.y, 0.0f, 0.0f),
+			dc.mKernel);
+		const BlendMode previousBlendMode = mCurrentBlendMode;
+		mCurrentBlendMode = BlendMode::OPAQUE;
+		applyBlendMode();
+		applyScissor();
+		GX2SetAttribBuffer(0, sizeof(PresentVertex) * PRESENT_VERTEX_COUNT, sizeof(PresentVertex), mVertexBuffer);
+		GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, PRESENT_VERTEX_COUNT, 0, 1);
+		mCurrentBlendMode = previousBlendMode;
+		invalidateSurfaceAfterColorWrite(mCurrentColorBuffer->surface);
+		return true;
+	}
+
+	GX2Texture& getDataAtlasTextureView(GX2Texture& texture)
+	{
+		if constexpr (USE_IDENTITY_DATA_TEXTURE_SWIZZLE)
+		{
+			mDataAtlasTextureView = texture;
+			mDataAtlasTextureView.compMap = GX2_COMP_MAP(GX2_SQ_SEL_R, GX2_SQ_SEL_G, GX2_SQ_SEL_B, GX2_SQ_SEL_A);
+			GX2InitTextureRegs(&mDataAtlasTextureView);
+			return mDataAtlasTextureView;
+		}
+		return texture;
+	}
+
+	void bindPlaneState(uint32 targetWidth, uint32 targetHeight, GX2Texture& planeDataTexture, WHBGfxShaderGroup& shaderGroup, const std::array<uint32, 5>& samplerLocations)
+	{
+		if (nullptr != mCurrentColorBuffer)
+			GX2SetColorBuffer(mCurrentColorBuffer, GX2_RENDER_TARGET_0);
+		GX2SetFetchShader(&shaderGroup.fetchShader);
+		GX2SetVertexShader(shaderGroup.vertexShader);
+		GX2SetPixelShader(shaderGroup.pixelShader);
+		setCafeGLSLUniformBlockShaderMode(shaderGroup);
 		GX2SetStreamOutEnable(FALSE);
 
 		GX2SetViewport(0.0f, 0.0f, (float)targetWidth, (float)targetHeight, 0.0f, 1.0f);
@@ -2777,10 +4092,10 @@ public:
 		GX2SetAlphaTest(FALSE, GX2_COMPARE_FUNC_ALWAYS, 0.0f);
 
 		GX2Sampler& sampler = getSampler(SamplingMode::POINT, TextureWrapMode::CLAMP);
-		const uint32 location = mPlaneSamplerLocations[0];
+		const uint32 location = samplerLocations[0];
 		if (location != UINT32_MAX)
 		{
-			GX2SetPixelTexture(&planeDataTexture, location);
+			GX2SetPixelTexture(&getDataAtlasTextureView(planeDataTexture), location);
 			GX2SetPixelSampler(&sampler, location);
 		}
 	}
@@ -2812,16 +4127,61 @@ public:
 			scrollOffsetX = scrollOffsetsManager.getScrollOffsetsH(dc.mScrollOffsets)[0];
 			scrollOffsetY = scrollOffsetsManager.getScrollOffsetsV(dc.mScrollOffsets)[0];
 		}
-		if constexpr (ENABLE_GX2_DRAWER_DIAGNOSTICS)
+		const bool noRepeat = scrollOffsetsManager.getHorizontalScrollNoRepeat(dc.mScrollOffsets);
+		const bool useSimpleFastShader = !FORCE_GENERAL_PLANE_SHADER && mPlaneSimpleShaderReady && useHorizontalScrolling == 0 && useVerticalScrolling == 0;
+		const bool useHScrollFastShader = !FORCE_GENERAL_PLANE_SHADER && !useSimpleFastShader && mPlaneHScrollShaderReady && useHorizontalScrolling != 0 && useVerticalScrolling == 0 && !noRepeat;
+		WHBGfxShaderGroup& planeShaderGroup = useSimpleFastShader ? mPlaneSimpleShaderGroup : (useHScrollFastShader ? mPlaneHScrollShaderGroup : mPlaneShaderGroup);
+		const std::array<uint32, 5>& planeSamplerLocations = useSimpleFastShader ? mPlaneSimpleSamplerLocations : (useHScrollFastShader ? mPlaneHScrollSamplerLocations : mPlaneSamplerLocations);
+		PixelUniformSlot* planeConfigUniforms = useSimpleFastShader ? mPlaneSimpleConfigUniforms : (useHScrollFastShader ? mPlaneHScrollConfigUniforms : mPlaneConfigUniforms);
+		const uint32 planeUniformBlockLocation = useSimpleFastShader ? mPlaneSimpleUniformBlockLocation : (useHScrollFastShader ? mPlaneHScrollUniformBlockLocation : mPlaneUniformBlockLocation);
+		const uint32 planeUniformBlockSize = useSimpleFastShader ? mPlaneSimpleUniformBlockSize : (useHScrollFastShader ? mPlaneHScrollUniformBlockSize : mPlaneUniformBlockSize);
+		if constexpr (ENABLE_GX2_PLANE_DRAW_DIAGNOSTICS)
 		{
 			static uint32 sPlaneDrawLogCount = 0;
 			static uint32 sNonEmptyPlaneDrawLogCount = 0;
-			if (sPlaneDrawLogCount < 8 || sNonEmptyPlaneDrawLogCount < 24)
+			const bool logLateFrame = (sPlaneDrawLogCount >= 1200 && sPlaneDrawLogCount < 1224)
+				|| (sPlaneDrawLogCount >= 2400 && sPlaneDrawLogCount < 2424)
+				|| (sPlaneDrawLogCount >= 3600 && sPlaneDrawLogCount < 3624);
+			++sPlaneDrawLogCount;
+			if (sPlaneDrawLogCount < 8 || sNonEmptyPlaneDrawLogCount < 80 || logLateFrame)
 			{
 				const uint16* planeBuffer = planeManager.getPlanePatternsBuffer((uint8)clamp(dc.mPlaneIndex, 0, 3));
-				const int sampleX = clamp((int)(std::abs(scrollOffsetX) / 8) % std::max(1, playfieldSize.z), 0, std::max(0, playfieldSize.z - 1));
-				const int sampleY = clamp((int)(std::abs(scrollOffsetY) / 8) % std::max(1, playfieldSize.w), 0, std::max(0, playfieldSize.w - 1));
+				const int sampleScreenX = rect.x + rect.width / 2;
+				const int sampleScreenY = rect.y + rect.height / 2;
+				int sampleScrollX = scrollOffsetX;
+				int sampleScrollY = scrollOffsetY;
+				if (useHorizontalScrolling != 0 && dc.mScrollOffsets != 0xff)
+					sampleScrollX = scrollOffsetsManager.getScrollOffsetsH(dc.mScrollOffsets)[sampleScreenY & 0xff];
+				if (useVerticalScrolling != 0 && dc.mScrollOffsets != 0xff)
+				{
+					int sampleVx = sampleScreenX - scrollOffsetsManager.getVerticalScrollOffsetBias();
+					sampleVx = (sampleVx & 0x1f0) >> 4;
+					sampleScrollY = scrollOffsetsManager.getScrollOffsetsV(dc.mScrollOffsets)[sampleVx];
+				}
+				int samplePixelX = (sampleScreenX + sampleScrollX) & 0x0fff;
+				int samplePixelY = (sampleScreenY + sampleScrollY) & (playfieldSize.y - 1);
+				if (!scrollOffsetsManager.getHorizontalScrollNoRepeat(dc.mScrollOffsets))
+					samplePixelX &= (playfieldSize.x - 1);
+				const int sampleX = clamp(samplePixelX / 8, 0, std::max(0, playfieldSize.z - 1));
+				const int sampleY = clamp(samplePixelY / 8, 0, std::max(0, playfieldSize.w - 1));
 				const uint16 sampleEntry = (nullptr != planeBuffer) ? planeBuffer[sampleX + sampleY * playfieldSize.z] : 0;
+				int sampleLocalX = samplePixelX & 7;
+				int sampleLocalY = samplePixelY & 7;
+				if ((sampleEntry & 0x0800) != 0)
+					sampleLocalX = 7 - sampleLocalX;
+				if ((sampleEntry & 0x1000) != 0)
+					sampleLocalY = 7 - sampleLocalY;
+				const int samplePattern = sampleEntry & 0x07ff;
+				const int samplePatternAtlasX = (samplePattern & 7) * 64 + sampleLocalX + sampleLocalY * 8;
+				const int samplePatternAtlasY = samplePattern >> 3;
+				uint32 samplePatternPixel = 0;
+				const Bitmap& planeDataBitmap = dc.mResources->getPlaneDataTexture().getBitmap();
+				if (!planeDataBitmap.empty()
+					&& samplePatternAtlasX >= 0 && samplePatternAtlasX < planeDataBitmap.getWidth()
+					&& samplePatternAtlasY >= 0 && samplePatternAtlasY < planeDataBitmap.getHeight())
+				{
+					samplePatternPixel = planeDataBitmap.getPixel(samplePatternAtlasX, samplePatternAtlasY);
+				}
 				uint32 nonZeroEntries = 0;
 				if (nullptr != planeBuffer)
 				{
@@ -2832,7 +4192,7 @@ public:
 							++nonZeroEntries;
 					}
 				}
-				const bool shouldLogPlane = (sPlaneDrawLogCount < 8) || (nonZeroEntries > 0 && sNonEmptyPlaneDrawLogCount < 24);
+				const bool shouldLogPlane = logLateFrame || (sPlaneDrawLogCount < 8) || (nonZeroEntries > 0 && sNonEmptyPlaneDrawLogCount < 80);
 				if (shouldLogPlane)
 				{
 					RMX_LOG_INFO("GX2Drawer: plane draw " << sPlaneDrawLogCount
@@ -2842,18 +4202,22 @@ public:
 						<< " rect=" << rect.x << "," << rect.y << " " << rect.width << "x" << rect.height
 						<< " scrollId=" << (int)dc.mScrollOffsets
 						<< " scroll=" << scrollOffsetX << "," << scrollOffsetY
+						<< " centerScroll=" << sampleScrollX << "," << sampleScrollY
 						<< " useHV=" << useHorizontalScrolling << "," << useVerticalScrolling
 						<< " playfield=" << playfieldSize.x << "x" << playfieldSize.y
 						<< " patterns=" << playfieldSize.z << "x" << playfieldSize.w
+						<< " sampleXY=" << sampleX << "," << sampleY
 						<< " sample=" << rmx::hexString(sampleEntry, 4)
+						<< " patternXY=" << samplePatternAtlasX << "," << samplePatternAtlasY
+						<< " patternPixel=" << rmx::hexString(samplePatternPixel, 8)
 						<< " nonZero=" << nonZeroEntries);
 					if (nonZeroEntries > 0)
 						++sNonEmptyPlaneDrawLogCount;
 				}
-				++sPlaneDrawLogCount;
 			}
 		}
 
+		const int scrollTextureIndex = (dc.mScrollOffsets == 0xff) ? 4 : clamp((int)dc.mScrollOffsets, 0, 3);
 		GX2Texture* planeDataTexture = getNativeTexture(dc.mResources->getPlaneDataTexture());
 		if (nullptr == planeDataTexture)
 			return false;
@@ -2861,19 +4225,26 @@ public:
 		PlaneVertex* vertices = allocatePlaneVertices(PRESENT_VERTEX_COUNT);
 		if (nullptr == vertices)
 			return false;
-		fillPlaneVertices(vertices, rect);
+		fillPlaneVertices(vertices, rect, dc.mPriorityFlag ? 0.75f : 0.0f);
 		const uint32 vertexDataSize = sizeof(PlaneVertex) * PRESENT_VERTEX_COUNT;
 		DCFlushRange(vertices, vertexDataSize);
 		GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, vertices, vertexDataSize);
 
 		const BlendMode previousBlendMode = mCurrentBlendMode;
-		mCurrentBlendMode = BlendMode::OPAQUE;
-		bindPlaneState(mCurrentColorBuffer->surface.width, mCurrentColorBuffer->surface.height, *planeDataTexture);
-		setPixelUniformVec4(mPlaneConfigUniforms[0], Vec4f((float)playfieldSize.x, (float)playfieldSize.y, (float)playfieldSize.z, (float)playfieldSize.w));
-		setPixelUniformVec4(mPlaneConfigUniforms[1], Vec4f(dc.mPriorityFlag ? 1.0f : 0.0f, paletteOffset, (float)scrollOffsetsManager.getVerticalScrollOffsetBias(), scrollOffsetsManager.getHorizontalScrollNoRepeat(dc.mScrollOffsets) ? 1.0f : 0.0f));
-		setPixelUniformVec4(mPlaneConfigUniforms[2], Vec4f((float)scrollOffsetX, (float)scrollOffsetY, (float)useHorizontalScrolling, (float)useVerticalScrolling));
-		const int scrollTextureIndex = (dc.mScrollOffsets == 0xff) ? 4 : clamp((int)dc.mScrollOffsets, 0, 3);
-		setPixelUniformVec4(mPlaneConfigUniforms[3], Vec4f((float)dc.mPlaneIndex, (float)scrollTextureIndex, 0.0f, 0.0f));
+		mCurrentBlendMode = BlendMode::ONE_BIT;
+		bindPlaneState(mCurrentColorBuffer->surface.width, mCurrentColorBuffer->surface.height, *planeDataTexture, planeShaderGroup, planeSamplerLocations);
+		setPlaneUniforms(
+			planeConfigUniforms,
+			planeUniformBlockLocation,
+			planeUniformBlockSize,
+			Vec4f((float)playfieldSize.x, (float)playfieldSize.y, (float)playfieldSize.z, (float)playfieldSize.w),
+			Vec4f(dc.mPriorityFlag ? 1.0f : 0.0f, paletteOffset, (float)scrollOffsetsManager.getVerticalScrollOffsetBias(), noRepeat ? 1.0f : 0.0f),
+			Vec4f((float)scrollOffsetX, (float)scrollOffsetY, (float)useHorizontalScrolling, (float)useVerticalScrolling),
+			Vec4f((float)dc.mPlaneIndex, (float)scrollTextureIndex, 0.0f, 0.0f));
+		if (dc.mPriorityFlag)
+			applyPriorityPlaneDepthWrite();
+		else
+			applyDepthDisabled();
 		applyBlendMode();
 		applyScissor();
 		GX2SetAttribBuffer(0, vertexDataSize, sizeof(PlaneVertex), vertices);
@@ -2886,6 +4257,8 @@ public:
 	{
 		if (nullptr == dc.mResources || !PlaneManager::isRenderablePlaneIndex(dc.mPlaneIndex))
 			return false;
+		if (dc.mPriorityFlag && !dc.mResources->hasPriorityPlanePatterns(dc.mPlaneIndex))
+			return true;
 
 		RenderParts& renderParts = dc.mResources->getRenderParts();
 		const int splitY = renderParts.getPaletteManager().mSplitPositionY;
@@ -2929,7 +4302,7 @@ public:
 		if (location != UINT32_MAX)
 		{
 			GX2Sampler& sampler = getSampler(SamplingMode::POINT, TextureWrapMode::CLAMP);
-			GX2SetPixelTexture(&planeDataTexture, location);
+			GX2SetPixelTexture(&getDataAtlasTextureView(planeDataTexture), location);
 			GX2SetPixelSampler(&sampler, location);
 		}
 	}
@@ -2946,16 +4319,18 @@ public:
 		PlaneVertex* vertices = allocatePlaneVertices(PRESENT_VERTEX_COUNT);
 		if (nullptr == vertices)
 			return false;
-		fillPlaneVertices(vertices, dc.mRect);
+		fillPlaneVertices(vertices, dc.mRect, spriteDepth(dc.mPriorityFlag));
 		const uint32 vertexDataSize = sizeof(PlaneVertex) * PRESENT_VERTEX_COUNT;
 		DCFlushRange(vertices, vertexDataSize);
 		GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, vertices, vertexDataSize);
 
 		bindVdpSpriteState(mCurrentColorBuffer->surface.width, mCurrentColorBuffer->surface.height, *planeDataTexture);
-		setPixelUniformVec4(mVdpSpriteUniforms[0], Vec4f((float)dc.mRect.x, (float)dc.mRect.y, (float)dc.mSizeInPatterns.x, (float)dc.mSizeInPatterns.y));
-		setPixelUniformVec4(mVdpSpriteUniforms[1], Vec4f((float)dc.mFirstPattern, (float)dc.mSplitY, 0.0f, 0.0f));
-		setPixelUniformVec4(mVdpSpriteUniforms[2], Vec4f(dc.mTintColor.r, dc.mTintColor.g, dc.mTintColor.b, dc.mTintColor.a));
-		setPixelUniformVec4(mVdpSpriteUniforms[3], Vec4f(dc.mAddedColor.r, dc.mAddedColor.g, dc.mAddedColor.b, dc.mAddedColor.a));
+		setVdpSpriteUniforms(
+			Vec4f((float)dc.mRect.x, (float)dc.mRect.y, (float)dc.mSizeInPatterns.x, (float)dc.mSizeInPatterns.y),
+			Vec4f((float)dc.mFirstPattern, (float)dc.mSplitY, dc.mShadowHighlightMode ? 1.0f : 0.0f, dc.mPriorityFlag ? 1.0f : 0.0f),
+			Vec4f(dc.mTintColor.r, dc.mTintColor.g, dc.mTintColor.b, dc.mTintColor.a),
+			Vec4f(dc.mAddedColor.r, dc.mAddedColor.g, dc.mAddedColor.b, dc.mAddedColor.a));
+		applySpriteDepthTest();
 		applyBlendMode();
 		applyScissor();
 		GX2SetAttribBuffer(0, vertexDataSize, sizeof(PlaneVertex), vertices);
@@ -2991,7 +4366,7 @@ public:
 		if (location != UINT32_MAX)
 		{
 			GX2Sampler& sampler = getSampler(SamplingMode::POINT, TextureWrapMode::CLAMP);
-			GX2SetPixelTexture(&planeDataTexture, location);
+			GX2SetPixelTexture(&getDataAtlasTextureView(planeDataTexture), location);
 			GX2SetPixelSampler(&sampler, location);
 		}
 	}
@@ -3000,7 +4375,7 @@ public:
 	{
 		if (commands.empty())
 			return true;
-		if (commands.size() == 1 || !mVdpSpriteBatchShaderReady)
+		if (!mVdpSpriteBatchShaderReady)
 		{
 			bool ok = false;
 			for (const GX2VdpSpriteDrawCommand* command : commands)
@@ -3040,7 +4415,7 @@ public:
 			const float ly0 = (float)rect.y;
 			const float ly1 = (float)(rect.y + rect.height);
 			const float config0[4] = { (float)rect.x, (float)rect.y, (float)command->mSizeInPatterns.x, (float)command->mSizeInPatterns.y };
-			const float config1[2] = { (float)command->mFirstPattern, (float)command->mSplitY };
+			const float config1[4] = { (float)command->mFirstPattern, (float)command->mSplitY, command->mShadowHighlightMode ? 1.0f : 0.0f, command->mPriorityFlag ? 1.0f : 0.0f };
 			const float tint[4] = { command->mTintColor.r, command->mTintColor.g, command->mTintColor.b, command->mTintColor.a };
 			const float added[4] = { command->mAddedColor.r, command->mAddedColor.g, command->mAddedColor.b, command->mAddedColor.a };
 			const float positions[6][4] =
@@ -3065,6 +4440,8 @@ public:
 				vertex.sizeY = config0[3];
 				vertex.firstPattern = config1[0];
 				vertex.splitY = config1[1];
+				vertex.shadowHighlight = config1[2];
+				vertex.configPadding = config1[3];
 				vertex.tintR = tint[0];
 				vertex.tintG = tint[1];
 				vertex.tintB = tint[2];
@@ -3081,6 +4458,7 @@ public:
 		GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, vertices, vertexDataSize);
 
 		bindVdpSpriteBatchState(mCurrentColorBuffer->surface.width, mCurrentColorBuffer->surface.height, *planeDataTexture);
+		applySpriteDepthTest();
 		applyBlendMode();
 		applyScissor();
 		GX2SetAttribBuffer(0, vertexDataSize, sizeof(VdpSpriteBatchVertex), vertices);
@@ -3126,7 +4504,7 @@ public:
 		GX2Sampler& sampler = getSampler(SamplingMode::POINT, TextureWrapMode::CLAMP);
 		if (mPaletteSpriteSamplerLocations[0] != UINT32_MAX)
 		{
-			GX2SetPixelTexture(&dataTexture, mPaletteSpriteSamplerLocations[0]);
+			GX2SetPixelTexture(&getDataAtlasTextureView(dataTexture), mPaletteSpriteSamplerLocations[0]);
 			GX2SetPixelSampler(&sampler, mPaletteSpriteSamplerLocations[0]);
 		}
 	}
@@ -3154,19 +4532,40 @@ public:
 		if (nullptr == vertices)
 			return false;
 		const Recti configRect = dc.mUseMesh ? Recti(0, 0, dc.mSourceSize.x, dc.mSourceSize.y) : dc.mRect;
+		if constexpr (ENABLE_GX2_DRAWER_DIAGNOSTICS)
+		{
+			static uint32 sPaletteSpriteDrawLogCount = 0;
+			if (sPaletteSpriteDrawLogCount < 16)
+			{
+				RMX_LOG_INFO("GX2Drawer: palette sprite draw " << sPaletteSpriteDrawLogCount
+					<< " mesh=" << (dc.mUseMesh ? 1 : 0)
+					<< " rect=" << dc.mRect.x << "," << dc.mRect.y << " " << dc.mRect.width << "x" << dc.mRect.height
+					<< " source=" << dc.mSourceSize.x << "x" << dc.mSourceSize.y
+					<< " config=" << configRect.x << "," << configRect.y << " " << configRect.width << "x" << configRect.height
+					<< " split=" << dc.mSplitY
+					<< " atex=" << dc.mAtex
+					<< " priority=" << (dc.mPriorityFlag ? 1 : 0)
+					<< " tintA=" << dc.mTintColor.a
+					<< " addedA=" << dc.mAddedColor.a);
+				++sPaletteSpriteDrawLogCount;
+			}
+		}
+		const float depth = spriteDepth(dc.mPriorityFlag);
 		if (dc.mUseMesh)
-			fillPaletteSpriteMeshVertices(vertices, dc.mTriangles);
+			fillPaletteSpriteMeshVertices(vertices, dc.mTriangles, depth);
 		else
-			fillPaletteSpriteRectVertices(vertices, dc.mRect);
+			fillPaletteSpriteRectVertices(vertices, dc.mRect, depth);
 		const uint32 vertexDataSize = (uint32)((size_t)vertexCount * sizeof(PaletteSpriteVertex));
 		DCFlushRange(vertices, vertexDataSize);
 		GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, vertices, vertexDataSize);
 
 		bindPaletteSpriteState(mCurrentColorBuffer->surface.width, mCurrentColorBuffer->surface.height, *dataTexture);
-		setPixelUniformVec4(mPaletteSpriteUniforms[0], Vec4f((float)configRect.x, (float)configRect.y, (float)configRect.width, (float)configRect.height));
-		setPixelUniformVec4(mPaletteSpriteUniforms[1], Vec4f((float)dc.mSplitY, (float)dc.mAtex, (float)dataTexture->surface.width, (float)dataTexture->surface.height));
-		setPixelUniformVec4(mPaletteSpriteUniforms[2], Vec4f(dc.mTintColor.r, dc.mTintColor.g, dc.mTintColor.b, dc.mTintColor.a));
-		setPixelUniformVec4(mPaletteSpriteUniforms[3], Vec4f(dc.mAddedColor.r, dc.mAddedColor.g, dc.mAddedColor.b, dc.mAddedColor.a));
+		setPaletteSpriteUniforms(
+			Vec4f((float)configRect.x, (float)configRect.y, (float)configRect.width, (float)configRect.height),
+			Vec4f((float)dc.mSplitY, (float)dc.mAtex, (float)dataTexture->surface.width, (float)dataTexture->surface.height),
+			Vec4f(dc.mTintColor.r, dc.mTintColor.g, dc.mTintColor.b, dc.mTintColor.a),
+			Vec4f(dc.mAddedColor.r, dc.mAddedColor.g, dc.mAddedColor.b, dc.mAddedColor.a));
+		applySpriteDepthTest();
 		applyBlendMode();
 		applyScissor();
 		GX2SetAttribBuffer(0, vertexDataSize, sizeof(PaletteSpriteVertex), vertices);
@@ -3240,6 +4639,83 @@ public:
 		return drawDrawerTextureRect(rect, *texture, tintColor, Color::TRANSPARENT, Vec2f(0.0f, 0.0f), Vec2f(1.0f, 1.0f));
 	}
 
+	template<typename T>
+	CachedTextTexture* getCachedTextTexture(Font& font, const T& text, int spacing)
+	{
+		const StringReader reader(text);
+		if (reader.mLength == 0)
+			return nullptr;
+
+		CachedTextKey key;
+		key.mFontPtr = (uintptr_t)&font;
+		key.mFontChangeCounter = font.getChangeCounter();
+		key.mTextHash = hashStringReader(reader);
+		key.mTextLength = (uint32)reader.mLength;
+		key.mSpacing = (int16)spacing;
+		key.mWideText = (nullptr != reader.mWString);
+
+		auto it = mTextTextures.find(key);
+		if (it == mTextTextures.end())
+		{
+			it = mTextTextures.emplace(std::piecewise_construct, std::forward_as_tuple(key), std::forward_as_tuple()).first;
+			CachedTextTexture& cached = it->second;
+			font.printBitmap(mTempTextBitmap, cached.mInnerRect, reader, spacing, &mTempTextReservedSize);
+			if (mTempTextBitmap.empty() || !initializeTextureStorage(cached.mTexture, mTempTextBitmap.getSize()))
+			{
+				mTextTextures.erase(it);
+				return nullptr;
+			}
+			uploadBitmapToTexture(cached.mTexture, mTempTextBitmap);
+			cached.mSize = mTempTextBitmap.getSize();
+			cached.mContainsTransparentPixels = bitmapContainsTransparentPixels(mTempTextBitmap);
+		}
+
+		CachedTextTexture& cached = it->second;
+		cached.mLastUsedFrame = mPresentCount;
+		return &cached;
+	}
+
+	void destroyCachedTextTexture(CachedTextTexture& cached)
+	{
+		destroyTextureStorage(cached.mTexture, true);
+		cached.mSize.clear();
+		cached.mInnerRect = Recti();
+		cached.mContainsTransparentPixels = false;
+	}
+
+	void cleanupTextTextureCache()
+	{
+		if ((int32)(mPresentCount - mNextTextCacheCleanupFrame) < 0 && mTextTextures.size() <= TEXT_TEXTURE_CACHE_LIMIT)
+			return;
+
+		for (auto it = mTextTextures.begin(); it != mTextTextures.end(); )
+		{
+			if ((uint32)(mPresentCount - it->second.mLastUsedFrame) > TEXT_TEXTURE_CACHE_KEEP_FRAMES)
+			{
+				destroyCachedTextTexture(it->second);
+				it = mTextTextures.erase(it);
+			}
+			else
+			{
+				++it;
+			}
+		}
+
+		while (mTextTextures.size() > TEXT_TEXTURE_CACHE_LIMIT)
+		{
+			auto oldest = mTextTextures.begin();
+			for (auto it = std::next(mTextTextures.begin()); it != mTextTextures.end(); ++it)
+			{
+				if ((uint32)(mPresentCount - it->second.mLastUsedFrame) > (uint32)(mPresentCount - oldest->second.mLastUsedFrame))
+					oldest = it;
+			}
+			destroyCachedTextTexture(oldest->second);
+			mTextTextures.erase(oldest);
+		}
+
+		mNextTextCacheCleanupFrame = mPresentCount + TEXT_TEXTURE_CACHE_CLEANUP_INTERVAL;
+	}
+
 	bool drawSprite(const SpriteDrawCommand& sc)
 	{
 		const SpriteCollection::Item* item = SpriteCollection::instance().getSprite(sc.mSpriteKey);
@@ -3278,28 +4754,40 @@ public:
 	template<typename T>
 	void printText(Font& font, const T& text, const Recti& rect, const DrawerPrintOptions& printOptions)
 	{
-		Vec2i drawPosition;
-		font.printBitmap(mTempTextBitmap, drawPosition, rect, text, printOptions.mAlignment, printOptions.mSpacing, &mTempTextReservedSize);
-		if (mTempTextBitmap.empty())
+		CachedTextTexture* cachedText = getCachedTextTexture(font, text, printOptions.mSpacing);
+		if (nullptr == cachedText || nullptr == cachedText->mTexture.surface.image)
+			return;
+
+		const Vec2i drawPosition = Font::applyAlignment(rect, cachedText->mInnerRect, printOptions.mAlignment);
+		const Vec2i textureSize = cachedText->mSize;
+		if (textureSize.x <= 0 || textureSize.y <= 0)
 			return;
 
 		const BlendMode previousBlendMode = mCurrentBlendMode;
+		const SamplingMode previousSamplingMode = mCurrentSamplingMode;
+		const TextureWrapMode previousWrapMode = mCurrentWrapMode;
 		// Match the mature Vulkan/D3D text path: font bitmaps carry antialiasing
 		// in alpha, so one-bit alpha testing makes menu text look washed out.
 		mCurrentBlendMode = BlendMode::ALPHA;
+		mCurrentSamplingMode = SamplingMode::POINT;
+		mCurrentWrapMode = TextureWrapMode::CLAMP;
 		if constexpr (ENABLE_GX2_DRAWER_DIAGNOSTICS || ENABLE_GX2_TEXT_DIAGNOSTICS)
 		{
 			if (mTextDebugLogCount < 16 || ((mPresentCount % 300) == 0 && mTextDebugLogCount < 64))
 			{
 				RMX_LOG_INFO("GX2Drawer: text draw rect=" << rect.x << "," << rect.y << " " << rect.width << "x" << rect.height
-					<< " out=" << drawPosition.x << "," << drawPosition.y << " " << mTempTextBitmap.getWidth() << "x" << mTempTextBitmap.getHeight()
+					<< " out=" << drawPosition.x << "," << drawPosition.y << " " << textureSize.x << "x" << textureSize.y
 					<< " align=" << printOptions.mAlignment
 					<< " tintA=" << printOptions.mTintColor.a);
-				logBitmapSample("GX2Drawer:   text bitmap", mTempTextBitmap);
 				++mTextDebugLogCount;
 			}
 		}
-		drawScratchBitmap(Recti(drawPosition, mTempTextBitmap.getSize()), mTempTextBitmap, SamplingMode::POINT, TextureWrapMode::CLAMP, printOptions.mTintColor);
+		drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(cachedText->mContainsTransparentPixels, printOptions.mTintColor, Color::TRANSPARENT), [&]()
+		{
+			return drawTexturedRect(Recti(drawPosition, textureSize), cachedText->mTexture, Vec2f(0.0f, 0.0f), Vec2f(1.0f, 1.0f), SamplingMode::POINT, TextureWrapMode::CLAMP, printOptions.mTintColor, Color::TRANSPARENT);
+		});
+		mCurrentWrapMode = previousWrapMode;
+		mCurrentSamplingMode = previousSamplingMode;
 		mCurrentBlendMode = previousBlendMode;
 	}
 
@@ -3526,18 +5014,66 @@ public:
 		GX2SetAlphaTest(FALSE, GX2_COMPARE_FUNC_ALWAYS, 0.0f);
 	}
 
-	void drawToCurrentTarget(uint32 targetWidth, uint32 targetHeight)
+	void drawTextureToCurrentTarget(GX2Texture& texture, uint32 targetWidth, uint32 targetHeight, const Recti* targetRect = nullptr)
 	{
-		if (!mShaderReady || nullptr == mVertexBuffer || nullptr == mPresentTexture.surface.image)
+		if (!mShaderReady || nullptr == mVertexBuffer || nullptr == texture.surface.image)
 			return;
 
-		bindState(targetWidth, targetHeight, mPresentTexture, getSampler(SamplingMode::POINT, TextureWrapMode::CLAMP));
+		bindState(targetWidth, targetHeight, texture, getSampler(SamplingMode::POINT, TextureWrapMode::CLAMP));
 		setPixelUniformColors(Color::WHITE, Color::TRANSPARENT);
 		mCurrentBlendMode = BlendMode::OPAQUE;
 		applyBlendMode();
 		applyFullTargetScissor(targetWidth, targetHeight);
-		GX2SetAttribBuffer(0, sizeof(PresentVertex) * PRESENT_VERTEX_COUNT, sizeof(PresentVertex), mVertexBuffer);
+
+		PresentVertex* vertices = mVertexBuffer;
+		if (nullptr != targetRect)
+		{
+			vertices = allocateVertices(PRESENT_VERTEX_COUNT);
+			if (nullptr == vertices)
+				return;
+			fillTargetRectVertices(vertices, *targetRect, targetWidth, targetHeight);
+			DCFlushRange(vertices, sizeof(PresentVertex) * PRESENT_VERTEX_COUNT);
+			GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, vertices, sizeof(PresentVertex) * PRESENT_VERTEX_COUNT);
+		}
+
+		GX2SetAttribBuffer(0, sizeof(PresentVertex) * PRESENT_VERTEX_COUNT, sizeof(PresentVertex), vertices);
 		GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, PRESENT_VERTEX_COUNT, 0, 1);
+	}
+
+	void drawToCurrentTarget(uint32 targetWidth, uint32 targetHeight)
+	{
+		drawTextureToCurrentTarget(mPresentTexture, targetWidth, targetHeight);
+	}
+
+	bool drawNativeTargetToScanout(GX2ColorBuffer& scanoutColorBuffer, Vec2i& scanoutColorBufferSize, const Vec2i& scanoutSize, const char* label)
+	{
+		if (scanoutSize.x <= 0 || scanoutSize.y <= 0 || nullptr == mCpuColorBuffer.surface.image)
+			return false;
+		if (!ensureScanoutColorBuffer(scanoutColorBuffer, scanoutColorBufferSize, scanoutSize, label))
+			return false;
+		const Vec2i nativeSize((int)mCpuColorBuffer.surface.width, (int)mCpuColorBuffer.surface.height);
+		if (!ensureNativeResolveColorBuffer(nativeSize))
+			return false;
+
+		GX2CopySurface(&mCpuColorBuffer.surface, 0, 0, &mNativeResolveColorBuffer.surface, 0, 0);
+		GX2Flush();
+		GX2DrawDone();
+		invalidateSurfaceAfterColorWrite(mNativeResolveColorBuffer.surface);
+		if (mResolvePresentLogCount < 4)
+		{
+			RMX_LOG_INFO("GX2Drawer: resolved native target for " << label << " upscale source "
+				<< nativeSize.x << "x" << nativeSize.y << " -> " << scanoutSize.x << "x" << scanoutSize.y);
+			++mResolvePresentLogCount;
+		}
+		initializeTextureViewFromColorBuffer(mNativeColorTextureView, mNativeResolveColorBuffer);
+		mCurrentColorBuffer = &scanoutColorBuffer;
+		GX2SetColorBuffer(&scanoutColorBuffer, GX2_RENDER_TARGET_0);
+		GX2ClearColor(&scanoutColorBuffer, 0.0f, 0.0f, 0.0f, 1.0f);
+		const Recti presentRect = getConfiguredScanoutRect(mNativeDrawableSize, scanoutSize);
+		drawTextureToCurrentTarget(mNativeColorTextureView, scanoutColorBuffer.surface.width, scanoutColorBuffer.surface.height, &presentRect);
+		GX2Flush();
+		invalidateSurfaceAfterColorWrite(scanoutColorBuffer.surface);
+		return true;
 	}
 
 	void present()
@@ -3616,8 +5152,23 @@ public:
 				if (!cpuPresent)
 				{
 					GX2Flush();
-					GX2DrawDone();
-					invalidateSurfaceAfterColorWrite(mCpuColorBuffer.surface);
+				}
+				const bool tvScanoutReady = (mTvScanoutSize.x > 0 && mTvScanoutSize.y > 0);
+				const bool drcScanoutReady = COPY_DRC_SCANOUT && (nullptr != mDrcScanBuffer && mDrcScanoutSize.x > 0 && mDrcScanoutSize.y > 0);
+				if constexpr (ENABLE_GX2_PRESENT_MODE_LOGS)
+				{
+					if (mPresentModeLogCount < 6)
+					{
+						RMX_LOG_INFO("GX2Drawer: present mode frame=" << mPresentCount
+							<< " directNative=" << (USE_DIRECT_NATIVE_SCANOUT ? 1 : 0)
+							<< " cpuPresent=" << (cpuPresent ? 1 : 0)
+							<< " tvReady=" << (tvScanoutReady ? 1 : 0)
+							<< " drcReady=" << (drcScanoutReady ? 1 : 0)
+							<< " native=" << mCpuColorBuffer.surface.width << "x" << mCpuColorBuffer.surface.height
+							<< " tv=" << mTvScanoutSize.x << "x" << mTvScanoutSize.y
+							<< " drc=" << mDrcScanoutSize.x << "x" << mDrcScanoutSize.y);
+						++mPresentModeLogCount;
+					}
 				}
 				if constexpr (PRESENT_LOGS)
 				{
@@ -3627,23 +5178,46 @@ public:
 							<< " cpuPresent=" << cpuPresent
 							<< " windowTarget=" << mWindowTargetBound
 							<< " colorBuffer=" << mCpuColorBuffer.surface.width << "x" << mCpuColorBuffer.surface.height
+							<< " tvScanout=" << tvScanoutReady
+							<< " drcScanout=" << drcScanoutReady
 							<< " pitch=" << mCpuColorBuffer.surface.pitch
 							<< " tvScan=" << (nullptr != mTvScanBuffer)
 							<< " drcScan=" << (nullptr != mDrcScanBuffer));
 						++mPresentLogCount;
 					}
 				}
-				GX2SetTVScale(mCpuColorBuffer.surface.width, mCpuColorBuffer.surface.height);
-				GX2CopyColorBufferToScanBuffer(&mCpuColorBuffer, GX2_SCAN_TARGET_TV);
-				if (nullptr != mDrcScanBuffer)
+				GX2ColorBuffer* tvSourceBuffer = &mCpuColorBuffer;
+				if constexpr (USE_DIRECT_NATIVE_SCANOUT)
 				{
-					GX2SetDRCScale(mCpuColorBuffer.surface.width, mCpuColorBuffer.surface.height);
-					GX2CopyColorBufferToScanBuffer(&mCpuColorBuffer, GX2_SCAN_TARGET_DRC);
+					if (!cpuPresent && mWindowTargetBound && tvScanoutReady)
+					{
+						if (drawNativeTargetToScanout(mTvScanoutColorBuffer, mTvScanoutColorBufferSize, mTvScanoutSize, "tv"))
+						{
+							tvSourceBuffer = &mTvScanoutColorBuffer;
+						}
+					}
+				}
+				GX2SetTVScale(tvSourceBuffer->surface.width, tvSourceBuffer->surface.height);
+				GX2CopyColorBufferToScanBuffer(tvSourceBuffer, GX2_SCAN_TARGET_TV);
+				if (drcScanoutReady)
+				{
+					GX2ColorBuffer* drcSourceBuffer = &mCpuColorBuffer;
+					if constexpr (USE_DIRECT_NATIVE_SCANOUT)
+					{
+						if (!cpuPresent && mWindowTargetBound)
+						{
+							if (drawNativeTargetToScanout(mDrcScanoutColorBuffer, mDrcScanoutColorBufferSize, mDrcScanoutSize, "drc"))
+							{
+								drcSourceBuffer = &mDrcScanoutColorBuffer;
+							}
+						}
+					}
+					GX2SetDRCScale(drcSourceBuffer->surface.width, drcSourceBuffer->surface.height);
+					GX2CopyColorBufferToScanBuffer(drcSourceBuffer, GX2_SCAN_TARGET_DRC);
 				}
 				GX2Flush();
 				GX2SwapScanBuffers();
 				GX2SetTVEnable(TRUE);
-				GX2DrawDone();
 				if constexpr (WAIT_FOR_SCAN_FLIP)
 				{
 					GX2WaitForFlip();
@@ -3690,7 +5264,10 @@ public:
 	bool mSetupSuccessful = false;
 	bool mShaderReady = false;
 	bool mColorShaderReady = false;
+	bool mBlurShaderReady = false;
 	bool mPlaneShaderReady = false;
+	bool mPlaneSimpleShaderReady = false;
+	bool mPlaneHScrollShaderReady = false;
 	bool mVdpSpriteShaderReady = false;
 	bool mVdpSpriteBatchShaderReady = false;
 	bool mPaletteSpriteShaderReady = false;
@@ -3701,34 +5278,69 @@ public:
 	void* mDrcScanBuffer = nullptr;
 	GX2ContextState* mNativeContext = nullptr;
 	Vec2i mNativeDrawableSize = Vec2i((int)FALLBACK_TV_WIDTH, (int)FALLBACK_TV_HEIGHT);
+	Vec2i mTvScanoutSize = Vec2i((int)FALLBACK_TV_WIDTH, (int)FALLBACK_TV_HEIGHT);
+	Vec2i mDrcScanoutSize = Vec2i((int)DRC_SCANOUT_WIDTH, (int)DRC_SCANOUT_HEIGHT);
 	WHBGfxShaderGroup mShaderGroup = {};
 	WHBGfxShaderGroup mColorShaderGroup = {};
+	WHBGfxShaderGroup mBlurShaderGroup = {};
 	WHBGfxShaderGroup mPlaneShaderGroup = {};
+	WHBGfxShaderGroup mPlaneSimpleShaderGroup = {};
+	WHBGfxShaderGroup mPlaneHScrollShaderGroup = {};
 	WHBGfxShaderGroup mVdpSpriteShaderGroup = {};
 	WHBGfxShaderGroup mVdpSpriteBatchShaderGroup = {};
 	WHBGfxShaderGroup mPaletteSpriteShaderGroup = {};
 	std::array<GX2Sampler, 4> mSamplers = {};
 	uint32 mSamplerLocation = 0;
-	std::array<uint32, 1> mPlaneSamplerLocations = {};
-	std::array<uint32, 1> mVdpSpriteSamplerLocations = {};
-	std::array<uint32, 1> mVdpSpriteBatchSamplerLocations = {};
+	std::array<uint32, 5> mPlaneSamplerLocations = {};
+	std::array<uint32, 5> mPlaneSimpleSamplerLocations = {};
+	std::array<uint32, 5> mPlaneHScrollSamplerLocations = {};
+	uint32 mBlurSamplerLocation = UINT32_MAX;
+	GX2Texture mDataAtlasTextureView = {};
+	std::array<uint32, 2> mVdpSpriteSamplerLocations = {};
+	std::array<uint32, 2> mVdpSpriteBatchSamplerLocations = {};
 	std::array<uint32, 2> mPaletteSpriteSamplerLocations = {};
 	PixelUniformSlot mTintUniform;
 	PixelUniformSlot mAddedUniform;
 	PixelUniformSlot mPlaneConfigUniforms[4];
+	PixelUniformSlot mPlaneSimpleConfigUniforms[4];
+	PixelUniformSlot mPlaneHScrollConfigUniforms[4];
 	PixelUniformSlot mVdpSpriteUniforms[4];
 	PixelUniformSlot mPaletteSpriteUniforms[4];
+	PixelUniformSlot mBlurUniforms[2];
 	uint8* mPixelUniformBlock = nullptr;
 	uint32 mPixelUniformBlockLocation = UINT32_MAX;
 	uint32 mPixelUniformBlockSize = 0;
+	uint32 mPlaneUniformBlockLocation = UINT32_MAX;
+	uint32 mPlaneUniformBlockSize = 0;
+	uint32 mPlaneSimpleUniformBlockLocation = UINT32_MAX;
+	uint32 mPlaneSimpleUniformBlockSize = 0;
+	uint32 mPlaneHScrollUniformBlockLocation = UINT32_MAX;
+	uint32 mPlaneHScrollUniformBlockSize = 0;
+	uint32 mVdpSpriteUniformBlockLocation = UINT32_MAX;
+	uint32 mVdpSpriteUniformBlockSize = 0;
+	uint32 mPaletteSpriteUniformBlockLocation = UINT32_MAX;
+	uint32 mPaletteSpriteUniformBlockSize = 0;
+	uint32 mBlurUniformBlockLocation = UINT32_MAX;
+	uint32 mBlurUniformBlockSize = 0;
 	uint32 mUploadLogCount = 0;
 	uint32 mTexturePresentLogCount = 0;
 	uint32 mPresentTextureCreateLogCount = 0;
 	uint32 mCpuPresentLogCount = 0;
 	uint32 mPresentLogCount = 0;
+	uint32 mPresentModeLogCount = 0;
+	uint32 mResolvePresentLogCount = 0;
 	uint32 mPresentCount = 0;
 	GX2ColorBuffer mCpuColorBuffer = {};
 	Vec2i mCpuColorBufferSize;
+	std::array<DepthBufferSlot, DEPTH_BUFFER_CACHE_SIZE> mDepthBuffers;
+	GX2DepthBuffer* mCurrentDepthBuffer = nullptr;
+	GX2ColorBuffer mNativeResolveColorBuffer = {};
+	Vec2i mNativeResolveColorBufferSize;
+	GX2ColorBuffer mTvScanoutColorBuffer = {};
+	Vec2i mTvScanoutColorBufferSize;
+	GX2ColorBuffer mDrcScanoutColorBuffer = {};
+	Vec2i mDrcScanoutColorBufferSize;
+	GX2Texture mNativeColorTextureView = {};
 	GX2Texture mPresentTexture = {};
 	Vec2i mPresentTextureSize;
 	PresentVertex* mVertexBuffer = nullptr;
@@ -3740,18 +5352,19 @@ public:
 	size_t mDynamicUniformWriteOffset = 0;
 	GX2ColorBuffer* mCurrentColorBuffer = nullptr;
 	Recti mCurrentViewport;
+	Recti mCurrentViewportTargetRect;
 	Vec4f mPixelToViewSpaceTransform;
 	std::vector<Recti> mScissorStack;
 	bool mInvalidScissorRegion = false;
 	bool mFrameActive = false;
 	bool mWindowTargetBound = false;
 	bool mWindowTargetCleared = false;
+	bool mDepthActiveForTarget = false;
 	BlendMode mCurrentBlendMode = BlendMode::OPAQUE;
 	SamplingMode mCurrentSamplingMode = SamplingMode::POINT;
 	TextureWrapMode mCurrentWrapMode = TextureWrapMode::CLAMP;
-	GX2Texture mScratchTexture = {};
-	Vec2i mScratchTextureSize;
-	bool mScratchUploadPending = false;
+	std::array<ScratchTextureSlot, SCRATCH_TEXTURE_RING_SIZE> mScratchTextures;
+	uint32 mScratchTextureCursor = 0;
 	uint32 mScratchDebugLogCount = 0;
 	uint32 mSpriteDebugLogCount = 0;
 	uint32 mTextDebugLogCount = 0;
@@ -3759,6 +5372,8 @@ public:
 	bool mSoftwarePresentLogged = false;
 	std::unordered_map<uint64, CachedSpriteTexture> mComponentSpriteTextures;
 	std::unordered_map<uint64, CachedSpriteTexture> mPaletteSpriteTextures;
+	std::unordered_map<CachedTextKey, CachedTextTexture, CachedTextKeyHasher> mTextTextures;
+	uint32 mNextTextCacheCleanupFrame = 0;
 	Bitmap mScratchBitmap;
 	int mScratchBitmapReservedSize = 0;
 	Bitmap mSolidBitmap;
@@ -3836,12 +5451,225 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 
 	if (!mInternal.beginFrame())
 		return;
+
+#if defined(PLATFORM_WIIU)
+	{
+		static uint32 sTelemetryFrame = 0;
+		static uint32 sHeavyTelemetryLogCount = 0;
+		const bool heavyTelemetry = ENABLE_GX2_HEAVY_TELEMETRY_LOGS && drawCommands.size() >= 64 && sHeavyTelemetryLogCount < 96;
+		const bool startupTelemetry = ENABLE_GX2_STARTUP_TELEMETRY_LOGS && sTelemetryFrame < 4;
+		const bool periodicTelemetry = ENABLE_GX2_PERIODIC_TELEMETRY_LOGS && (sTelemetryFrame % 120) == 0 && sTelemetryFrame < 3600;
+		const bool logTelemetry = heavyTelemetry || startupTelemetry || periodicTelemetry;
+		if (logTelemetry)
+		{
+			uint32 gx2PlaneCount = 0;
+			uint32 gx2VdpSpriteCount = 0;
+			uint32 gx2PaletteSpriteCount = 0;
+			uint32 gx2TextureSpriteCount = 0;
+			uint32 gx2BlurCount = 0;
+			uint32 rectCount = 0;
+			uint32 upscaledRectCount = 0;
+			uint32 meshCount = 0;
+			uint32 textCount = 0;
+			uint32 scissorCount = 0;
+			uint32 renderTargetCount = 0;
+			uint32 depthClearCount = 0;
+			uint32 blendChangeCount = 0;
+			uint32 simulatedVdpBatches = 0;
+			uint32 simulatedVdpBatchSprites = 0;
+			uint32 simulatedMaxVdpBatch = 0;
+			uint32 pendingVdpBatch = 0;
+			uint32 flushByTarget = 0;
+			uint32 flushByRect = 0;
+			uint32 flushByMesh = 0;
+			uint32 flushByPlane = 0;
+			uint32 flushByPalette = 0;
+			uint32 flushByTextureSprite = 0;
+			uint32 flushByBlur = 0;
+			uint32 flushByDepth = 0;
+			uint32 flushByBlend = 0;
+			uint32 flushByText = 0;
+			uint32 flushByScissor = 0;
+			uint32 flushByResource = 0;
+			uint32 flushByOther = 0;
+			BlendMode simulatedBlendMode = mInternal.mCurrentBlendMode;
+			GX2RenderResources* simulatedVdpResources = nullptr;
+			auto flushSimulatedVdpBatch = [&](uint32* flushReason)
+			{
+				if (pendingVdpBatch == 0)
+					return;
+				++simulatedVdpBatches;
+				simulatedVdpBatchSprites += pendingVdpBatch;
+				simulatedMaxVdpBatch = std::max(simulatedMaxVdpBatch, pendingVdpBatch);
+				if (nullptr != flushReason)
+					++(*flushReason);
+				pendingVdpBatch = 0;
+				simulatedVdpResources = nullptr;
+			};
+
+			for (DrawCommand* command : drawCommands)
+			{
+				switch (command->getType())
+				{
+					case DrawCommand::Type::SET_WINDOW_RENDER_TARGET:
+					case DrawCommand::Type::SET_RENDER_TARGET:
+						flushSimulatedVdpBatch(&flushByTarget);
+						++renderTargetCount;
+						break;
+
+					case DrawCommand::Type::RECT:
+						flushSimulatedVdpBatch(&flushByRect);
+						++rectCount;
+						break;
+
+					case DrawCommand::Type::UPSCALED_RECT:
+						flushSimulatedVdpBatch(&flushByRect);
+						++upscaledRectCount;
+						break;
+
+					case DrawCommand::Type::SPRITE:
+					case DrawCommand::Type::SPRITE_RECT:
+					case DrawCommand::Type::MESH:
+					case DrawCommand::Type::MESH_VERTEX_COLOR:
+						flushSimulatedVdpBatch(&flushByMesh);
+						++meshCount;
+						break;
+
+					case DrawCommand::Type::GX2_PLANE:
+						flushSimulatedVdpBatch(&flushByPlane);
+						++gx2PlaneCount;
+						break;
+
+					case DrawCommand::Type::GX2_VDP_SPRITE:
+					{
+						GX2VdpSpriteDrawCommand& dc = command->as<GX2VdpSpriteDrawCommand>();
+						if (!dc.mRect.empty())
+						{
+							if (pendingVdpBatch != 0 && simulatedVdpResources != dc.mResources)
+								flushSimulatedVdpBatch(&flushByResource);
+							simulatedVdpResources = dc.mResources;
+							++pendingVdpBatch;
+							++gx2VdpSpriteCount;
+						}
+						break;
+					}
+
+					case DrawCommand::Type::GX2_PALETTE_SPRITE:
+						flushSimulatedVdpBatch(&flushByPalette);
+						++gx2PaletteSpriteCount;
+						break;
+
+					case DrawCommand::Type::GX2_TEXTURE_SPRITE:
+						flushSimulatedVdpBatch(&flushByTextureSprite);
+						++gx2TextureSpriteCount;
+						break;
+
+					case DrawCommand::Type::GX2_BLUR:
+						flushSimulatedVdpBatch(&flushByBlur);
+						++gx2BlurCount;
+						break;
+
+					case DrawCommand::Type::GX2_CLEAR_DEPTH:
+						flushSimulatedVdpBatch(&flushByDepth);
+						++depthClearCount;
+						break;
+
+					case DrawCommand::Type::SET_BLEND_MODE:
+					{
+						const BlendMode blendMode = command->as<SetBlendModeDrawCommand>().mBlendMode;
+						if (pendingVdpBatch != 0 && simulatedBlendMode != blendMode)
+							flushSimulatedVdpBatch(&flushByBlend);
+						simulatedBlendMode = blendMode;
+						++blendChangeCount;
+						break;
+					}
+
+					case DrawCommand::Type::PRINT_TEXT:
+					case DrawCommand::Type::PRINT_TEXT_W:
+						flushSimulatedVdpBatch(&flushByText);
+						++textCount;
+						break;
+
+					case DrawCommand::Type::PUSH_SCISSOR:
+					case DrawCommand::Type::POP_SCISSOR:
+						flushSimulatedVdpBatch(&flushByScissor);
+						++scissorCount;
+						break;
+
+					default:
+						flushSimulatedVdpBatch(&flushByOther);
+						break;
+				}
+			}
+			flushSimulatedVdpBatch(nullptr);
+
+			RMX_LOG_INFO("GX2Drawer: telemetry frame=" << sTelemetryFrame
+				<< " present=" << mInternal.mPresentCount
+				<< " commands=" << drawCommands.size()
+				<< " planes=" << gx2PlaneCount
+				<< " vdp=" << gx2VdpSpriteCount
+				<< " vdpBatches=" << simulatedVdpBatches
+				<< " vdpBatchSprites=" << simulatedVdpBatchSprites
+				<< " maxVdpBatch=" << simulatedMaxVdpBatch
+				<< " palette=" << gx2PaletteSpriteCount
+				<< " textureSprites=" << gx2TextureSpriteCount
+				<< " blur=" << gx2BlurCount
+				<< " rects=" << rectCount
+				<< " upscaled=" << upscaledRectCount
+				<< " meshes=" << meshCount
+				<< " text=" << textCount
+				<< " scissor=" << scissorCount
+				<< " targets=" << renderTargetCount
+				<< " depthClears=" << depthClearCount
+				<< " blends=" << blendChangeCount
+				<< " vdpFlushTarget=" << flushByTarget
+				<< " vdpFlushRect=" << flushByRect
+				<< " vdpFlushMesh=" << flushByMesh
+				<< " vdpFlushPlane=" << flushByPlane
+				<< " vdpFlushPalette=" << flushByPalette
+				<< " vdpFlushTexture=" << flushByTextureSprite
+				<< " vdpFlushBlur=" << flushByBlur
+				<< " vdpFlushDepth=" << flushByDepth
+				<< " vdpFlushBlend=" << flushByBlend
+				<< " vdpFlushText=" << flushByText
+				<< " vdpFlushScissor=" << flushByScissor
+				<< " vdpFlushResource=" << flushByResource
+				<< " vdpFlushOther=" << flushByOther);
+			if (heavyTelemetry)
+				++sHeavyTelemetryLogCount;
+		}
+		++sTelemetryFrame;
+	}
+#endif
+
 	if constexpr (ENABLE_GX2_DRAWER_DIAGNOSTICS)
 	{
 		if (mInternal.mPresentCount < 8 || (mInternal.mPresentCount % 300) == 0)
 		{
+			uint32 gx2PlaneCount = 0;
+			uint32 gx2VdpSpriteCount = 0;
+			uint32 gx2PaletteSpriteCount = 0;
+			uint32 gx2TextureSpriteCount = 0;
+			uint32 gx2BlurCount = 0;
+			for (DrawCommand* command : drawCommands)
+			{
+				switch (command->getType())
+				{
+					case DrawCommand::Type::GX2_PLANE:			++gx2PlaneCount; break;
+					case DrawCommand::Type::GX2_VDP_SPRITE:		++gx2VdpSpriteCount; break;
+					case DrawCommand::Type::GX2_PALETTE_SPRITE:	++gx2PaletteSpriteCount; break;
+					case DrawCommand::Type::GX2_TEXTURE_SPRITE:	++gx2TextureSpriteCount; break;
+					case DrawCommand::Type::GX2_BLUR:			++gx2BlurCount; break;
+					default: break;
+				}
+			}
 			RMX_LOG_INFO("GX2Drawer: performRendering commands=" << drawCommands.size()
-				<< " presentCount=" << mInternal.mPresentCount);
+				<< " presentCount=" << mInternal.mPresentCount
+				<< " gx2Planes=" << gx2PlaneCount
+				<< " gx2VdpSprites=" << gx2VdpSpriteCount
+				<< " gx2PaletteSprites=" << gx2PaletteSpriteCount
+				<< " gx2TextureSprites=" << gx2TextureSpriteCount
+				<< " gx2Blur=" << gx2BlurCount);
 			int commandIndex = 0;
 			for (DrawCommand* command : drawCommands)
 			{
@@ -3886,6 +5714,52 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 						RMX_LOG_INFO("GX2Drawer: cmd[" << commandIndex << "] BLEND mode=" << (int)dc.mBlendMode);
 						break;
 					}
+					case DrawCommand::Type::GX2_PLANE:
+					{
+						GX2PlaneDrawCommand& dc = command->as<GX2PlaneDrawCommand>();
+						RMX_LOG_INFO("GX2Drawer: cmd[" << commandIndex << "] GX2_PLANE rect=" << dc.mActiveRect.x << "," << dc.mActiveRect.y << " " << dc.mActiveRect.width << "x" << dc.mActiveRect.height
+							<< " plane=" << dc.mPlaneIndex << " priority=" << dc.mPriorityFlag);
+						break;
+					}
+					case DrawCommand::Type::GX2_VDP_SPRITE:
+					{
+						GX2VdpSpriteDrawCommand& dc = command->as<GX2VdpSpriteDrawCommand>();
+						RMX_LOG_INFO("GX2Drawer: cmd[" << commandIndex << "] GX2_VDP rect=" << dc.mRect.x << "," << dc.mRect.y << " " << dc.mRect.width << "x" << dc.mRect.height
+							<< " patterns=" << dc.mSizeInPatterns.x << "x" << dc.mSizeInPatterns.y
+							<< " first=" << dc.mFirstPattern << " blend=" << (int)mInternal.mCurrentBlendMode);
+						break;
+					}
+					case DrawCommand::Type::GX2_PALETTE_SPRITE:
+					{
+						GX2PaletteSpriteDrawCommand& dc = command->as<GX2PaletteSpriteDrawCommand>();
+						RMX_LOG_INFO("GX2Drawer: cmd[" << commandIndex << "] GX2_PALETTE rect=" << dc.mRect.x << "," << dc.mRect.y << " " << dc.mRect.width << "x" << dc.mRect.height
+							<< " source=" << dc.mSourceSize.x << "x" << dc.mSourceSize.y
+							<< " mesh=" << dc.mUseMesh
+							<< " dataTex=" << (nullptr != dc.mDataTexture ? dc.mDataTexture->getWidth() : 0) << "x" << (nullptr != dc.mDataTexture ? dc.mDataTexture->getHeight() : 0)
+							<< " atex=" << dc.mAtex);
+						break;
+					}
+					case DrawCommand::Type::GX2_TEXTURE_SPRITE:
+					{
+						GX2TextureSpriteDrawCommand& dc = command->as<GX2TextureSpriteDrawCommand>();
+						RMX_LOG_INFO("GX2Drawer: cmd[" << commandIndex << "] GX2_TEXTURE rect=" << dc.mRect.x << "," << dc.mRect.y << " " << dc.mRect.width << "x" << dc.mRect.height
+							<< " mesh=" << dc.mUseMesh
+							<< " triangles=" << dc.mTriangles.size()
+							<< " tex=" << (nullptr != dc.mTexture ? dc.mTexture->getWidth() : 0) << "x" << (nullptr != dc.mTexture ? dc.mTexture->getHeight() : 0)
+							<< " tintA=" << dc.mTintColor.a
+							<< " addedA=" << dc.mAddedColor.a);
+						break;
+					}
+					case DrawCommand::Type::GX2_BLUR:
+					{
+						GX2BlurDrawCommand& dc = command->as<GX2BlurDrawCommand>();
+						RMX_LOG_INFO("GX2Drawer: cmd[" << commandIndex << "] GX2_BLUR texture="
+							<< (nullptr != dc.mProcessingTexture ? dc.mProcessingTexture->getWidth() : 0)
+							<< "x" << (nullptr != dc.mProcessingTexture ? dc.mProcessingTexture->getHeight() : 0)
+							<< " resolution=" << dc.mResolution.x << "x" << dc.mResolution.y
+							<< " kernel=" << dc.mKernel.x << "," << dc.mKernel.y << "," << dc.mKernel.z << "," << dc.mKernel.w);
+						break;
+					}
 					default:
 					{
 						RMX_LOG_INFO("GX2Drawer: cmd[" << commandIndex << "] type=" << (int)command->getType());
@@ -3898,7 +5772,7 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 	}
 	if constexpr (ENABLE_GX2_MENU_COMMAND_TRACE)
 	{
-		if (!mInternal.mMenuCommandTraceDone)
+		if (!mInternal.mMenuCommandTraceDone && mInternal.mPresentCount > 180 && drawCommands.size() >= 16)
 		{
 			bool hasMenuText = false;
 			for (DrawCommand* command : drawCommands)
@@ -3960,6 +5834,72 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 								<< " tintA=" << dc.mTintColor.a);
 							break;
 						}
+						case DrawCommand::Type::MESH:
+						{
+							MeshDrawCommand& dc = command->as<MeshDrawCommand>();
+							float minX = 0.0f;
+							float minY = 0.0f;
+							float maxX = 0.0f;
+							float maxY = 0.0f;
+							float minU = 0.0f;
+							float minV = 0.0f;
+							float maxU = 0.0f;
+							float maxV = 0.0f;
+							if (!dc.mTriangles.empty())
+							{
+								minX = maxX = dc.mTriangles[0].mPosition.x;
+								minY = maxY = dc.mTriangles[0].mPosition.y;
+								minU = maxU = dc.mTriangles[0].mTexcoords.x;
+								minV = maxV = dc.mTriangles[0].mTexcoords.y;
+								for (const DrawerMeshVertex& vertex : dc.mTriangles)
+								{
+									minX = std::min(minX, vertex.mPosition.x);
+									minY = std::min(minY, vertex.mPosition.y);
+									maxX = std::max(maxX, vertex.mPosition.x);
+									maxY = std::max(maxY, vertex.mPosition.y);
+									minU = std::min(minU, vertex.mTexcoords.x);
+									minV = std::min(minV, vertex.mTexcoords.y);
+									maxU = std::max(maxU, vertex.mTexcoords.x);
+									maxV = std::max(maxV, vertex.mTexcoords.y);
+								}
+							}
+							RMX_LOG_INFO("GX2Drawer menu trace: [" << commandIndex << "] MESH tris=" << dc.mTriangles.size()
+								<< " bounds=" << minX << "," << minY << ".." << maxX << "," << maxY
+								<< " uv=" << minU << "," << minV << ".." << maxU << "," << maxV
+								<< " tex=" << (nullptr != dc.mTexture ? dc.mTexture->getWidth() : 0) << "x" << (nullptr != dc.mTexture ? dc.mTexture->getHeight() : 0)
+								<< " tint=" << dc.mTintColor.r << "," << dc.mTintColor.g << "," << dc.mTintColor.b << "," << dc.mTintColor.a
+								<< " add=" << dc.mAddedColor.r << "," << dc.mAddedColor.g << "," << dc.mAddedColor.b << "," << dc.mAddedColor.a);
+							break;
+						}
+						case DrawCommand::Type::MESH_VERTEX_COLOR:
+						{
+							MeshVertexColorDrawCommand& dc = command->as<MeshVertexColorDrawCommand>();
+							float minX = 0.0f;
+							float minY = 0.0f;
+							float maxX = 0.0f;
+							float maxY = 0.0f;
+							float minA = 0.0f;
+							float maxA = 0.0f;
+							if (!dc.mTriangles.empty())
+							{
+								minX = maxX = dc.mTriangles[0].mPosition.x;
+								minY = maxY = dc.mTriangles[0].mPosition.y;
+								minA = maxA = dc.mTriangles[0].mColor.a;
+								for (const DrawerMeshVertex_P2_C4& vertex : dc.mTriangles)
+								{
+									minX = std::min(minX, vertex.mPosition.x);
+									minY = std::min(minY, vertex.mPosition.y);
+									maxX = std::max(maxX, vertex.mPosition.x);
+									maxY = std::max(maxY, vertex.mPosition.y);
+									minA = std::min(minA, vertex.mColor.a);
+									maxA = std::max(maxA, vertex.mColor.a);
+								}
+							}
+							RMX_LOG_INFO("GX2Drawer menu trace: [" << commandIndex << "] MESH_VERTEX_COLOR tris=" << dc.mTriangles.size()
+								<< " bounds=" << minX << "," << minY << ".." << maxX << "," << maxY
+								<< " alpha=" << minA << ".." << maxA);
+							break;
+						}
 						case DrawCommand::Type::PRINT_TEXT:
 						{
 							PrintTextDrawCommand& dc = command->as<PrintTextDrawCommand>();
@@ -4006,6 +5946,65 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 							RMX_LOG_INFO("GX2Drawer menu trace: [" << commandIndex << "] POP_SCISSOR");
 							break;
 						}
+						case DrawCommand::Type::GX2_PALETTE_SPRITE:
+						{
+							GX2PaletteSpriteDrawCommand& dc = command->as<GX2PaletteSpriteDrawCommand>();
+							float minX = 0.0f;
+							float minY = 0.0f;
+							float maxX = 0.0f;
+							float maxY = 0.0f;
+							if (!dc.mTriangles.empty())
+							{
+								minX = maxX = dc.mTriangles[0].mPosition.x;
+								minY = maxY = dc.mTriangles[0].mPosition.y;
+								for (const DrawerMeshVertex& vertex : dc.mTriangles)
+								{
+									minX = std::min(minX, vertex.mPosition.x);
+									minY = std::min(minY, vertex.mPosition.y);
+									maxX = std::max(maxX, vertex.mPosition.x);
+									maxY = std::max(maxY, vertex.mPosition.y);
+								}
+							}
+							RMX_LOG_INFO("GX2Drawer menu trace: [" << commandIndex << "] GX2_PALETTE rect="
+								<< dc.mRect.x << "," << dc.mRect.y << " " << dc.mRect.width << "x" << dc.mRect.height
+								<< " mesh=" << dc.mUseMesh
+								<< " tris=" << dc.mTriangles.size()
+								<< " bounds=" << minX << "," << minY << ".." << maxX << "," << maxY
+								<< " source=" << dc.mSourceSize.x << "x" << dc.mSourceSize.y
+								<< " tintA=" << dc.mTintColor.a
+								<< " addA=" << dc.mAddedColor.a
+								<< " atex=" << dc.mAtex);
+							break;
+						}
+						case DrawCommand::Type::GX2_TEXTURE_SPRITE:
+						{
+							GX2TextureSpriteDrawCommand& dc = command->as<GX2TextureSpriteDrawCommand>();
+							float minX = 0.0f;
+							float minY = 0.0f;
+							float maxX = 0.0f;
+							float maxY = 0.0f;
+							if (!dc.mTriangles.empty())
+							{
+								minX = maxX = dc.mTriangles[0].mPosition.x;
+								minY = maxY = dc.mTriangles[0].mPosition.y;
+								for (const DrawerMeshVertex& vertex : dc.mTriangles)
+								{
+									minX = std::min(minX, vertex.mPosition.x);
+									minY = std::min(minY, vertex.mPosition.y);
+									maxX = std::max(maxX, vertex.mPosition.x);
+									maxY = std::max(maxY, vertex.mPosition.y);
+								}
+							}
+							RMX_LOG_INFO("GX2Drawer menu trace: [" << commandIndex << "] GX2_TEXTURE rect="
+								<< dc.mRect.x << "," << dc.mRect.y << " " << dc.mRect.width << "x" << dc.mRect.height
+								<< " mesh=" << dc.mUseMesh
+								<< " tris=" << dc.mTriangles.size()
+								<< " bounds=" << minX << "," << minY << ".." << maxX << "," << maxY
+								<< " tex=" << (nullptr != dc.mTexture ? dc.mTexture->getWidth() : 0) << "x" << (nullptr != dc.mTexture ? dc.mTexture->getHeight() : 0)
+								<< " tintA=" << dc.mTintColor.a
+								<< " addA=" << dc.mAddedColor.a);
+							break;
+						}
 						default:
 						{
 							RMX_LOG_INFO("GX2Drawer menu trace: [" << commandIndex << "] type=" << (int)command->getType());
@@ -4015,6 +6014,146 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 					++commandIndex;
 				}
 			}
+		}
+	}
+	if constexpr (ENABLE_GX2_MENU_COMMAND_TRACE)
+	{
+		static uint32 sStableBatchTraceCount = 0;
+		if (mInternal.mPresentCount >= 360 && sStableBatchTraceCount < 36)
+		{
+			uint32 setWindowCount = 0;
+			uint32 setTargetCount = 0;
+			uint32 rectCount = 0;
+			uint32 texturedRectCount = 0;
+			uint32 meshCount = 0;
+			uint32 textCount = 0;
+			uint32 blendCount = 0;
+			uint32 depthClearCount = 0;
+			uint32 scissorCount = 0;
+			Recti firstWindowViewport;
+			bool hasFirstWindowViewport = false;
+			bool hasGamePresentRect = false;
+			bool hasRedProbeRect = false;
+			bool hasOpaqueBlackLeftRect = false;
+			bool hasLeftMesh = false;
+			float leftMeshMinX = 0.0f;
+			float leftMeshMaxX = 0.0f;
+			float leftMeshMinY = 0.0f;
+			float leftMeshMaxY = 0.0f;
+
+			for (DrawCommand* command : drawCommands)
+			{
+				switch (command->getType())
+				{
+					case DrawCommand::Type::SET_WINDOW_RENDER_TARGET:
+					{
+						++setWindowCount;
+						SetWindowRenderTargetDrawCommand& dc = command->as<SetWindowRenderTargetDrawCommand>();
+						if (!hasFirstWindowViewport)
+						{
+							firstWindowViewport = dc.mViewport;
+							hasFirstWindowViewport = true;
+						}
+						break;
+					}
+					case DrawCommand::Type::SET_RENDER_TARGET:
+						++setTargetCount;
+						break;
+					case DrawCommand::Type::RECT:
+					{
+						++rectCount;
+						RectDrawCommand& dc = command->as<RectDrawCommand>();
+						if (nullptr != dc.mTexture)
+						{
+							++texturedRectCount;
+							hasGamePresentRect = hasGamePresentRect
+								|| (dc.mTexture->getWidth() == (int)NATIVE_GAME_RENDER_WIDTH
+									&& dc.mTexture->getHeight() == (int)NATIVE_GAME_RENDER_HEIGHT
+									&& dc.mRect.x == 0 && dc.mRect.y == 0
+									&& dc.mRect.width == (int)NATIVE_GAME_RENDER_WIDTH
+									&& dc.mRect.height == (int)NATIVE_GAME_RENDER_HEIGHT);
+						}
+						else
+						{
+							hasRedProbeRect = hasRedProbeRect
+								|| (dc.mRect.x == 16 && dc.mRect.y == 16 && dc.mRect.width == 48 && dc.mRect.height == 48
+									&& dc.mColor.r > 0.9f && dc.mColor.g < 0.1f && dc.mColor.b < 0.1f && dc.mColor.a > 0.9f);
+							hasOpaqueBlackLeftRect = hasOpaqueBlackLeftRect
+								|| (dc.mRect.x <= 0 && dc.mRect.y <= 0 && dc.mRect.width >= 160 && dc.mRect.height >= (int)NATIVE_GAME_RENDER_HEIGHT
+									&& dc.mColor.r < 0.01f && dc.mColor.g < 0.01f && dc.mColor.b < 0.01f && dc.mColor.a > 0.9f);
+						}
+						break;
+					}
+					case DrawCommand::Type::MESH:
+					{
+						++meshCount;
+						MeshDrawCommand& dc = command->as<MeshDrawCommand>();
+						if (!dc.mTriangles.empty())
+						{
+							float minX = dc.mTriangles[0].mPosition.x;
+							float minY = dc.mTriangles[0].mPosition.y;
+							float maxX = minX;
+							float maxY = minY;
+							for (const DrawerMeshVertex& vertex : dc.mTriangles)
+							{
+								minX = std::min(minX, vertex.mPosition.x);
+								minY = std::min(minY, vertex.mPosition.y);
+								maxX = std::max(maxX, vertex.mPosition.x);
+								maxY = std::max(maxY, vertex.mPosition.y);
+							}
+							if (!hasLeftMesh && minX < 180.0f && maxX > 0.0f)
+							{
+								hasLeftMesh = true;
+								leftMeshMinX = minX;
+								leftMeshMaxX = maxX;
+								leftMeshMinY = minY;
+								leftMeshMaxY = maxY;
+							}
+						}
+						break;
+					}
+					case DrawCommand::Type::PRINT_TEXT:
+					case DrawCommand::Type::PRINT_TEXT_W:
+						++textCount;
+						break;
+					case DrawCommand::Type::SET_BLEND_MODE:
+						++blendCount;
+						break;
+					case DrawCommand::Type::GX2_CLEAR_DEPTH:
+						++depthClearCount;
+						break;
+					case DrawCommand::Type::PUSH_SCISSOR:
+					case DrawCommand::Type::POP_SCISSOR:
+						++scissorCount;
+						break;
+					default:
+						break;
+				}
+			}
+
+			RMX_LOG_INFO("GX2Drawer stable batch trace: index=" << sStableBatchTraceCount
+				<< " present=" << mInternal.mPresentCount
+				<< " commands=" << drawCommands.size()
+				<< " window=" << setWindowCount
+				<< " firstWindow=" << (hasFirstWindowViewport ? firstWindowViewport.x : 0) << "," << (hasFirstWindowViewport ? firstWindowViewport.y : 0)
+					<< " " << (hasFirstWindowViewport ? firstWindowViewport.width : 0) << "x" << (hasFirstWindowViewport ? firstWindowViewport.height : 0)
+				<< " target=" << setTargetCount
+				<< " rects=" << rectCount
+				<< " texRects=" << texturedRectCount
+				<< " meshes=" << meshCount
+				<< " text=" << textCount
+				<< " blends=" << blendCount
+				<< " depthClears=" << depthClearCount
+				<< " scissors=" << scissorCount
+				<< " gameRect=" << (hasGamePresentRect ? 1 : 0)
+				<< " redProbe=" << (hasRedProbeRect ? 1 : 0)
+				<< " blackLeft=" << (hasOpaqueBlackLeftRect ? 1 : 0)
+				<< " leftMesh=" << (hasLeftMesh ? 1 : 0)
+				<< " leftMeshBounds=" << leftMeshMinX << "," << leftMeshMinY << ".." << leftMeshMaxX << "," << leftMeshMaxY
+				<< " frameActive=" << (mInternal.mFrameActive ? 1 : 0)
+				<< " windowCleared=" << (mInternal.mWindowTargetCleared ? 1 : 0)
+				<< " windowBound=" << (mInternal.mWindowTargetBound ? 1 : 0));
+			++sStableBatchTraceCount;
 		}
 	}
 
@@ -4211,6 +6350,31 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 				if (!mInternal.mayRenderAnything())
 					break;
 				mInternal.drawGX2PaletteSprite(drawCommand->as<GX2PaletteSpriteDrawCommand>());
+				break;
+			}
+
+			case DrawCommand::Type::GX2_TEXTURE_SPRITE:
+			{
+				flushPendingVdpSprites();
+				if (!mInternal.mayRenderAnything())
+					break;
+				mInternal.drawGX2TextureSprite(drawCommand->as<GX2TextureSpriteDrawCommand>());
+				break;
+			}
+
+			case DrawCommand::Type::GX2_BLUR:
+			{
+				flushPendingVdpSprites();
+				if (!mInternal.mayRenderAnything())
+					break;
+				mInternal.drawGX2Blur(drawCommand->as<GX2BlurDrawCommand>());
+				break;
+			}
+
+			case DrawCommand::Type::GX2_CLEAR_DEPTH:
+			{
+				flushPendingVdpSprites();
+				mInternal.clearCurrentDepthBuffer();
 				break;
 			}
 

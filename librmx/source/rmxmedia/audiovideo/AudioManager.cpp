@@ -272,9 +272,14 @@ namespace rmx
 		instance.mVolumeChange = playbackOptions.mVolumeChange;
 		instance.mSpeed = playbackOptions.mSpeed;
 		instance.mPosition = roundToInt(playbackOptions.mPosition * (float)playbackOptions.mAudioBuffer->getFrequency());
+		instance.mTimeout = 0;
+		instance.mLoopStart = 0;
 		instance.mLoop = playbackOptions.mLoop;
 		instance.mStreaming = playbackOptions.mStreaming;
 		instance.mPaused = playbackOptions.mStartPaused;
+		instance.mUsePan = false;
+		instance.mPanning = 0.0f;
+		instance.mPlaybackDone = false;
 
 		lockAudio();
 		audioMixer->addAudioInstance(instance);
