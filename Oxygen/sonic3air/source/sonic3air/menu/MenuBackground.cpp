@@ -468,7 +468,11 @@ void MenuBackground::setGameStartedMenu()
 void MenuBackground::openMenu(GameMenuBase& menu)
 {
 	// The menus only really work in a fixed resolution, so make sure that one is set
+#if defined(PLATFORM_WIIU)
+	VideoOut::instance().setScreenSize(427, 240);
+#else
 	VideoOut::instance().setScreenSize(400, 224);
+#endif
 
 	GameMenuManager::instance().addMenu(menu);
 

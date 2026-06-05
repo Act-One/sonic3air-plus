@@ -23,7 +23,6 @@ namespace lemon
 		#if defined(PLATFORM_WIIU) || defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 			// LemonScript scalar globals live in 64-bit slots. Nativized code may bind
 			// narrower typed pointers directly, so big-endian hosts need the low bytes.
-			// Still not sure if this patch is correct.
 			if (bytes > 0 && bytes < sizeof(int64))
 				return reinterpret_cast<uint8*>(slot) + (sizeof(int64) - bytes);
 		#endif

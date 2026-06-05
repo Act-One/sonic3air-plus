@@ -215,7 +215,11 @@ public:
 #else
 	Vec2i mWindowSize = Vec2i(1200, 672);
 #endif
+#if defined(PLATFORM_WIIU)
+	Vec2i mGameScreen = Vec2i(427, 240);
+#else
 	Vec2i mGameScreen = Vec2i(400, 224);
+#endif
 	int   mDisplayIndex = 0;
 	RenderMethod mRenderMethod = RenderMethod::UNDEFINED;
 	bool  mAutoDetectRenderMethod = true;

@@ -33,6 +33,7 @@
 
 #include <lemon/program/ModuleBindingsBuilder.h>
 #include <lemon/program/Program.h>
+#include <lemon/runtime/ControlFlow.h>
 #include <lemon/runtime/Runtime.h>
 
 #include <rmxmedia.h>
@@ -95,31 +96,68 @@ namespace
 		return *lemon::Runtime::getActiveEnvironmentSafe<RuntimeEnvironment>().mEmulatorInterface;
 	}
 
-	FORCE_INLINE bool isBigEndianHost()
+	enum class RegisterField : uint8
 	{
-		const uint16 value = 0x0102;
-		return *(const uint8*)&value == 0x01;
+		U8,
+		S8,
+		U16,
+		S16,
+		U32,
+		S32
+	};
+
+	int64 readRegisterField(size_t index, RegisterField field)
+	{
+		const uint32 value = getEmulatorInterface().getRegister(index);
+		switch (field)
+		{
+			case RegisterField::U8:  return (uint8)value;
+			case RegisterField::S8:  return (int8)(uint8)value;
+			case RegisterField::U16: return (uint16)value;
+			case RegisterField::S16: return (int16)(uint16)value;
+			case RegisterField::U32: return (int64)value;
+			case RegisterField::S32: return (int32)value;
+		}
+		return 0;
 	}
 
-	FORCE_INLINE uint8* accessRegisterBytes(size_t index)
+	void writeRegisterField(size_t index, RegisterField field, int64 value)
 	{
 		uint32& reg = getEmulatorInterface().getRegister(index);
-		return reinterpret_cast<uint8*>(&reg);
+		switch (field)
+		{
+			case RegisterField::U8:
+			case RegisterField::S8:
+				reg = (reg & 0xffffff00) | ((uint32)value & 0x000000ff);
+				break;
+
+			case RegisterField::U16:
+			case RegisterField::S16:
+				reg = (reg & 0xffff0000) | ((uint32)value & 0x0000ffff);
+				break;
+
+			case RegisterField::U32:
+			case RegisterField::S32:
+				reg = (uint32)value;
+				break;
+		}
 	}
 
-	int64* accessRegister32(size_t index)
+	void registerFieldGetter(lemon::ControlFlow& controlFlow, size_t index, RegisterField field)
 	{
-		return reinterpret_cast<int64*>(accessRegisterBytes(index));
+		controlFlow.pushValueStack<int64>(readRegisterField(index, field));
 	}
 
-	int64* accessRegister16(size_t index)
+	void registerFieldSetter(lemon::ControlFlow& controlFlow, size_t index, RegisterField field)
 	{
-		return reinterpret_cast<int64*>(accessRegisterBytes(index) + (isBigEndianHost() ? 2 : 0));
+		writeRegisterField(index, field, controlFlow.readValueStack<int64>(-1));
 	}
 
-	int64* accessRegister8(size_t index)
+	void addRegisterFieldVariable(lemon::Module& module, const std::string& name, const lemon::DataTypeDefinition* dataType, size_t index, RegisterField field)
 	{
-		return reinterpret_cast<int64*>(accessRegisterBytes(index) + (isBigEndianHost() ? 3 : 0));
+		lemon::UserDefinedVariable& variable = module.addUserDefinedVariable(name, dataType);
+		variable.mGetter = std::bind(registerFieldGetter, std::placeholders::_1, index, field);
+		variable.mSetter = std::bind(registerFieldSetter, std::placeholders::_1, index, field);
 	}
 
 	void scriptAssert1(uint8 condition, lemon::StringRef text)
@@ -1181,13 +1219,13 @@ void LemonScriptBindings::registerBindings(lemon::Module& module)
 		const std::string registerNamesDAR[16] = { "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7" };
 		for (size_t i = 0; i < 16; ++i)
 		{
-			module.addExternalVariable(registerNamesDAR[i],			 &lemon::PredefinedDataTypes::UINT_32, std::bind(accessRegister32, i));
-			module.addExternalVariable(registerNamesDAR[i] + ".u8",  &lemon::PredefinedDataTypes::UINT_8,  std::bind(accessRegister8, i));
-			module.addExternalVariable(registerNamesDAR[i] + ".s8",  &lemon::PredefinedDataTypes::INT_8,   std::bind(accessRegister8, i));
-			module.addExternalVariable(registerNamesDAR[i] + ".u16", &lemon::PredefinedDataTypes::UINT_16, std::bind(accessRegister16, i));
-			module.addExternalVariable(registerNamesDAR[i] + ".s16", &lemon::PredefinedDataTypes::INT_16,  std::bind(accessRegister16, i));
-			module.addExternalVariable(registerNamesDAR[i] + ".u32", &lemon::PredefinedDataTypes::UINT_32, std::bind(accessRegister32, i));
-			module.addExternalVariable(registerNamesDAR[i] + ".s32", &lemon::PredefinedDataTypes::INT_32,  std::bind(accessRegister32, i));
+			addRegisterFieldVariable(module, registerNamesDAR[i],          &lemon::PredefinedDataTypes::UINT_32, i, RegisterField::U32);
+			addRegisterFieldVariable(module, registerNamesDAR[i] + ".u8",  &lemon::PredefinedDataTypes::UINT_8,  i, RegisterField::U8);
+			addRegisterFieldVariable(module, registerNamesDAR[i] + ".s8",  &lemon::PredefinedDataTypes::INT_8,   i, RegisterField::S8);
+			addRegisterFieldVariable(module, registerNamesDAR[i] + ".u16", &lemon::PredefinedDataTypes::UINT_16, i, RegisterField::U16);
+			addRegisterFieldVariable(module, registerNamesDAR[i] + ".s16", &lemon::PredefinedDataTypes::INT_16,  i, RegisterField::S16);
+			addRegisterFieldVariable(module, registerNamesDAR[i] + ".u32", &lemon::PredefinedDataTypes::UINT_32, i, RegisterField::U32);
+			addRegisterFieldVariable(module, registerNamesDAR[i] + ".s32", &lemon::PredefinedDataTypes::INT_32,  i, RegisterField::S32);
 		}
 
 

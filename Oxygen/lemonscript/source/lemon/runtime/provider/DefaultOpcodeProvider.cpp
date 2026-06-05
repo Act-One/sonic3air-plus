@@ -16,7 +16,6 @@
 #include "lemon/program/function/NativeFunction.h"
 
 // Default opcode provider, used as fallback if no nativized or optimized opcode provider is available or can handle a certain opcode
-// oh also endian safety for big endian
 namespace lemon
 {
 	namespace
@@ -25,6 +24,8 @@ namespace lemon
 		{
 			const size_t bytes = BaseTypeHelper::getSizeOfBaseType(baseType);
 		#if defined(PLATFORM_WIIU) || defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+			// LemonScript scalar globals live in 64-bit slots; typed pointers to
+			// narrower values must address the low bytes on big-endian hosts.
 			if (bytes > 0 && bytes < sizeof(int64))
 				return reinterpret_cast<uint8*>(slot) + (sizeof(int64) - bytes);
 		#endif

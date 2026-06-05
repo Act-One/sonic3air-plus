@@ -13,7 +13,6 @@
 #include "lemon/runtime/OpcodeExecUtils.h"
 #include "lemon/program/Program.h"
 
-// endian safety for big endian (which is currently only relevant to Wii U)
 namespace lemon
 {
 	namespace
@@ -22,6 +21,8 @@ namespace lemon
 		{
 			const size_t bytes = BaseTypeHelper::getSizeOfBaseType(baseType);
 		#if defined(PLATFORM_WIIU) || defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+			// LemonScript scalar globals live in 64-bit slots; typed pointers to
+			// narrower values must address the low bytes on big-endian hosts.
 			if (bytes > 0 && bytes < sizeof(int64))
 				return reinterpret_cast<uint8*>(slot) + (sizeof(int64) - bytes);
 		#endif
