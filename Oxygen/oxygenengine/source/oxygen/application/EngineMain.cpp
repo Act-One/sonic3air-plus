@@ -1035,7 +1035,7 @@ bool EngineMain::createWindow()
 		if (useOpenGL)
 		{
 		#if defined(PLATFORM_WIIU)
-			RMX_LOG_WARNING("OpenGL context creation skipped on Wii U native GX2 build");
+			RMX_LOG_WARNING("OpenGL context creation skipped on Wii U GX2 build");
 			config.mRenderMethod = Configuration::RenderMethod::GX2_FULL;
 		#else
 			RMX_LOG_INFO("Creating OpenGL context...");

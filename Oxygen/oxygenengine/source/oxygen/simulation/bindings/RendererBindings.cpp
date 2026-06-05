@@ -25,6 +25,11 @@
 
 namespace
 {
+#if defined(PLATFORM_WIIU)
+	constexpr int WIIU_PIXEL_PERFECT_GAME_WIDTH = 427;
+	constexpr int WIIU_PIXEL_PERFECT_GAME_HEIGHT = 240;
+#endif
+
 	inline EmulatorInterface& getEmulatorInterface()
 	{
 		return *lemon::Runtime::getActiveEnvironmentSafe<RuntimeEnvironment>().mEmulatorInterface;
@@ -34,29 +39,18 @@ namespace
 	{
 		Vec2i screenSize = VideoOut::instance().getScreenSize();
 #if defined(PLATFORM_WIIU)
-		const Vec2i configuredSize = Configuration::instance().mGameScreen;
-		if (configuredSize.x >= 128 && configuredSize.x <= 512 && configuredSize.y >= 128 && configuredSize.y <= 256
-			&& (screenSize.x > configuredSize.x || screenSize.y > configuredSize.y))
+		const Vec2i pixelPerfectSize(WIIU_PIXEL_PERFECT_GAME_WIDTH, WIIU_PIXEL_PERFECT_GAME_HEIGHT);
+		if (screenSize != pixelPerfectSize)
 		{
-			static bool sLoggedConfiguredFallback = false;
-			if (!sLoggedConfiguredFallback)
+			static bool sLoggedWiiUSizeCorrection = false;
+			if (!sLoggedWiiUSizeCorrection)
 			{
-				sLoggedConfiguredFallback = true;
-				RMX_LOG_INFO("RendererBindings: using configured Wii U game screen size "
-					<< configuredSize.x << " x " << configuredSize.y
+				sLoggedWiiUSizeCorrection = true;
+				RMX_LOG_INFO("RendererBindings: using Wii U pixel-perfect game screen size "
+					<< pixelPerfectSize.x << " x " << pixelPerfectSize.y
 					<< " instead of VideoOut size " << screenSize.x << " x " << screenSize.y);
 			}
-			screenSize = configuredSize;
-		}
-		if (screenSize.x < 128 || screenSize.x > 512 || screenSize.y < 128 || screenSize.y > 256)
-		{
-			static bool sLoggedWiiUFallback = false;
-			if (!sLoggedWiiUFallback)
-			{
-				sLoggedWiiUFallback = true;
-				RMX_LOG_INFO("RendererBindings: using Wii U logical game screen size because the reported size was " << screenSize.x << " x " << screenSize.y);
-			}
-			screenSize.set(400, 224);
+			screenSize = pixelPerfectSize;
 		}
 #else
 		if (screenSize.x < 128 || screenSize.x > 1024 || screenSize.y < 128 || screenSize.y > 1024)

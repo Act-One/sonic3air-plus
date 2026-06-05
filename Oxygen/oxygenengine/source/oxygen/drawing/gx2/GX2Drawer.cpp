@@ -143,8 +143,8 @@ namespace
 
 	static constexpr uint32 FALLBACK_TV_WIDTH = 1280;
 	static constexpr uint32 FALLBACK_TV_HEIGHT = 720;
-	static constexpr uint32 NATIVE_GAME_RENDER_WIDTH = 400;
-	static constexpr uint32 NATIVE_GAME_RENDER_HEIGHT = 224;
+	static constexpr uint32 NATIVE_GAME_RENDER_WIDTH = 427;
+	static constexpr uint32 NATIVE_GAME_RENDER_HEIGHT = 240;
 	static constexpr uint32 DRC_SCANOUT_WIDTH = 854;
 	static constexpr uint32 DRC_SCANOUT_HEIGHT = 480;
 	static constexpr uint32 PRESENT_VERTEX_COUNT = 6;
@@ -164,7 +164,7 @@ namespace
 	static constexpr bool WAIT_FOR_SCAN_FLIP = false;
 	static constexpr bool USE_DIRECT_NATIVE_SCANOUT = false;
 	static constexpr bool USE_GX2_DEPTH_BUFFER = true;
-	static constexpr bool COPY_DRC_SCANOUT = false;
+	static constexpr bool COPY_DRC_SCANOUT = true;
 	static constexpr bool USE_IDENTITY_DATA_TEXTURE_SWIZZLE = false;
 	static constexpr bool FORCE_GENERAL_PLANE_SHADER = true;
 	static constexpr bool PRESENT_LOGS = false;
@@ -963,18 +963,31 @@ void main()
 
 	Recti getIntegerLetterBoxRect(const Vec2i& sourceSize, const Vec2i& targetSize)
 	{
-		Recti rect = getLetterBoxRect(sourceSize, targetSize);
-		if (sourceSize.x <= 0 || sourceSize.y <= 0)
-			return rect;
+		if (sourceSize.x <= 0 || sourceSize.y <= 0 || targetSize.x <= 0 || targetSize.y <= 0)
+			return Recti(0, 0, targetSize.x, targetSize.y);
 
-		const int scale = rect.height / sourceSize.y;
-		if (scale >= 1)
-		{
-			rect.width = sourceSize.x * scale;
-			rect.height = sourceSize.y * scale;
-			rect.x = (targetSize.x - rect.width) / 2;
-			rect.y = (targetSize.y - rect.height) / 2;
-		}
+		const int scale = std::min(targetSize.x / sourceSize.x, targetSize.y / sourceSize.y);
+		if (scale < 1)
+			return getLetterBoxRect(sourceSize, targetSize);
+
+		Recti rect(0, 0, sourceSize.x * scale, sourceSize.y * scale);
+		rect.x = (targetSize.x - rect.width) / 2;
+		rect.y = (targetSize.y - rect.height) / 2;
+		return rect;
+	}
+
+	Recti getIntegerFillRect(const Vec2i& sourceSize, const Vec2i& targetSize)
+	{
+		if (sourceSize.x <= 0 || sourceSize.y <= 0 || targetSize.x <= 0 || targetSize.y <= 0)
+			return Recti(0, 0, targetSize.x, targetSize.y);
+
+		const int scaleX = (targetSize.x + sourceSize.x - 1) / sourceSize.x;
+		const int scaleY = (targetSize.y + sourceSize.y - 1) / sourceSize.y;
+		const int scale = std::max(1, std::max(scaleX, scaleY));
+
+		Recti rect(0, 0, sourceSize.x * scale, sourceSize.y * scale);
+		rect.x = (targetSize.x - rect.width) / 2;
+		rect.y = (targetSize.y - rect.height) / 2;
 		return rect;
 	}
 
@@ -1003,6 +1016,9 @@ void main()
 
 	Recti getConfiguredScanoutRect(const Vec2i& sourceSize, const Vec2i& targetSize)
 	{
+#if defined(PLATFORM_WIIU)
+		return getIntegerFillRect(sourceSize, targetSize);
+#else
 		switch (Configuration::instance().mUpscaling)
 		{
 			case 1:
@@ -1024,6 +1040,7 @@ void main()
 			default:
 				return getLetterBoxRect(sourceSize, targetSize);
 		}
+#endif
 	}
 
 	uint32 getSamplerLocation(const WHBGfxShaderGroup& shaderGroup)
@@ -6033,7 +6050,6 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 			Recti firstWindowViewport;
 			bool hasFirstWindowViewport = false;
 			bool hasGamePresentRect = false;
-			bool hasRedProbeRect = false;
 			bool hasOpaqueBlackLeftRect = false;
 			bool hasLeftMesh = false;
 			float leftMeshMinX = 0.0f;
@@ -6075,9 +6091,6 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 						}
 						else
 						{
-							hasRedProbeRect = hasRedProbeRect
-								|| (dc.mRect.x == 16 && dc.mRect.y == 16 && dc.mRect.width == 48 && dc.mRect.height == 48
-									&& dc.mColor.r > 0.9f && dc.mColor.g < 0.1f && dc.mColor.b < 0.1f && dc.mColor.a > 0.9f);
 							hasOpaqueBlackLeftRect = hasOpaqueBlackLeftRect
 								|| (dc.mRect.x <= 0 && dc.mRect.y <= 0 && dc.mRect.width >= 160 && dc.mRect.height >= (int)NATIVE_GAME_RENDER_HEIGHT
 									&& dc.mColor.r < 0.01f && dc.mColor.g < 0.01f && dc.mColor.b < 0.01f && dc.mColor.a > 0.9f);
@@ -6146,7 +6159,6 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 				<< " depthClears=" << depthClearCount
 				<< " scissors=" << scissorCount
 				<< " gameRect=" << (hasGamePresentRect ? 1 : 0)
-				<< " redProbe=" << (hasRedProbeRect ? 1 : 0)
 				<< " blackLeft=" << (hasOpaqueBlackLeftRect ? 1 : 0)
 				<< " leftMesh=" << (hasLeftMesh ? 1 : 0)
 				<< " leftMeshBounds=" << leftMeshMinX << "," << leftMeshMinY << ".." << leftMeshMaxX << "," << leftMeshMaxY

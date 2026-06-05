@@ -48,16 +48,44 @@ namespace lemon
 			}
 			writer.endBlock("};");
 		}
+
+		uint16 readLittleEndian16(const uint8* data)
+		{
+			return (uint16)((uint16)data[0] | ((uint16)data[1] << 8));
+		}
+
+		uint64 readLittleEndian64(const uint8* data)
+		{
+			uint64 result = 0;
+			for (int i = 7; i >= 0; --i)
+			{
+				result = (result << 8) | data[i];
+			}
+			return result;
+		}
+
+		void writeLittleEndian16(uint8* data, uint16 value)
+		{
+			data[0] = (uint8)value;
+			data[1] = (uint8)(value >> 8);
+		}
+
+		void writeLittleEndian64(uint8* data, uint64 value)
+		{
+			for (int i = 0; i < 8; ++i)
+			{
+				data[i] = (uint8)(value >> (i * 8));
+			}
+		}
 	}
-
-
 
 	void Nativizer::LookupDictionary::addEmptyEntries(const uint64* hashes, size_t numHashes)
 	{
 		mEntries.reserve(mEntries.size() + numHashes);
+		const uint8* hashData = reinterpret_cast<const uint8*>(hashes);
 		for (size_t i = 0; i < numHashes; ++i)
 		{
-			mEntries.emplace(hashes[i], LookupEntry());
+			mEntries.emplace(readLittleEndian64(hashData + i * 8), LookupEntry());
 		}
 	}
 
@@ -78,7 +106,7 @@ namespace lemon
 		data = &decompressedData[0];
 		for (LookupEntry::ParameterInfo& info : mParameterData)
 		{
-			info.mOffset = *(uint16*)&data[0];
+			info.mOffset = readLittleEndian16(data);
 			info.mOpcodeIndex = data[2];
 			info.mSemantics = (LookupEntry::ParameterInfo::Semantics)data[3];
 			data += 4;
@@ -248,8 +276,13 @@ namespace lemon
 						entriesToWrite.push_back(pair.first);
 					}
 				}
-				const uint8* data = (const uint8*)&entriesToWrite[0];
-				const size_t bytes = entriesToWrite.size() * 8;
+				std::vector<uint8> entriesToWriteData(entriesToWrite.size() * 8);
+				for (size_t k = 0; k < entriesToWrite.size(); ++k)
+				{
+					writeLittleEndian64(&entriesToWriteData[k * 8], entriesToWrite[k]);
+				}
+				const uint8* data = entriesToWriteData.data();
+				const size_t bytes = entriesToWriteData.size();
 				const size_t chunks = (bytes + 0x7fff) / 0x8000;
 				for (size_t i = 0; i < chunks; ++i)
 				{
@@ -279,7 +312,7 @@ namespace lemon
 				uint8* outPtr = &parameterData[0];
 				for (const LookupEntry::ParameterInfo& parameterInfo : mBuiltDictionary.mParameterData)
 				{
-					*(uint16*)(&outPtr[0]) = (uint16)parameterInfo.mOffset;
+					writeLittleEndian16(outPtr, (uint16)parameterInfo.mOffset);
 					outPtr[2] = (uint8)parameterInfo.mOpcodeIndex;
 					outPtr[3] = (uint8)parameterInfo.mSemantics;
 					outPtr += 4;

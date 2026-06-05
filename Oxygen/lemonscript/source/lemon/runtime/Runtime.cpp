@@ -832,14 +832,15 @@ namespace lemon
 		}
 
 		// Signature and version number
-		const uint32 SIGNATURE = *(uint32*)"LMN|";
+		const uint8 SIGNATURE[4] = { 'L', 'M', 'N', '|' };
+		const uint8 LEGACY_BIG_ENDIAN_SIGNATURE[4] = { '|', 'N', 'M', 'L' };
 		uint16 version = 0x01;
 		if (serializer.isReading())
 		{
-			const uint32 signature = *(const uint32*)serializer.peek();
-			if (signature == SIGNATURE)
+			const uint8* signature = (serializer.getRemaining() >= sizeof(SIGNATURE)) ? serializer.peek() : nullptr;
+			if (nullptr != signature && (memcmp(signature, SIGNATURE, sizeof(SIGNATURE)) == 0 || memcmp(signature, LEGACY_BIG_ENDIAN_SIGNATURE, sizeof(LEGACY_BIG_ENDIAN_SIGNATURE)) == 0))
 			{
-				serializer.skip(4);
+				serializer.skip(sizeof(SIGNATURE));
 				version = serializer.read<uint16>();
 			}
 			else
@@ -849,7 +850,7 @@ namespace lemon
 		}
 		else
 		{
-			serializer.write(SIGNATURE);
+			serializer.write(SIGNATURE, sizeof(SIGNATURE));
 			serializer.write(version);
 		}
 
@@ -976,7 +977,11 @@ namespace lemon
 					serializer.write(variable->getName().getString());
 					const size_t offset = (variable->isA<GlobalVariable>()) ? variable->as<GlobalVariable>().getStaticMemoryOffset() : 0xffffffff;
 					if (offset < mStaticMemory.size())
-						serializer.write(&mStaticMemory[offset], sizeof(int64));
+					{
+						int64 value = 0;
+						memcpy(&value, &mStaticMemory[offset], sizeof(int64));
+						serializer.write(value);
+					}
 					else
 						serializer.write<int64>(0);
 				}

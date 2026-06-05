@@ -62,6 +62,8 @@ namespace
 {
 #if defined(PLATFORM_WIIU)
 	constexpr bool ENABLE_WIIU_VIDEOOUT_TIMING_LOGS = false;
+	constexpr int WIIU_PIXEL_PERFECT_GAME_WIDTH = 427;
+	constexpr int WIIU_PIXEL_PERFECT_GAME_HEIGHT = 240;
 
 	double getElapsedMilliseconds(uint64 start, uint64 end)
 	{
@@ -72,16 +74,19 @@ namespace
 	Vec2i sanitizeGameResolution(const Vec2i& screenSize)
 	{
 #if defined(PLATFORM_WIIU)
-		if (screenSize.x >= 128 && screenSize.x <= 512 && screenSize.y >= 128 && screenSize.y <= 256)
+		const Vec2i pixelPerfectSize(WIIU_PIXEL_PERFECT_GAME_WIDTH, WIIU_PIXEL_PERFECT_GAME_HEIGHT);
+		if (screenSize == pixelPerfectSize)
 			return screenSize;
 
-		static bool sLoggedWiiUFallback = false;
-		if (!sLoggedWiiUFallback)
+		static bool sLoggedWiiUPixelPerfectSize = false;
+		if (!sLoggedWiiUPixelPerfectSize)
 		{
-			sLoggedWiiUFallback = true;
-			RMX_LOG_INFO("VideoOut: using Wii U logical game resolution 400 x 224 because the live size was " << screenSize.x << " x " << screenSize.y);
+			sLoggedWiiUPixelPerfectSize = true;
+			RMX_LOG_INFO("VideoOut: using Wii U pixel-perfect logical game resolution "
+				<< pixelPerfectSize.x << " x " << pixelPerfectSize.y
+				<< " because the live size was " << screenSize.x << " x " << screenSize.y);
 		}
-		return Vec2i(400, 224);
+		return pixelPerfectSize;
 #else
 		if (screenSize.x >= 128 && screenSize.x <= 1024 && screenSize.y >= 128 && screenSize.y <= 1024)
 			return screenSize;
