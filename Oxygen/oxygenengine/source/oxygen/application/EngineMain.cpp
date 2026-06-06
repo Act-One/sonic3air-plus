@@ -410,15 +410,9 @@ void EngineMain::run()
 	RMX_LOG_INFO("--- MAIN LOOP ---");
 	RMX_LOG_INFO("Starting main application loop");
 
-#if defined(PLATFORM_WIIU)
-	Application* application = new Application();
-	FTX::System->run(*application);
-	RMX_LOG_INFO("Main application loop returned");
-	RMX_LOG_INFO("Wii U: leaving Application instance for process teardown");
-#else
 	Application application;
 	FTX::System->run(application);
-#endif
+	RMX_LOG_INFO("Main application loop returned");
 }
 
 void EngineMain::shutdown()

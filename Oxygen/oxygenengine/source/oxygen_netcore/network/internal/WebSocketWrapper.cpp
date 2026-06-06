@@ -12,9 +12,42 @@
 #include "oxygen_netcore/network/NetConnection.h"
 
 
+namespace
+{
+	uint16 readBigEndian16(const uint8* data)
+	{
+		return (uint16)(((uint16)data[0] << 8) | (uint16)data[1]);
+	}
+
+	uint64 readBigEndian64(const uint8* data)
+	{
+		uint64 value = 0;
+		for (int i = 0; i < 8; ++i)
+		{
+			value = (value << 8) | (uint64)data[i];
+		}
+		return value;
+	}
+
+	void writeBigEndian16(uint8* data, uint16 value)
+	{
+		data[0] = (uint8)(value >> 8);
+		data[1] = (uint8)value;
+	}
+
+	void writeBigEndian64(uint8* data, uint64 value)
+	{
+		for (int i = 7; i >= 0; --i)
+		{
+			data[i] = (uint8)value;
+			value >>= 8;
+		}
+	}
+}
+
 bool WebSocketWrapper::handleWebSocketHttpHeader(const std::vector<uint8>& receivedData, String& outWebSocketKey)
 {
-	if (receivedData.size() < 0x80 || *(uint32*)&receivedData[0] != *(uint32*)"GET ")
+	if (receivedData.size() < 0x80 || memcmp(&receivedData[0], "GET ", 4) != 0)
 		return false;
 
 	// Parse WebSocket handshake header
@@ -96,18 +129,22 @@ bool WebSocketWrapper::processReceivedClientPacket(std::vector<uint8>& data)
 	{
 		if (payloadLength == 126)
 		{
-			payloadLength = swapBytes16(*(uint16*)&data[offset]);
+			if (offset + 2 > data.size())
+				return false;
+			payloadLength = readBigEndian16(&data[offset]);
 			offset += 2;
 		}
 		else
 		{
-			payloadLength = swapBytes64(*(uint64*)&data[offset]);
+			if (offset + 8 > data.size())
+				return false;
+			payloadLength = readBigEndian64(&data[offset]);
 			offset += 8;
 			// TODO: Limit length to some reasonable value
 		}
 	}
 
-	if (offset + 5 >= data.size())
+	if (offset + 4 > data.size() || payloadLength > data.size() - offset - 4)
 	{
 		// Error: Data just stops unexpectedly
 		return false;
@@ -137,13 +174,13 @@ void WebSocketWrapper::wrapDataToSendToClient(const std::vector<uint8>& data, st
 	else if (data.size() <= 0xffff)
 	{
 		headerContent[1] += 126;
-		*(uint16*)&headerContent[2] = (uint16)data.size();
+		writeBigEndian16(&headerContent[2], (uint16)data.size());
 		headerSize += 2;
 	}
 	else
 	{
 		headerContent[1] += 127;
-		*(uint64*)&headerContent[2] = (uint64)data.size();
+		writeBigEndian64(&headerContent[2], (uint64)data.size());
 		headerSize += 8;
 	}
 

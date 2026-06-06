@@ -13,6 +13,11 @@
 
 namespace
 {
+	FORCE_INLINE uint16 readLittleEndian16(const uint8* data)
+	{
+		return (uint16)((uint16)data[0] | ((uint16)data[1] << 8));
+	}
+
 	static const constexpr int LIT_TABLE[29][2] =
 	{
 		{ 0,3 },  { 0,4 },  { 0,5 },  { 0,6 },  { 0,7 },  { 0,8 },  { 0,9 },  { 0,10 }, { 1,11 },  { 1,13 },  { 1,15 },  { 1,17 },  { 2,19 },  { 2,23 },  { 2,27 },
@@ -424,7 +429,7 @@ uint8* DeflateCodec::decode(int& outputSize, const void* input, int length)
 		if (btype == 0)
 		{
 			alignBitbuf();		// Discard remaining bits of current byte
-			unsigned short len = *(unsigned short*)&bitmem[0];
+			const uint16 len = readLittleEndian16(&bitmem[0]);
 			//unsigned short nlen = *(unsigned short*)&bitmem[2];
 			expandOutput(outpos + len);
 			memcpy(&output[outpos], &bitmem[4], len);

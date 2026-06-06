@@ -185,10 +185,7 @@ void VideoOut::destroyRenderer()
 	SAFE_DELETE(mOpenGLRenderer);
 #endif
 #if defined(PLATFORM_WIIU)
-	if (nullptr != mGX2Renderer)
-	{
-		RMX_LOG_INFO("VideoOut: leaving GX2 renderer for process teardown");
-	}
+	SAFE_DELETE(mGX2Renderer);
 #endif
 	mActiveRenderer = nullptr;
 }

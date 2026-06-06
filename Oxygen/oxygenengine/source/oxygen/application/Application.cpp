@@ -151,7 +151,7 @@ void Application::deinitialize()
 	RMX_LOG_INFO("--- SHUTDOWN ---");
 
 #if defined(PLATFORM_WIIU)
-	RMX_LOG_INFO("Application shutdown: Wii U drawer shutdown deferred to engine shutdown");
+	RMX_LOG_INFO("Application shutdown: Wii U renderer teardown will run during engine shutdown");
 #endif
 
 	// Destroy game app here already, instead of using the auto-deletion of children

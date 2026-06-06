@@ -307,7 +307,8 @@ void BinarySerializer::readPortable(void* address, size_t bytes, bool checkEndia
 			uint64 value = 0;
 			mInputStream->read(reinterpret_cast<char*>(&value), bytes);
 			RMX_CHECK(mInputStream->good(), "BinarySerializer: I/O error while deserializing", RMX_REACT_THROW);
-			*reinterpret_cast<uint64*>(address) = swapBytes64(value);
+			value = swapBytes64(value);
+			memcpy(address, &value, bytes);
 			return;
 		}
 
@@ -316,7 +317,8 @@ void BinarySerializer::readPortable(void* address, size_t bytes, bool checkEndia
 			uint32 value = 0;
 			mInputStream->read(reinterpret_cast<char*>(&value), bytes);
 			RMX_CHECK(mInputStream->good(), "BinarySerializer: I/O error while deserializing", RMX_REACT_THROW);
-			*reinterpret_cast<uint32*>(address) = swapBytes32(value);
+			value = swapBytes32(value);
+			memcpy(address, &value, bytes);
 			return;
 		}
 
@@ -325,7 +327,8 @@ void BinarySerializer::readPortable(void* address, size_t bytes, bool checkEndia
 			uint16 value = 0;
 			mInputStream->read(reinterpret_cast<char*>(&value), bytes);
 			RMX_CHECK(mInputStream->good(), "BinarySerializer: I/O error while deserializing", RMX_REACT_THROW);
-			*reinterpret_cast<uint16*>(address) = swapBytes16(value);
+			value = swapBytes16(value);
+			memcpy(address, &value, bytes);
 			return;
 		}
 	}
@@ -340,7 +343,9 @@ void BinarySerializer::writePortable(const void* address, size_t bytes, bool che
 	{
 		if (bytes == 8)
 		{
-			uint64 value = swapBytes64(*reinterpret_cast<const uint64*>(address));
+			uint64 value = 0;
+			memcpy(&value, address, bytes);
+			value = swapBytes64(value);
 			mOutputStream->write(reinterpret_cast<char*>(&value), bytes);
 			RMX_CHECK(mOutputStream->good(), "BinarySerializer: I/O error while serializing", RMX_REACT_THROW);
 			return;
@@ -348,7 +353,9 @@ void BinarySerializer::writePortable(const void* address, size_t bytes, bool che
 
 		if (bytes == 4)
 		{
-			uint32 value = swapBytes32(*reinterpret_cast<const uint32*>(address));
+			uint32 value = 0;
+			memcpy(&value, address, bytes);
+			value = swapBytes32(value);
 			mOutputStream->write(reinterpret_cast<char*>(&value), bytes);
 			RMX_CHECK(mOutputStream->good(), "BinarySerializer: I/O error while serializing", RMX_REACT_THROW);
 			return;
@@ -356,7 +363,9 @@ void BinarySerializer::writePortable(const void* address, size_t bytes, bool che
 
 		if (bytes == 2)
 		{
-			uint16 value = swapBytes16(*reinterpret_cast<const uint16*>(address));
+			uint16 value = 0;
+			memcpy(&value, address, bytes);
+			value = swapBytes16(value);
 			mOutputStream->write(reinterpret_cast<char*>(&value), bytes);
 			RMX_CHECK(mOutputStream->good(), "BinarySerializer: I/O error while serializing", RMX_REACT_THROW);
 			return;

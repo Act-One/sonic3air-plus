@@ -37,6 +37,7 @@ public:
 
 private:
 	void ensureSoftwareRendererInitialized();
+	bool shouldUseSoftwareGameRendering(const std::vector<Geometry*>& geometries) const;
 	bool supportsNativeRendering(const std::vector<Geometry*>& geometries) const;
 	bool supportsNativeGeometry(const Geometry& geometry) const;
 	bool supportsNativeSprite(const SpriteGeometry& geometry) const;

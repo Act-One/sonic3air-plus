@@ -24,6 +24,7 @@ public:
 
 	void buildRectAspectFit(const Recti& outerRect, float stretchTowardsFullscreen = 0.0f);
 	void buildRectIntegerAspectFit(const Recti& outerRect);
+	void buildRectIntegerScaleToFill(const Recti& outerRect);
 	void buildRectScaleToFill(const Recti& outerRect);
 	void buildRectWithAlignment(const Recti& outerRect, float relativeScale, const Vec2f& relativeAlignment, bool withIntegerScaling);
 

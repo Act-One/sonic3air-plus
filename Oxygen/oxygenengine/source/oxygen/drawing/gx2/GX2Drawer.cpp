@@ -160,7 +160,7 @@ namespace
 	static constexpr bool FORCE_GPU_PRESENT_CLEAR = false;
 	static constexpr bool FORCE_TEXTURE_PRESENT_PATTERN = false;
 	static constexpr bool FORCE_COLOR_SHADER_TEST_RECT = false;
-	static constexpr bool SKIP_GX2_TEARDOWN_ON_EXIT = true;
+	static constexpr bool SKIP_GX2_TEARDOWN_ON_EXIT = false;
 	static constexpr bool WAIT_FOR_SCAN_FLIP = false;
 	static constexpr bool USE_DIRECT_NATIVE_SCANOUT = false;
 	static constexpr bool USE_GX2_DEPTH_BUFFER = true;

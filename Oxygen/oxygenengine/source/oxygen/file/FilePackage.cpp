@@ -11,6 +11,18 @@
 #include "oxygen/helper/Utils.h"
 
 
+namespace
+{
+	void writeLittleEndian32(std::vector<uint8>& data, size_t position, uint32 value)
+	{
+		RMX_ASSERT(position + 4 <= data.size(), "Invalid file package write position");
+		data[position] = (uint8)value;
+		data[position + 1] = (uint8)(value >> 8);
+		data[position + 2] = (uint8)(value >> 16);
+		data[position + 3] = (uint8)(value >> 24);
+	}
+}
+
 bool FilePackage::loadPackage(std::wstring_view packageFilename, std::map<std::wstring, PackedFile>& outPackedFiles, bool forceLoadAll, bool showErrors)
 {
 	// Try to load the package
@@ -136,13 +148,13 @@ void FilePackage::createFilePackage(const std::wstring& packageFilename, const s
 
 		// Write entry header size
 		entryHeaderSize = output.size() - PackageHeader::HEADER_SIZE;
-		*(uint32*)&output[headerSizePosition] = (uint32)entryHeaderSize;
+		writeLittleEndian32(output, headerSizePosition, (uint32)entryHeaderSize);
 
 		for (auto& [key, packedFile] : packedFiles)
 		{
 			const uint32 position = (uint32)output.size();
 			serializer.write(&packedFile.mContent[0], packedFile.mContent.size());
-			*(uint32*)&output[packedFile.mPositionInFile] = position;
+			writeLittleEndian32(output, packedFile.mPositionInFile, position);
 			packedFile.mPositionInFile = position;
 		}
 	}

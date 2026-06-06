@@ -252,9 +252,7 @@ namespace
 				uint32 value = 0;
 				if (bytes == 2)
 				{
-					const uint8* ptr = emulatorInterface.getMemoryPointer(address, false, bytes);
-					if (nullptr != ptr)
-						value = *(uint16*)ptr;
+					value = emulatorInterface.readMemory16(address);
 				}
 				LemonScriptBindings::mDebugNotificationInterface->onVRAMWrite(mWriteAddress, bytes, value);
 			}

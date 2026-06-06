@@ -68,21 +68,6 @@ Drawer::Type Drawer::getType() const
 
 void Drawer::destroyDrawer()
 {
-#if defined(PLATFORM_WIIU)
-	// GX2 texture implementations are detached here instead of destroyed one by one.
-	// The active GX2 drawer owns display shutdown; CafeOS reclaims the remaining texture storage at process exit.
-	for (DrawerTexture* texture : mDrawerTextures)
-	{
-		texture->mImplementation = nullptr;
-		texture->mRegisteredOwner = nullptr;
-	}
-	mDrawerTextures.clear();
-	mTexturesByID.clear();
-
-	SAFE_DELETE(mActiveDrawer);
-	return;
-#endif
-
 	// Invalidate drawer textures
 	for (DrawerTexture* texture : mDrawerTextures)
 	{

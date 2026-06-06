@@ -32,6 +32,24 @@ namespace rmx
 	};
 	#pragma pack()
 
+	inline uint16 readLittleEndian16(const uint8* data)
+	{
+		return (uint16)((uint16)data[0] | ((uint16)data[1] << 8));
+	}
+
+	inline uint32 readLittleEndian32(const uint8* data)
+	{
+		return (uint32)data[0] | ((uint32)data[1] << 8) | ((uint32)data[2] << 16) | ((uint32)data[3] << 24);
+	}
+
+	inline void writeLittleEndian32(uint8* data, uint32 value)
+	{
+		data[0] = (uint8)value;
+		data[1] = (uint8)(value >> 8);
+		data[2] = (uint8)(value >> 16);
+		data[3] = (uint8)(value >> 24);
+	}
+
 	#define RETURN(errcode) \
 	{ \
 		outResult.mError = errcode; \
@@ -54,16 +72,18 @@ namespace rmx
 	{
 		MemInputStream mstream(stream);
 		const uint8* buffer = mstream.getCursor();
+		const size_t bufferSize = mstream.getRemaining();
 
-		IcoHeader header;
-		stream >> header;
-		if (header.idReserved != 0 || header.idType != 1)
+		if (bufferSize < sizeof(IcoHeader))
+			RETURN(Bitmap::LoadResult::Error::INVALID_FILE);
+		if (readLittleEndian16(buffer) != 0 || readLittleEndian16(buffer + 2) != 1)
 			RETURN(Bitmap::LoadResult::Error::INVALID_FILE);
 
-		const int imageCount = header.idCount;
+		const int imageCount = readLittleEndian16(buffer + 4);
+		if (imageCount <= 0 || bufferSize < sizeof(IcoHeader) + (size_t)imageCount * sizeof(IconDirEntry))
+			RETURN(Bitmap::LoadResult::Error::INVALID_FILE);
 
-		const IconDirEntry* entries = (const IconDirEntry*)mstream.getCursor();
-		mstream.skip(imageCount * sizeof(IconDirEntry));
+		const uint8* entries = buffer + sizeof(IcoHeader);
 
 		// Choose the best fitting one from the icons
 		const int optimalWidth = (bitmap.getWidth() > 0)  ? bitmap.getWidth()  : 32;
@@ -74,12 +94,16 @@ namespace rmx
 
 		for (int i = 0; i < imageCount; ++i)
 		{
-			int bpp = entries[i].bitCount;
-			if (bpp == 0)
-				bpp = *(unsigned short*)&buffer[entries[i].imageOffset + 14];
+			const uint8* entry = entries + i * sizeof(IconDirEntry);
+			const int width = (entry[0] != 0) ? entry[0] : 256;
+			const int height = (entry[1] != 0) ? entry[1] : 256;
+			const uint32 imageOffset = readLittleEndian32(entry + 12);
+			int bpp = readLittleEndian16(entry + 6);
+			if (bpp == 0 && imageOffset + 16 <= bufferSize)
+				bpp = readLittleEndian16(&buffer[imageOffset + 14]);
 
-			const int dx = abs(entries[i].width - optimalWidth);
-			const int dy = abs(entries[i].height - optimalHeight);
+			const int dx = abs(width - optimalWidth);
+			const int dy = abs(height - optimalHeight);
 			const int db = abs(bpp - optimalBpp) * 1000;
 
 			uint32 difference = dx*dx + dy*dy + db*db;
@@ -94,21 +118,23 @@ namespace rmx
 			RETURN(Bitmap::LoadResult::Error::INVALID_FILE);
 
 		// Load icon
-		const IconDirEntry& bestEntry = entries[bestImageIndex];
-		unsigned int size = bestEntry.bytesInRes;
-		unsigned int offset = bestEntry.imageOffset;
+		const uint8* bestEntry = entries + bestImageIndex * sizeof(IconDirEntry);
+		const uint32 size = readLittleEndian32(bestEntry + 8);
+		const uint32 offset = readLittleEndian32(bestEntry + 12);
+		if (offset > bufferSize || size > bufferSize - offset || size < 40)
+			RETURN(Bitmap::LoadResult::Error::INVALID_FILE);
 
 		uint8* mem = new uint8[size+14];
 		memcpy(&mem[14], &buffer[offset], size);
 		mem[0] = 'B';
 		mem[1] = 'M';
-		*(unsigned int*)&mem[2]  = 54 + *(unsigned int*)&mem[34];
-		*(unsigned int*)&mem[6]  = 0;
-		*(unsigned int*)&mem[10] = 54;
-		*(unsigned int*)&mem[22] /= 2;		// File contains double image height for some reason
-		const int width  = *(unsigned int*)&mem[18];
-		const int height = *(unsigned int*)&mem[22];
-		const int bpp    = *(unsigned short*)&mem[28];
+		writeLittleEndian32(&mem[2], 14 + size);
+		writeLittleEndian32(&mem[6], 0);
+		writeLittleEndian32(&mem[10], 54);
+		writeLittleEndian32(&mem[22], readLittleEndian32(&mem[22]) / 2);		// File contains double image height for some reason
+		const int width  = (int)readLittleEndian32(&mem[18]);
+		const int height = (int)readLittleEndian32(&mem[22]);
+		const int bpp    = (int)readLittleEndian16(&mem[28]);
 
 		// Decode as BMP
 		MemInputStream bmpstream(mem, size+14, true);

@@ -89,6 +89,24 @@ namespace
 		}
 		return false;
 	}
+// use software rendering here, GX2 rendering doesn't yet support this and it's used in some non-gameplay scenes
+// add GX2 support for it eventually. for now this is a pretty nasty hack
+	bool isDefaultPlaneRenderQueue(uint16 renderQueue)
+	{
+		switch (renderQueue)
+		{
+			case 0x1000:
+			case 0x2000:
+			case 0x2200:
+			case 0x3000:
+			case 0x4000:
+			case 0x4200:
+				return true;
+
+			default:
+				return false;
+		}
+	}
 
 	void dumpBitmapPpmOnce(const char* path, const Bitmap& bitmap)
 	{
@@ -410,6 +428,18 @@ void GX2Renderer::renderGameScreen(const std::vector<Geometry*>& geometries)
 		return;
 	}
 
+	if (shouldUseSoftwareGameRendering(geometries))
+	{
+		static uint32 sParityFallbackLogCount = 0;
+		if (sParityFallbackLogCount < 8)
+		{
+			RMX_LOG_INFO("GX2Renderer: software parity fallback for complex plane/viewport/blur frame");
+			++sParityFallbackLogCount;
+		}
+		renderHybridGameScreen(geometries);
+		return;
+	}
+
 	mRenderResources.refresh();
 	if (!supportsNativeRendering(geometries))
 	{
@@ -484,6 +514,26 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 				drawer.popScissor();
 			}
 		}
+		mCurrentTargetAlreadyHasNativeFrame = true;
+		return;
+	}
+
+	if (shouldUseSoftwareGameRendering(geometries))
+	{
+		static uint32 sDirectParityFallbackLogCount = 0;
+		if (sDirectParityFallbackLogCount < 8)
+		{
+			RMX_LOG_INFO("GX2Renderer: software parity fallback in direct path for complex plane/viewport/blur frame");
+			++sDirectParityFallbackLogCount;
+		}
+		renderHybridGameScreen(geometries);
+		DrawerTexture& presentTexture = updateGameScreenPresentTexture();
+		drawer.setWindowRenderTarget(viewport);
+		resetNativeQueuedState();
+		setNativeBlendMode(drawer, BlendMode::OPAQUE);
+		drawer.setSamplingMode(SamplingMode::POINT);
+		drawer.setWrapMode(TextureWrapMode::CLAMP);
+		drawer.drawRect(viewport, presentTexture);
 		mCurrentTargetAlreadyHasNativeFrame = true;
 		return;
 	}
@@ -595,7 +645,7 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 		if (!sLoggedOffscreenWindowPath)
 		{
 			sLoggedOffscreenWindowPath = true;
-				RMX_LOG_INFO("GX2Renderer: native window path uses 400x224 render target before pixel-perfect TV presentation");
+			RMX_LOG_INFO("GX2Renderer: native window path uses logical render target before pixel-perfect TV presentation");
 		}
 		renderNativeGameScreen(geometries);
 		drawer.setWindowRenderTarget(viewport);
@@ -727,6 +777,34 @@ void GX2Renderer::ensureSoftwareRendererInitialized()
 		mSoftwareRenderer.setGameResolution(mGameResolution);
 	}
 	mSoftwareRendererInitialized = true;
+}
+
+bool GX2Renderer::shouldUseSoftwareGameRendering(const std::vector<Geometry*>& geometries) const
+{
+	for (const Geometry* geometry : geometries)
+	{
+		if (nullptr == geometry)
+			continue;
+
+		switch (geometry->getType())
+		{
+			case Geometry::Type::PLANE:
+			{
+				const PlaneGeometry& plane = geometry->as<PlaneGeometry>();
+				if (!isDefaultPlaneRenderQueue(plane.mRenderQueue))
+					return true;
+				break;
+			}
+
+			case Geometry::Type::VIEWPORT:
+			case Geometry::Type::EFFECT_BLUR:
+				return true;
+
+			default:
+				break;
+		}
+	}
+	return false;
 }
 
 bool GX2Renderer::supportsNativeRendering(const std::vector<Geometry*>& geometries) const

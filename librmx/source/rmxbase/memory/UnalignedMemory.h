@@ -20,10 +20,20 @@ namespace rmx
 {
 #if !defined(__vita__)
 	template<typename T>
-	T readMemoryUnaligned(const void* pointer) { return *(T*)pointer; }
+	T readMemoryUnaligned(const void* pointer)
+	{
+		T val;
+		memcpy(&val, pointer, sizeof(T));
+		return val;
+	}
 
 	template<typename T>
-	T readMemoryUnalignedSwapped(const void* pointer) { return swapBytes<T>(*(T*)pointer); }
+	T readMemoryUnalignedSwapped(const void* pointer)
+	{
+		T val;
+		memcpy(&val, pointer, sizeof(T));
+		return swapBytes<T>(val);
+	}
 #else
 	template<typename T>
 	T readMemoryUnaligned(const void* pointer)

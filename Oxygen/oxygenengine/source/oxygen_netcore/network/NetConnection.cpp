@@ -16,6 +16,14 @@
 #include "oxygen_netcore/network/RequestBase.h"
 
 
+namespace
+{
+	uint16 readLittleEndian16(const uint8* data)
+	{
+		return (uint16)((uint16)data[0] | ((uint16)data[1] << 8));
+	}
+}
+
 uint64 NetConnection::buildSenderKey(const SocketAddress& remoteAddress, uint16 remoteConnectionID)
 {
 	return remoteAddress.getHash() ^ remoteConnectionID;
@@ -356,7 +364,7 @@ void NetConnection::handleLowLevelPacket(const ReceivedPacket& receivedPacket)
 
 			// Set remote connection ID, as it was not known before
 			//  -> Unfortunately, we have to get in a somewhat awkward way, as it was skipped in deserialization before
-			mRemoteConnectionID = *(uint16*)serializer.getBufferPointer(2);
+			mRemoteConnectionID = readLittleEndian16(serializer.getBufferPointer(2));
 			mSenderKey = buildSenderKey(mRemoteAddress, mRemoteConnectionID);
 			mState = State::CONNECTED;
 

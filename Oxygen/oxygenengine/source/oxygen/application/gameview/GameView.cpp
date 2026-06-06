@@ -97,7 +97,7 @@ void GameView::updateGameViewport()
 	mGameViewport.setResolution(gameScreenRect.getSize());
 
 #if defined(PLATFORM_WIIU)
-	mGameViewport.buildRectIntegerAspectFit(mRect);
+	mGameViewport.buildRectIntegerScaleToFill(mRect);
 #else
 	switch (config.mUpscaling)
 	{
@@ -585,7 +585,7 @@ void GameView::render()
 	const Recti gameScreenRect = VideoOut::instance().getScreenRect();
 	mGameViewport.setResolution(gameScreenRect.getSize());
 #if defined(PLATFORM_WIIU)
-	const bool renderDirectToWindow = true;
+	const bool renderDirectToWindow = false;
 #else
 	const bool renderDirectToWindow = false;
 #endif
@@ -825,17 +825,21 @@ void GameView::render()
 		if (!FTX::Video->getVideoConfig().mAutoClearScreen)
 		{
 			// Draw black bars so no screen clearing is needed
-			const int x1 = gameViewportRect.x;
-			const int x2 = gameViewportRect.x + gameViewportRect.width;
 			const int x3 = FTX::Video->getScreenWidth();
-			const int y1 = gameViewportRect.y;
-			const int y2 = gameViewportRect.y + gameViewportRect.height;
 			const int y3 = FTX::Video->getScreenHeight();
+			const int x1 = clamp(gameViewportRect.x, 0, x3);
+			const int x2 = clamp(gameViewportRect.x + gameViewportRect.width, 0, x3);
+			const int y1 = clamp(gameViewportRect.y, 0, y3);
+			const int y2 = clamp(gameViewportRect.y + gameViewportRect.height, 0, y3);
 
-			drawer.drawRect(Recti(0, 0, x3, y1), Color::BLACK);
-			drawer.drawRect(Recti(0, y2, x3, y3 - y2), Color::BLACK);
-			drawer.drawRect(Recti(0, y1, x1, y2 - y1), Color::BLACK);
-			drawer.drawRect(Recti(x2, y1, x3 - x2, y2 - y1), Color::BLACK);
+			if (y1 > 0)
+				drawer.drawRect(Recti(0, 0, x3, y1), Color::BLACK);
+			if (y2 < y3)
+				drawer.drawRect(Recti(0, y2, x3, y3 - y2), Color::BLACK);
+			if (x1 > 0 && y2 > y1)
+				drawer.drawRect(Recti(0, y1, x1, y2 - y1), Color::BLACK);
+			if (x2 < x3 && y2 > y1)
+				drawer.drawRect(Recti(x2, y1, x3 - x2, y2 - y1), Color::BLACK);
 		}
 	}
 

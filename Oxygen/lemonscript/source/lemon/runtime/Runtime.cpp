@@ -343,7 +343,6 @@ namespace lemon
 		{
 			throw std::runtime_error("Reached var stack limit, possibly due to recursive function calls");
 		}
-// lots of logging to trace the lemonscript shakiness 
 #if defined(PLATFORM_WIIU)
 		static int sCallLogCount = 0;
 		if constexpr (ENABLE_WIIU_LEMON_RUNTIME_TRACE)
@@ -1052,7 +1051,7 @@ namespace lemon
 				if (variable.getStaticMemorySize() > 0)
 				{
 					const int64 value = variable.mInitialValue.get<int64>();
-					*(int64*)&mStaticMemory[variable.getStaticMemoryOffset()] = value;
+					memcpy(&mStaticMemory[variable.getStaticMemoryOffset()], &value, sizeof(value));
 				}
 			}
 		}

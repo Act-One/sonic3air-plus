@@ -48,12 +48,11 @@ namespace serialization
 		#endif
 		}
 	};
-
 	template<typename T>
 	uint32 getToken()
 	{
 		// Return default token
-		return *(uint32*)("type");
+		return ((uint32)'t') | ((uint32)'y' << 8) | ((uint32)'p' << 16) | ((uint32)'e' << 24);
 	}
 }
 

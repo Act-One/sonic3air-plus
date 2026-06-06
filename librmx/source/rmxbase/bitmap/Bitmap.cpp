@@ -286,7 +286,6 @@ bool Bitmap::encode(OutputStream& stream, const char* format) const
 	}
 	return false;
 }
-
 uint8* Bitmap::convert(ColorFormat format, int& size, uint32* palette)
 {
 	// Convert into a different color format
@@ -316,7 +315,8 @@ uint8* Bitmap::convert(ColorFormat format, int& size, uint32* palette)
 				color += (mData[i] >> 3) & 0x001f;
 				color += (mData[i] >> 5) & 0x07e0;
 				color += (mData[i] >> 8) & 0xf800;
-				*(uint16*)(&output[i*2]) = color;
+				output[i*2] = (uint8)color;
+				output[i*2 + 1] = (uint8)(color >> 8);
 			}
 			return output;
 		}

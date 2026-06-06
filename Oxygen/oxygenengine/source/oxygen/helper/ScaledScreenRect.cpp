@@ -50,6 +50,24 @@ void ScaledScreenRect::buildRectIntegerAspectFit(const Recti& outerRect)
 	}
 }
 
+void ScaledScreenRect::buildRectIntegerScaleToFill(const Recti& outerRect)
+{
+	if (mResolution.x <= 0 || mResolution.y <= 0)
+	{
+		mRectOnScreen = outerRect;
+		return;
+	}
+
+	const int scaleX = (outerRect.width + mResolution.x - 1) / mResolution.x;
+	const int scaleY = (outerRect.height + mResolution.y - 1) / mResolution.y;
+	const int scale = std::max(std::max(scaleX, scaleY), 1);
+
+	mRectOnScreen.width = mResolution.x * scale;
+	mRectOnScreen.height = mResolution.y * scale;
+	mRectOnScreen.x = outerRect.x + (outerRect.width - mRectOnScreen.width) / 2;
+	mRectOnScreen.y = outerRect.y + (outerRect.height - mRectOnScreen.height) / 2;
+}
+
 void ScaledScreenRect::buildRectScaleToFill(const Recti& outerRect)
 {
 	mRectOnScreen = RenderUtils::getScaleToFillRect(outerRect, (float)mResolution.x / (float)mResolution.y);
