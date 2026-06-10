@@ -760,8 +760,7 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 
 bool GX2Renderer::canDrawPresentedGameScreenToCurrentTarget() const
 {
-	const DrawerTexture& presentTexture = mGameScreenPresentTextures[mGameScreenPresentTextureIndex];
-	return mCurrentTargetAlreadyHasNativeFrame || mNativeRenderTargetReady || !presentTexture.getBitmap().empty();
+	return true;
 }
 
 bool GX2Renderer::drawPresentedGameScreenToCurrentTarget(const Recti& targetRect)
@@ -772,8 +771,7 @@ bool GX2Renderer::drawPresentedGameScreenToCurrentTarget(const Recti& targetRect
 		return true;
 	}
 
-	DrawerTexture& presentTexture = mGameScreenPresentTextures[mGameScreenPresentTextureIndex];
-	DrawerTexture* texture = mNativeRenderTargetReady ? &mGameScreenTexture : (presentTexture.getBitmap().empty() ? nullptr : &presentTexture);
+	DrawerTexture* texture = &mGameScreenTexture;
 	if (nullptr == texture)
 		return false;
 

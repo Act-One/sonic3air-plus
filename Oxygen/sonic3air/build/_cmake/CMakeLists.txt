@@ -125,7 +125,7 @@ option(S3AIR_WIIU_BUILD_GX2GL_COMPAT "Build the legacy gx2gl/OpenGL compatibilit
 option(S3AIR_WIIU_BUILD_GX2VK "Build gx2vk alongside native GX2 for Wii U renderer experiments" OFF)
 option(S3AIR_WIIU_ENABLE_GX2VK_RENDERER "Enable Sonic 3 A.I.R.'s Vulkan renderer on Wii U through gx2vk" OFF)
 set(S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL "3" CACHE STRING "Forced LemonScript optimization level for Wii U builds")
-option(S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT "Disable Wii U LemonScript nativized provider for crash isolation" ON)
+option(S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT "Disable Wii U LemonScript nativized provider for crash isolation" OFF)
 if (PLATFORM_WIIU_BUILD AND (S3AIR_WIIU_BUILD_GX2GL_COMPAT OR S3AIR_WIIU_BUILD_GX2VK OR S3AIR_WIIU_ENABLE_GX2VK_RENDERER))
 	message(FATAL_ERROR "Wii U build is native GX2 only; gx2gl/gx2vk are off.")
 endif()
