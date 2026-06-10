@@ -86,7 +86,7 @@ namespace lemon
 						return 0;
 					}
 
-					const T* data = context->mControlFlow.accessLocalVariable<T>(var.getLocalMemoryOffset());
+					const T* data = context->mControlFlow.accessLocalVariableRaw<T>(var.getLocalMemoryOffset());
 					return data[index];
 				}
 
@@ -98,8 +98,14 @@ namespace lemon
 						return 0;
 					}
 
-					const T* data = reinterpret_cast<T*>(context->mControlFlow.getRuntime().accessGlobalVariableValue(var));
-					return data[index];
+					const uint8* storage = context->mControlFlow.getRuntime().accessGlobalVariableStorage(var);
+					if (nullptr == storage)
+					{
+						return 0;
+					}
+					T value = {};
+					memcpy(&value, storage + (size_t)index * sizeof(T), sizeof(T));
+					return value;
 				}
 
 				default:
@@ -130,7 +136,7 @@ namespace lemon
 						return;
 					}
 
-					T* data = context->mControlFlow.accessLocalVariable<T>(var.getLocalMemoryOffset());
+					T* data = context->mControlFlow.accessLocalVariableRaw<T>(var.getLocalMemoryOffset());
 					data[index] = value;
 					break;
 				}
@@ -143,8 +149,12 @@ namespace lemon
 						return;
 					}
 
-					T* data = reinterpret_cast<T*>(context->mControlFlow.getRuntime().accessGlobalVariableValue(var));
-					data[index] = value;
+					uint8* storage = context->mControlFlow.getRuntime().accessGlobalVariableStorage(var);
+					if (nullptr == storage)
+					{
+						return;
+					}
+					memcpy(storage + (size_t)index * sizeof(T), &value, sizeof(T));
 					break;
 				}
 

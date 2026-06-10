@@ -166,6 +166,7 @@ void GameView::initialize()
 	const Vec2i& resolution = Configuration::instance().mGameScreen;
 
 	RMX_LOG_INFO("Creating game screen texture");
+	mFinalGameTexture.setContentKnownOpaque(true);
 	mFinalGameTexture.setupAsRenderTarget(resolution);
 }
 
@@ -585,13 +586,14 @@ void GameView::render()
 	const Recti gameScreenRect = VideoOut::instance().getScreenRect();
 	mGameViewport.setResolution(gameScreenRect.getSize());
 #if defined(PLATFORM_WIIU)
-	const bool renderDirectToWindow = false;
+	const bool renderDirectToWindow = true;
 #else
 	const bool renderDirectToWindow = false;
 #endif
 	const bool renderGameScreenDirectToWindow = renderDirectToWindow && mStillImage.mMode == StillImageMode::NONE && !config.mMirrorMode;
 	if (!renderDirectToWindow)
 	{
+		mFinalGameTexture.setContentKnownOpaque(true);
 		mFinalGameTexture.setupAsRenderTarget(gameScreenRect.getSize());
 	}
 
@@ -654,19 +656,30 @@ void GameView::render()
 				<< " gameScreenRect=" << sLoggedDirectGameScreenRect.x << "," << sLoggedDirectGameScreenRect.y << " " << sLoggedDirectGameScreenRect.width << "x" << sLoggedDirectGameScreenRect.height
 				<< " gameViewportRect=" << sLoggedDirectViewportRect.x << "," << sLoggedDirectViewportRect.y << " " << sLoggedDirectViewportRect.width << "x" << sLoggedDirectViewportRect.height);
 		}
-		drawer.setWindowRenderTarget(FTX::screenRect());
+		if (!renderGameScreenDirectToWindow)
+		{
+			drawer.setWindowRenderTarget(gameScreenRect);
+		}
 	}
 	else
 	{
 		drawer.setRenderTarget(mFinalGameTexture, gameScreenRect);
 	}
 	drawer.setBlendMode(BlendMode::OPAQUE);
+	if (!renderDirectToWindow)
+	{
+		drawer.drawRect(gameScreenRect, Color::BLACK);
+	}
 
 	// Simple mirror mode implementation: Just mirror the whole screen
 	if (renderGameScreenDirectToWindow)
 	{
 #if defined(PLATFORM_WIIU)
-		videoOut.updateGameScreenOnCurrentTarget(gameScreenRect);
+		const bool updatedGameScreen = videoOut.updateGameScreenOnCurrentTarget(gameScreenRect);
+		if (!updatedGameScreen && !videoOut.canDrawGameScreenOnCurrentTarget())
+		{
+			return;
+		}
 		drawer.setWindowRenderTarget(gameScreenRect);
 		videoOut.drawGameScreenOnCurrentTarget(gameScreenRect);
 #endif
@@ -677,10 +690,20 @@ void GameView::render()
 	}
 	else
 	{
+#if defined(PLATFORM_WIIU)
+		drawer.drawRect(gameScreenRect, videoOut.getGameScreenTexture(), gameScreenRect, Color::WHITE);
+#else
 		drawer.drawRect(gameScreenRect, videoOut.getGameScreenTexture());
+#endif
 	}
 
 	// Enable alpha for the UI
+#if defined(PLATFORM_WIIU)
+	if (renderDirectToWindow)
+	{
+		drawer.setWindowRenderTarget(gameScreenRect);
+	}
+#endif
 	drawer.setBlendMode(BlendMode::ALPHA);
 
 	// Highlight rects (from rendered geometry dev mode window)
@@ -812,7 +835,9 @@ void GameView::render()
 #if defined(PLATFORM_WIIU)
 		if (drawer.getType() == Drawer::Type::GX2)
 		{
-			drawer.drawUpscaledRect(gameViewportRect, mFinalGameTexture);
+			drawer.setSamplingMode(SamplingMode::POINT);
+			drawer.setWrapMode(TextureWrapMode::CLAMP);
+			drawer.drawRect(FTX::screenRect(), mFinalGameTexture, Color::WHITE, Color(0.0f, 0.0f, 0.0f, 1.0f));
 		}
 		else
 		{

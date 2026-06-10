@@ -25,6 +25,13 @@ namespace rmx
 				((uint64)data[6] << 48) |
 				((uint64)data[7] << 56);
 		}
+
+		uint64 getMurmur2_64_wide(std::wstring_view str)
+		{
+			std::string utf8;
+			UTF8Conversion::convertToUTF8(str, utf8);
+			return getMurmur2_64(std::string_view(utf8));
+		}
 	}
 
 	uint32 getFNV1a_32(const uint8* data, size_t bytes)
@@ -123,8 +130,7 @@ namespace rmx
 
 	uint64 getMurmur2_64(const WString& str)
 	{
-		// Note that this is *not* platform-independent
-		return getMurmur2_64((const uint8*)*str, str.length() * sizeof(wchar_t));
+		return getMurmur2_64_wide(std::wstring_view(*str, str.length()));
 	}
 
 	uint64 getMurmur2_64(const char* str)
@@ -134,19 +140,17 @@ namespace rmx
 
 	uint64 getMurmur2_64(const wchar_t* str)
 	{
-		// Note that this is *not* platform-independent
-		return getMurmur2_64((const uint8*)str, wcslen(str) * sizeof(wchar_t));
+		return getMurmur2_64_wide(std::wstring_view(str, wcslen(str)));
 	}
 
 	uint64 getMurmur2_64(const std::string& str)
 	{
-		return getMurmur2_64((const uint8*)&str[0], str.length() * sizeof(char));
+		return getMurmur2_64((const uint8*)str.data(), str.length() * sizeof(char));
 	}
 
 	uint64 getMurmur2_64(const std::wstring& str)
 	{
-		// Note that this is *not* platform-independent
-		return getMurmur2_64((const uint8*)&str[0], str.length() * sizeof(wchar_t));
+		return getMurmur2_64_wide(std::wstring_view(str));
 	}
 
 	uint64 getMurmur2_64(std::string_view str)
@@ -156,8 +160,7 @@ namespace rmx
 
 	uint64 getMurmur2_64(std::wstring_view str)
 	{
-		// Note that this is *not* platform-independent
-		return getMurmur2_64((const uint8*)str.data(), str.length() * sizeof(wchar_t));
+		return getMurmur2_64_wide(str);
 	}
 
 	uint32 getCRC32(const uint8* data, size_t bytes)

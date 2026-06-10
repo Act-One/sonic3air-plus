@@ -51,26 +51,31 @@ namespace lemon
 	struct API_EXPORT RuntimeOpcode : public RuntimeOpcodeBase
 	{
 	public:
-		static const constexpr size_t PARAMETER_OFFSET = sizeof(RuntimeOpcodeBase);
+		static const constexpr size_t PARAMETER_ALIGNMENT = 8;
+		static const constexpr size_t PARAMETER_OFFSET = (sizeof(RuntimeOpcodeBase) + PARAMETER_ALIGNMENT - 1) & ~(PARAMETER_ALIGNMENT - 1);
 
 		template<typename T> FORCE_INLINE T getParameter() const
 		{
-			return *reinterpret_cast<const T*>((uint8*)this + PARAMETER_OFFSET);
+			T value;
+			memcpy(&value, (uint8*)this + PARAMETER_OFFSET, sizeof(T));
+			return value;
 		}
 
 		template<typename T> FORCE_INLINE T getParameter(size_t offset) const
 		{
-			return *reinterpret_cast<const T*>((uint8*)this + PARAMETER_OFFSET + offset);
+			T value;
+			memcpy(&value, (uint8*)this + PARAMETER_OFFSET + offset, sizeof(T));
+			return value;
 		}
 
 		template<typename T> void setParameter(T value)
 		{
-			*reinterpret_cast<T*>((uint8*)this + PARAMETER_OFFSET) = value;
+			memcpy((uint8*)this + PARAMETER_OFFSET, &value, sizeof(T));
 		}
 
 		template<typename T> void setParameter(T value, size_t offset)
 		{
-			*reinterpret_cast<T*>((uint8*)this + PARAMETER_OFFSET + offset) = value;
+			memcpy((uint8*)this + PARAMETER_OFFSET + offset, &value, sizeof(T));
 		}
 	};
 

@@ -135,10 +135,11 @@ namespace lemon
 			++context.mControlFlow->mValueStackPtr;
 		}
 
+		template<typename T>
 		static void exec_GET_VARIABLE_VALUE_LOCAL(const RuntimeOpcodeContext context)
 		{
 			const uint32 variableOffset = context.getParameter<uint32>();
-			*context.mControlFlow->mValueStackPtr = context.readLocalVariable<int64>(variableOffset);
+			*context.mControlFlow->mValueStackPtr = BaseTypeConversion::convert<T, uint64>(context.readLocalVariable<T>(variableOffset));
 			++context.mControlFlow->mValueStackPtr;
 		}
 
@@ -152,15 +153,29 @@ namespace lemon
 		template<typename T>
 		static void exec_GET_VARIABLE_VALUE_EXTERNAL(const RuntimeOpcodeContext context)
 		{
-			*context.mControlFlow->mValueStackPtr = *context.getParameter<T*>();
+			const T* pointer = context.getParameter<T*>();
+			T value = {};
+			if (nullptr != pointer)
+			{
+				memcpy(&value, pointer, sizeof(T));
+			}
+			*context.mControlFlow->mValueStackPtr = BaseTypeConversion::convert<T, uint64>(value);
 			++context.mControlFlow->mValueStackPtr;
 		}
 
+		static void exec_GET_VARIABLE_VALUE_EXTERNAL_DYNAMIC(const RuntimeOpcodeContext context)
+		{
+			const uint32 variableId = context.getParameter<uint32>();
+			*context.mControlFlow->mValueStackPtr = context.mControlFlow->readVariableGeneric(variableId);
+			++context.mControlFlow->mValueStackPtr;
+		}
+
+		template<typename T>
 		static void exec_SET_VARIABLE_VALUE_LOCAL(const RuntimeOpcodeContext context)
 		{
-			const int64 value = *(context.mControlFlow->mValueStackPtr-1);
+			const T value = BaseTypeConversion::convert<uint64, T>(*(context.mControlFlow->mValueStackPtr-1));
 			const uint32 variableOffset = context.getParameter<uint32>();
-			context.writeLocalVariable<int64>(variableOffset, value);
+			context.writeLocalVariable<T>(variableOffset, value);
 		}
 
 		static void exec_SET_VARIABLE_VALUE_USER(const RuntimeOpcodeContext context)
@@ -173,8 +188,18 @@ namespace lemon
 		template<typename T>
 		static void exec_SET_VARIABLE_VALUE_EXTERNAL(const RuntimeOpcodeContext context)
 		{
-			const int64 value = *(context.mControlFlow->mValueStackPtr-1);
-			*context.getParameter<T*>() = (T)value;
+			const T value = BaseTypeConversion::convert<uint64, T>(*(context.mControlFlow->mValueStackPtr-1));
+			T* pointer = context.getParameter<T*>();
+			if (nullptr != pointer)
+			{
+				memcpy(pointer, &value, sizeof(T));
+			}
+		}
+
+		static void exec_SET_VARIABLE_VALUE_EXTERNAL_DYNAMIC(const RuntimeOpcodeContext context)
+		{
+			const uint32 variableId = context.getParameter<uint32>();
+			context.mControlFlow->writeVariableGeneric(variableId, *(context.mControlFlow->mValueStackPtr-1));
 		}
 
 		template<typename T>
@@ -466,7 +491,7 @@ namespace lemon
 					{
 						const LocalVariable& variable = function.getLocalVariableByID(variableId);
 						runtimeOpcode.setParameter(variable.getLocalMemoryOffset());
-						runtimeOpcode.mExecFunc = &OpcodeExec::exec_GET_VARIABLE_VALUE_LOCAL;
+						SELECT_EXEC_FUNC_BY_DATATYPE(OpcodeExec::exec_GET_VARIABLE_VALUE_LOCAL);
 						break;
 					}
 
@@ -475,14 +500,7 @@ namespace lemon
 						const GlobalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<GlobalVariable>();
 						int64* value = const_cast<Runtime&>(runtime).accessGlobalVariableValue(variable);
 						runtimeOpcode.setParameter(getScriptSlotPointerForType(value, opcode.mDataType));
-
-						switch (BaseTypeHelper::getSizeOfBaseType(opcode.mDataType))
-						{
-							case 1:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_GET_VARIABLE_VALUE_EXTERNAL<uint8>;   break;
-							case 2:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_GET_VARIABLE_VALUE_EXTERNAL<uint16>;  break;
-							case 4:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_GET_VARIABLE_VALUE_EXTERNAL<uint32>;  break;
-							case 8:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_GET_VARIABLE_VALUE_EXTERNAL<uint64>;  break;
-						}
+						SELECT_EXEC_FUNC_BY_DATATYPE(OpcodeExec::exec_GET_VARIABLE_VALUE_EXTERNAL);
 						break;
 					}
 
@@ -496,15 +514,15 @@ namespace lemon
 					case Variable::Type::EXTERNAL:
 					{
 						const ExternalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<ExternalVariable>();
-						runtimeOpcode.setParameter(variable.mAccessor());
-
-						switch (variable.getDataType()->getBytes())
+						int64* value = variable.mAccessor ? variable.mAccessor() : nullptr;
+						if (nullptr == value)
 						{
-							case 1:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_GET_VARIABLE_VALUE_EXTERNAL<uint8>;   break;
-							case 2:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_GET_VARIABLE_VALUE_EXTERNAL<uint16>;  break;
-							case 4:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_GET_VARIABLE_VALUE_EXTERNAL<uint32>;  break;
-							case 8:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_GET_VARIABLE_VALUE_EXTERNAL<uint64>;  break;
+							runtimeOpcode.setParameter(variableId);
+							runtimeOpcode.mExecFunc = &OpcodeExec::exec_GET_VARIABLE_VALUE_EXTERNAL_DYNAMIC;
+							break;
 						}
+						runtimeOpcode.setParameter(reinterpret_cast<uint8*>(value));
+						SELECT_EXEC_FUNC_BY_DATATYPE(OpcodeExec::exec_GET_VARIABLE_VALUE_EXTERNAL);
 						break;
 					}
 				}
@@ -521,7 +539,7 @@ namespace lemon
 					{
 						const LocalVariable& variable = function.getLocalVariableByID(variableId);
 						runtimeOpcode.setParameter(variable.getLocalMemoryOffset());
-						runtimeOpcode.mExecFunc = &OpcodeExec::exec_SET_VARIABLE_VALUE_LOCAL;
+						SELECT_EXEC_FUNC_BY_DATATYPE(OpcodeExec::exec_SET_VARIABLE_VALUE_LOCAL);
 						break;
 					}
 
@@ -530,14 +548,7 @@ namespace lemon
 						const GlobalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<GlobalVariable>();
 						int64* value = const_cast<Runtime&>(runtime).accessGlobalVariableValue(variable);
 						runtimeOpcode.setParameter(getScriptSlotPointerForType(value, opcode.mDataType));
-
-						switch (BaseTypeHelper::getSizeOfBaseType(opcode.mDataType))
-						{
-							case 1:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_SET_VARIABLE_VALUE_EXTERNAL<uint8>;   break;
-							case 2:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_SET_VARIABLE_VALUE_EXTERNAL<uint16>;  break;
-							case 4:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_SET_VARIABLE_VALUE_EXTERNAL<uint32>;  break;
-							case 8:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_SET_VARIABLE_VALUE_EXTERNAL<uint64>;  break;
-						}
+						SELECT_EXEC_FUNC_BY_DATATYPE(OpcodeExec::exec_SET_VARIABLE_VALUE_EXTERNAL);
 						break;
 					}
 
@@ -551,15 +562,15 @@ namespace lemon
 					case Variable::Type::EXTERNAL:
 					{
 						const ExternalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<ExternalVariable>();
-						runtimeOpcode.setParameter(variable.mAccessor());
-
-						switch (variable.getDataType()->getBytes())
+						int64* value = variable.mAccessor ? variable.mAccessor() : nullptr;
+						if (nullptr == value)
 						{
-							case 1:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_SET_VARIABLE_VALUE_EXTERNAL<uint8>;   break;
-							case 2:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_SET_VARIABLE_VALUE_EXTERNAL<uint16>;  break;
-							case 4:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_SET_VARIABLE_VALUE_EXTERNAL<uint32>;  break;
-							case 8:  runtimeOpcode.mExecFunc = &OpcodeExec::exec_SET_VARIABLE_VALUE_EXTERNAL<uint64>;  break;
+							runtimeOpcode.setParameter(variableId);
+							runtimeOpcode.mExecFunc = &OpcodeExec::exec_SET_VARIABLE_VALUE_EXTERNAL_DYNAMIC;
+							break;
 						}
+						runtimeOpcode.setParameter(reinterpret_cast<uint8*>(value));
+						SELECT_EXEC_FUNC_BY_DATATYPE(OpcodeExec::exec_SET_VARIABLE_VALUE_EXTERNAL);
 						break;
 					}
 				}

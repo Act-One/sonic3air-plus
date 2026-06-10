@@ -92,6 +92,9 @@ namespace lemon
 		// Misc
 		bool processGlobalPragma(const std::string& content);
 		AnyBaseValue readConstantExpression(TokenList& tokens, size_t& pos, size_t endPos, const DataTypeDefinition* dataType, uint32 lineNumber);
+		void checkForMissingReturn(FunctionNode& functionNode);
+		bool canReachNodeAfter(const Node& node) const;
+		bool canReachEndOfBlock(const BlockNode& blockNode) const;
 
 	private:
 		Module& mModule;

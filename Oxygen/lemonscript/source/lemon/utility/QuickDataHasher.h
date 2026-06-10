@@ -36,7 +36,12 @@ namespace lemon
 			if (mSize > 0)
 			{
 				uint64 chunkHash = rmx::getMurmur2_64(mChunk, mSize);
-				mHash = rmx::addToFNV1a_64(mHash, (uint8*)&chunkHash, sizeof(chunkHash));
+				uint8 hashBytes[sizeof(chunkHash)];
+				for (size_t i = 0; i < sizeof(chunkHash); ++i)
+				{
+					hashBytes[i] = (uint8)((chunkHash >> (i * 8)) & 0xff);
+				}
+				mHash = rmx::addToFNV1a_64(mHash, hashBytes, sizeof(hashBytes));
 				mSize = 0;
 			}
 		}
@@ -57,8 +62,11 @@ namespace lemon
 
 		void addData(uint64 value)
 		{
-			memcpy(&mChunk[mSize], &value, sizeof(value));
-			++mSize;
+			for (size_t i = 0; i < sizeof(value); ++i)
+			{
+				mChunk[mSize + i] = (uint8)((value >> (i * 8)) & 0xff);
+			}
+			mSize += sizeof(value);
 		}
 	};
 }

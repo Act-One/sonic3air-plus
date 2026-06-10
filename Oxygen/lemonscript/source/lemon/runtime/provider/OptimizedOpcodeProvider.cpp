@@ -78,12 +78,13 @@ namespace lemon
 			return AnyBaseValue(context.mOpcode->getParameter<uint64>(offset)).get<T>();
 		}
 
+		template<typename T>
 		static void exec_OPT_SET_VARIABLE_VALUE_LOCAL_DISCARD(const RuntimeOpcodeContext context)
 		{
 			--context.mControlFlow->mValueStackPtr;
-			const int64 value = *context.mControlFlow->mValueStackPtr;
+			const T value = BaseTypeConversion::convert<uint64, T>(*context.mControlFlow->mValueStackPtr);
 			const uint32 variableOffset = context.getParameter<uint32>();
-			context.writeLocalVariable<int64>(variableOffset, value);
+			context.writeLocalVariable<T>(variableOffset, value);
 		}
 
 		static void exec_OPT_SET_VARIABLE_VALUE_USER_DISCARD(const RuntimeOpcodeContext context)
@@ -98,9 +99,11 @@ namespace lemon
 		static void exec_OPT_SET_VARIABLE_VALUE_EXTERNAL_DISCARD(const RuntimeOpcodeContext context)
 		{
 			--context.mControlFlow->mValueStackPtr;
-			const int64 value = *context.mControlFlow->mValueStackPtr;
 			T* pointer = context.mOpcode->getParameter<T*>();
-			*pointer = (T)value;
+			if (nullptr == pointer)
+				return;
+			const T storedValue = BaseTypeConversion::convert<uint64, T>(*context.mControlFlow->mValueStackPtr);
+			memcpy(pointer, &storedValue, sizeof(T));
 		}
 
 		template<typename T>
@@ -109,6 +112,20 @@ namespace lemon
 			context.mControlFlow->mValueStackPtr -= 2;
 			const uint64 address = *(context.mControlFlow->mValueStackPtr);
 			OpcodeExecUtils::writeMemory<T>(*context.mControlFlow, address, (T)(*(context.mControlFlow->mValueStackPtr+1)));
+		}
+
+		template<typename T>
+		static FORCE_INLINE T readDirectValue(const uint8* pointer)
+		{
+			T value;
+			memcpy(&value, pointer, sizeof(T));
+			return value;
+		}
+
+		template<typename T>
+		static FORCE_INLINE void writeDirectValue(uint8* pointer, T value)
+		{
+			memcpy(pointer, &value, sizeof(T));
 		}
 
 		template<typename T>
@@ -123,7 +140,7 @@ namespace lemon
 		static void exec_OPT_READ_MEMORY_FIXED_ADDR_DIRECT(const RuntimeOpcodeContext context)
 		{
 			const uint8* pointer = context.getParameter<uint8*>();
-			*context.mControlFlow->mValueStackPtr = *(T*)pointer;
+			*context.mControlFlow->mValueStackPtr = readDirectValue<T>(pointer);
 			++context.mControlFlow->mValueStackPtr;
 		}
 
@@ -131,7 +148,7 @@ namespace lemon
 		static void exec_OPT_READ_MEMORY_FIXED_ADDR_DIRECT_SWAP(const RuntimeOpcodeContext context)
 		{
 			const uint8* pointer = context.getParameter<uint8*>();
-			*context.mControlFlow->mValueStackPtr = rmx::swapBytes(*(T*)pointer);
+			*context.mControlFlow->mValueStackPtr = rmx::swapBytes(readDirectValue<T>(pointer));
 			++context.mControlFlow->mValueStackPtr;
 		}
 
@@ -148,14 +165,14 @@ namespace lemon
 		static void exec_OPT_WRITE_MEMORY_FIXED_ADDR_DIRECT(const RuntimeOpcodeContext context)
 		{
 			uint8* pointer = context.getParameter<uint8*>();
-			*(T*)pointer = (T)(*(context.mControlFlow->mValueStackPtr-1));
+			writeDirectValue<T>(pointer, (T)(*(context.mControlFlow->mValueStackPtr-1)));
 		}
 
 		template<typename T>
 		static void exec_OPT_WRITE_MEMORY_FIXED_ADDR_DIRECT_SWAP(const RuntimeOpcodeContext context)
 		{
 			uint8* pointer = context.getParameter<uint8*>();
-			*(T*)pointer = rmx::swapBytes((T)(*(context.mControlFlow->mValueStackPtr-1)));
+			writeDirectValue<T>(pointer, rmx::swapBytes((T)(*(context.mControlFlow->mValueStackPtr-1))));
 		}
 	*/
 
@@ -258,7 +275,8 @@ namespace lemon
 		template<typename T>
 		static void exec_OPT_EXTERNAL_ADD_CONSTANT(const RuntimeOpcodeContext context)
 		{
-			context.writeValueStack<T>(0, *context.mOpcode->getParameter<T*>() + readConstantParameter<T>(context, 8));
+			const uint8* pointer = context.mOpcode->getParameter<uint8*>();
+			context.writeValueStack<T>(0, readDirectValue<T>(pointer) + readConstantParameter<T>(context, 8));
 			++context.mControlFlow->mValueStackPtr;
 		}
 	};
@@ -269,18 +287,22 @@ namespace lemon
 		if (numOpcodesAvailable >= 2)
 		{
 			// Merge: Binary operation with an external variable and a constant value
-			if (opcodes[0].mType == Opcode::Type::GET_VARIABLE_VALUE && (Variable::Type)((uint32)(opcodes[0].mParameter) >> 28) == Variable::Type::EXTERNAL)
+			if (numOpcodesAvailable >= 3 && opcodes[0].mType == Opcode::Type::GET_VARIABLE_VALUE && (Variable::Type)((uint32)(opcodes[0].mParameter) >> 28) == Variable::Type::EXTERNAL)
 			{
 				if (opcodes[1].mType == Opcode::Type::PUSH_CONSTANT)
 				{
 					if (opcodes[2].mType == Opcode::Type::ARITHM_ADD && opcodes[2].mDataType == opcodes[0].mDataType)
 					{
+						const uint32 variableId = (uint32)opcodes[0].mParameter;
+						const ExternalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<ExternalVariable>();
+						int64* value = variable.mAccessor ? variable.mAccessor() : nullptr;
+						if (nullptr == value)
+							return false;
+
 						RuntimeOpcode& runtimeOpcode = buffer.addOpcode(16);
 						SELECT_EXEC_FUNC_BY_DATATYPE(OptimizedOpcodeExec::exec_OPT_EXTERNAL_ADD_CONSTANT, opcodes[0].mDataType);
 
-						const uint32 variableId = (uint32)opcodes[0].mParameter;
-						const ExternalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<ExternalVariable>();
-						runtimeOpcode.setParameter(variable.mAccessor());
+						runtimeOpcode.setParameter(reinterpret_cast<uint8*>(value));
 						runtimeOpcode.setParameter(opcodes[1].mParameter, 8);
 						outNumOpcodesConsumed = 3;
 						return true;
@@ -341,7 +363,7 @@ namespace lemon
 						{
 							const LocalVariable& variable = function.getLocalVariableByID(variableId);
 							runtimeOpcode.setParameter(variable.getLocalMemoryOffset());
-							runtimeOpcode.mExecFunc = &OptimizedOpcodeExec::exec_OPT_SET_VARIABLE_VALUE_LOCAL_DISCARD;
+							SELECT_EXEC_FUNC_BY_DATATYPE(OptimizedOpcodeExec::exec_OPT_SET_VARIABLE_VALUE_LOCAL_DISCARD, opcodes[0].mDataType);
 							break;
 						}
 
@@ -357,29 +379,18 @@ namespace lemon
 							const GlobalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<GlobalVariable>();
 							int64* value = const_cast<Runtime&>(runtime).accessGlobalVariableValue(variable);
 							runtimeOpcode.setParameter(getScriptSlotPointerForType(value, opcodes[0].mDataType));
-
-							switch (BaseTypeHelper::getSizeOfBaseType(opcodes[0].mDataType))
-							{
-								case 1:  runtimeOpcode.mExecFunc = &OptimizedOpcodeExec::exec_OPT_SET_VARIABLE_VALUE_EXTERNAL_DISCARD<uint8>;   break;
-								case 2:  runtimeOpcode.mExecFunc = &OptimizedOpcodeExec::exec_OPT_SET_VARIABLE_VALUE_EXTERNAL_DISCARD<uint16>;  break;
-								case 4:  runtimeOpcode.mExecFunc = &OptimizedOpcodeExec::exec_OPT_SET_VARIABLE_VALUE_EXTERNAL_DISCARD<uint32>;  break;
-								case 8:  runtimeOpcode.mExecFunc = &OptimizedOpcodeExec::exec_OPT_SET_VARIABLE_VALUE_EXTERNAL_DISCARD<uint64>;  break;
-							}
+							SELECT_EXEC_FUNC_BY_DATATYPE(OptimizedOpcodeExec::exec_OPT_SET_VARIABLE_VALUE_EXTERNAL_DISCARD, opcodes[0].mDataType);
 							break;
 						}
 
 						case Variable::Type::EXTERNAL:
 						{
 							const ExternalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<ExternalVariable>();
-							runtimeOpcode.setParameter(variable.mAccessor());
-
-							switch (variable.getDataType()->getBytes())
-							{
-								case 1:  runtimeOpcode.mExecFunc = &OptimizedOpcodeExec::exec_OPT_SET_VARIABLE_VALUE_EXTERNAL_DISCARD<uint8>;   break;
-								case 2:  runtimeOpcode.mExecFunc = &OptimizedOpcodeExec::exec_OPT_SET_VARIABLE_VALUE_EXTERNAL_DISCARD<uint16>;  break;
-								case 4:  runtimeOpcode.mExecFunc = &OptimizedOpcodeExec::exec_OPT_SET_VARIABLE_VALUE_EXTERNAL_DISCARD<uint32>;  break;
-								case 8:  runtimeOpcode.mExecFunc = &OptimizedOpcodeExec::exec_OPT_SET_VARIABLE_VALUE_EXTERNAL_DISCARD<uint64>;  break;
-							}
+							int64* value = variable.mAccessor ? variable.mAccessor() : nullptr;
+							if (nullptr == value)
+								return false;
+							runtimeOpcode.setParameter(reinterpret_cast<uint8*>(value));
+							SELECT_EXEC_FUNC_BY_DATATYPE(OptimizedOpcodeExec::exec_OPT_SET_VARIABLE_VALUE_EXTERNAL_DISCARD, opcodes[0].mDataType);
 							break;
 						}
 					}

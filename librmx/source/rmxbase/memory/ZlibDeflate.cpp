@@ -17,6 +17,10 @@
 
 bool ZlibDeflate::decode(std::vector<uint8>& output, const void* inputData, size_t inputSize)
 {
+	output.clear();
+	if (nullptr == inputData && inputSize > 0)
+		return false;
+
 	// Setup inflate
 	z_stream strm;
 	strm.zalloc = nullptr;
@@ -31,6 +35,7 @@ bool ZlibDeflate::decode(std::vector<uint8>& output, const void* inputData, size
 	strm.avail_in = (uInt)inputSize;
 
 	// Run inflate on input until output buffer not full
+	bool reachedStreamEnd = false;
 	do
 	{
 		const size_t outputOffset = output.size();
@@ -42,8 +47,10 @@ bool ZlibDeflate::decode(std::vector<uint8>& output, const void* inputData, size
 		if (zlibResult != Z_OK && zlibResult != Z_STREAM_END)
 		{
 			inflateEnd(&strm);
+			output.clear();
 			return false;
 		}
+		reachedStreamEnd = (zlibResult == Z_STREAM_END);
 
 		const unsigned int bytesWritten = CHUNK_SIZE - strm.avail_out;
 		if (bytesWritten < CHUNK_SIZE)
@@ -52,11 +59,16 @@ bool ZlibDeflate::decode(std::vector<uint8>& output, const void* inputData, size
 			output.resize(outputOffset + bytesWritten);
 		}
 	}
-	while (strm.avail_out == 0);
+	while (!reachedStreamEnd && strm.avail_out == 0);
 
 	// Clean up
 	zlibResult = inflateEnd(&strm);
-	return (zlibResult == Z_STREAM_END || zlibResult == Z_OK);
+	if (zlibResult != Z_OK || !reachedStreamEnd)
+	{
+		output.clear();
+		return false;
+	}
+	return true;
 }
 
 bool ZlibDeflate::encode(std::vector<uint8>& output, const void* inputData, size_t inputSize, int compressionLevel)

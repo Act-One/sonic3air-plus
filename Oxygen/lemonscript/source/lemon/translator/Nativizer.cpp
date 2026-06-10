@@ -79,13 +79,12 @@ namespace lemon
 		}
 	}
 
-	void Nativizer::LookupDictionary::addEmptyEntries(const uint64* hashes, size_t numHashes)
+	void Nativizer::LookupDictionary::addEmptyEntries(const uint8* hashes, size_t numHashes)
 	{
 		mEntries.reserve(mEntries.size() + numHashes);
-		const uint8* hashData = reinterpret_cast<const uint8*>(hashes);
 		for (size_t i = 0; i < numHashes; ++i)
 		{
-			mEntries.emplace(readLittleEndian64(hashData + i * 8), LookupEntry());
+			mEntries.emplace(readLittleEndian64(hashes + i * 8), LookupEntry());
 		}
 	}
 
@@ -228,9 +227,16 @@ namespace lemon
 
 	uint64 Nativizer::addOpcodeSubtypeInfoToHash(uint64 hash, const OpcodeSubtypeInfo& info)
 	{
-		const uint8* typePointer = (info.mSpecialType == OpcodeSubtypeInfo::SpecialType::NONE) ? (uint8*)&info.mType : (uint8*)&info.mSpecialType;
-		hash = rmx::addToFNV1a_64(hash, typePointer, 1);
-		hash = rmx::addToFNV1a_64(hash, (uint8*)&info.mSubtypeData, 4);
+		const uint8 type = (info.mSpecialType == OpcodeSubtypeInfo::SpecialType::NONE) ? (uint8)info.mType : (uint8)info.mSpecialType;
+		const uint8 subtypeData[] =
+		{
+			(uint8)info.mSubtypeData,
+			(uint8)(info.mSubtypeData >> 8),
+			(uint8)(info.mSubtypeData >> 16),
+			(uint8)(info.mSubtypeData >> 24)
+		};
+		hash = rmx::addToFNV1a_64(hash, &type, 1);
+		hash = rmx::addToFNV1a_64(hash, subtypeData, 4);
 		return hash;
 	}
 
@@ -289,7 +295,7 @@ namespace lemon
 					const std::string identifier = "emptyEntries" + std::to_string(i);
 					const size_t restBytes = std::min<size_t>(bytes - i * 0x8000, 0x8000);
 					writeBinaryBlob(writer, identifier, &data[i * 0x8000], restBytes);
-					writer.writeLine("dict.addEmptyEntries(reinterpret_cast<const uint64*>(" + identifier + "), " + rmx::hexString(restBytes / 8, 2) + ");");
+					writer.writeLine("dict.addEmptyEntries(reinterpret_cast<const uint8*>(" + identifier + "), " + rmx::hexString(restBytes / 8, 2) + ");");
 					writer.writeEmptyLine();
 				}
 			}

@@ -49,7 +49,6 @@
 	#include "oxygen/platform/android/AndroidJavaInterface.h"
 #endif
 #if defined(PLATFORM_WIIU)
-	#include <whb/gfx.h>
 #if defined(RMX_WITH_OPENGL_SUPPORT)
 	#include "gx2gl/sdl_bridge.h"
 #endif
@@ -81,15 +80,7 @@ namespace
 #if defined(PLATFORM_WIIU)
 	void setVideoConfigToTVDrawableSize(rmx::VideoConfig& videoConfig)
 	{
-		GX2ColorBuffer* tvColorBuffer = WHBGfxGetTVColourBuffer();
-		if (nullptr != tvColorBuffer && tvColorBuffer->surface.width > 0 && tvColorBuffer->surface.height > 0)
-		{
-			videoConfig.mWindowRect.set(0, 0, (int)tvColorBuffer->surface.width, (int)tvColorBuffer->surface.height);
-		}
-		else
-		{
-			videoConfig.mWindowRect.set(0, 0, 1280, 720);
-		}
+		videoConfig.mWindowRect.set(0, 0, 1280, 720);
 	}
 #endif
 }
@@ -152,6 +143,9 @@ EngineMain::~EngineMain()
 
 void EngineMain::execute()
 {
+#if defined(PLATFORM_WIIU)
+	RMX_LOG_INFO("EngineMain execute: begin");
+#endif
 	// Startup the Oxygen Engine part that is independent from the application / project
 	if (startupEngine())
 	{
@@ -434,7 +428,7 @@ void EngineMain::shutdown()
 	RMX_LOG_INFO("Engine shutdown: FTX audio exit complete");
 
 	RMX_LOG_INFO("Engine shutdown: job manager shutdown begin");
-	FTX::JobManager->~JobManager();
+	FTX::JobManager->shutdown();
 	RMX_LOG_INFO("Engine shutdown: job manager shutdown complete");
 
 	RMX_LOG_INFO("Engine shutdown: VideoOut shutdown begin");
@@ -449,10 +443,18 @@ void EngineMain::shutdown()
 	mDrawer.shutdown();
 	RMX_LOG_INFO("Engine shutdown: drawer shutdown complete");
 
+	RMX_LOG_INFO("Engine shutdown: copy mod settings");
+	mInternal.mModManager.copyModSettingsToConfig();
+	RMX_LOG_INFO("Engine shutdown: save settings begin");
+	Configuration::instance().saveSettings();
+	RMX_LOG_INFO("Engine shutdown: save settings complete");
+
 	RMX_LOG_INFO("System shutdown");
 	RMX_LOG_INFO("Engine shutdown: FTX system exit begin");
 	FTX::System->exit();
 	RMX_LOG_INFO("Engine shutdown: FTX system exit complete");
+	RMX_LOG_INFO("Engine shutdown: logging shutdown begin");
+	oxygen::Logging::shutdown();
 #else
 	RMX_LOG_INFO("Engine shutdown: destroyWindow begin");
 	destroyWindow();
@@ -479,7 +481,7 @@ void EngineMain::shutdown()
 	// Cleanup system
 	RMX_LOG_INFO("System shutdown");
 	RMX_LOG_INFO("Engine shutdown: job manager shutdown begin");
-	FTX::JobManager->~JobManager();
+	FTX::JobManager->shutdown();
 	RMX_LOG_INFO("Engine shutdown: job manager shutdown complete");
 	RMX_LOG_INFO("Engine shutdown: FTX audio exit begin");
 	FTX::Audio->exit();
@@ -487,14 +489,16 @@ void EngineMain::shutdown()
 	RMX_LOG_INFO("Engine shutdown: FTX system exit begin");
 	FTX::System->exit();
 	RMX_LOG_INFO("Engine shutdown: FTX system exit complete");
-#endif
 
 	RMX_LOG_INFO("Engine shutdown: copy mod settings");
 	mInternal.mModManager.copyModSettingsToConfig();
 	RMX_LOG_INFO("Engine shutdown: save settings begin");
 	Configuration::instance().saveSettings();
 	RMX_LOG_INFO("Engine shutdown: save settings complete");
+	RMX_LOG_INFO("Engine shutdown: logging shutdown begin");
 	oxygen::Logging::shutdown();
+	RMX_LOG_INFO("Engine shutdown: logging shutdown complete");
+#endif
 }
 
 void EngineMain::initDirectories()

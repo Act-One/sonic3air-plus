@@ -33,7 +33,8 @@ public:
 	void renderGameScreen(const std::vector<Geometry*>& geometries) override;
 	void renderDebugDraw(int debugDrawMode, const Recti& rect) override;
 	void renderGameScreenToCurrentTarget(const std::vector<Geometry*>& geometries, const Recti& targetRect);
-	void drawPresentedGameScreenToCurrentTarget(const Recti& targetRect);
+	bool canDrawPresentedGameScreenToCurrentTarget() const;
+	bool drawPresentedGameScreenToCurrentTarget(const Recti& targetRect);
 
 private:
 	void ensureSoftwareRendererInitialized();

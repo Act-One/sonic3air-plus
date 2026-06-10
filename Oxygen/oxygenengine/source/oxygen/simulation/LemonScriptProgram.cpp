@@ -187,7 +187,7 @@ LemonScriptProgram::LoadScriptsResult LemonScriptProgram::loadScripts(std::wstri
 		static bool sLoggedWiiUOptimizationLevel = false;
 		if (!sLoggedWiiUOptimizationLevel)
 		{
-			RMX_LOG_INFO("LemonScript: Wii U forced optimization level " << scriptOptimizationLevel);
+			RMX_LOG_INFO("LemonScript: Wii U forced optimization level " << scriptOptimizationLevel << " functions=" << mInternal.mProgram.getFunctions().size() << " scripts=" << mInternal.mProgram.getScriptFunctions().size());
 			sLoggedWiiUOptimizationLevel = true;
 		}
 	#endif
@@ -202,7 +202,13 @@ LemonScriptProgram::LoadScriptsResult LemonScriptProgram::loadScripts(std::wstri
 	}
 
 	// Scan for function pragmas defining hooks
+#if defined(PLATFORM_WIIU)
+	RMX_LOG_INFO("LemonScript: collecting hooks");
+#endif
 	collectHooksFromFunctions();
+#if defined(PLATFORM_WIIU)
+	RMX_LOG_INFO("LemonScript: collected hooks address=" << getNumAddressHooks() << " pre=" << (nullptr != mInternal.mPreUpdateHook.mFunction) << " post=" << (nullptr != mInternal.mPostUpdateHook.mFunction));
+#endif
 
 	if (EngineMain::getDelegate().useDeveloperFeatures())
 	{
@@ -332,7 +338,7 @@ LemonScriptProgram::LoadingResult LemonScriptProgram::loadAllScriptModules(const
 			// If that failed, load from scripts.bin
 			if (!scriptsLoaded)
 			{
-				scriptsLoaded = loadBaseScriptFromBinary(globalsLookup, L"data/scripts.bin", coreModuleDependencyHash, loadOptions);
+				scriptsLoaded = loadBaseScriptFromBinary(globalsLookup, L"data/scripts.bin", coreModuleDependencyHash, loadOptions, false);
 			}
 		}
 		else
@@ -340,8 +346,17 @@ LemonScriptProgram::LoadingResult LemonScriptProgram::loadAllScriptModules(const
 			// Without dev mode, prefer loading from scripts.bin
 			if (!scriptsLoaded)
 			{
-				scriptsLoaded = loadBaseScriptFromBinary(globalsLookup, L"data/scripts.bin", coreModuleDependencyHash, loadOptions);
+				scriptsLoaded = loadBaseScriptFromBinary(globalsLookup, L"data/scripts.bin", coreModuleDependencyHash, loadOptions, false);
 			}
+
+			// If that failed, try a validated saved cache before falling back to source compilation
+		#if defined(PLATFORM_WIIU)
+			if (!scriptsLoaded && !config.mCompiledScriptSavePath.empty())
+			{
+				RMX_LOG_WARNING("LemonScript: packaged scripts unavailable or stale, trying saved compiled script cache");
+				scriptsLoaded = loadBaseScriptFromCache(globalsLookup, coreModuleDependencyHash, loadOptions);
+			}
+		#endif
 
 			// If that failed, try to load from sources as a fallback
 			if (!scriptsLoaded)
@@ -449,7 +464,7 @@ bool LemonScriptProgram::loadBaseScriptFromSource(lemon::GlobalsLookup& globalsL
 	return true;
 }
 
-bool LemonScriptProgram::loadBaseScriptFromBinary(lemon::GlobalsLookup& globalsLookup, std::wstring_view filename, uint32 coreModuleDependencyHash, const LoadOptions& loadOptions)
+bool LemonScriptProgram::loadBaseScriptFromBinary(lemon::GlobalsLookup& globalsLookup, std::wstring_view filename, uint32 coreModuleDependencyHash, const LoadOptions& loadOptions, bool allowCompiledScriptFallback)
 {
 	// Deserialize from compiled scripts
 	std::vector<uint8> buffer;
@@ -457,7 +472,7 @@ bool LemonScriptProgram::loadBaseScriptFromBinary(lemon::GlobalsLookup& globalsL
 	std::wstring loadedFilename(filename);
 
 	Configuration& config = Configuration::instance();
-	if (!loaded && !config.mCompiledScriptSavePath.empty())
+	if (!loaded && allowCompiledScriptFallback && !config.mCompiledScriptSavePath.empty())
 	{
 		loaded = FTX::FileSystem->readFile(config.mCompiledScriptSavePath, buffer);
 		if (loaded)
@@ -467,12 +482,17 @@ bool LemonScriptProgram::loadBaseScriptFromBinary(lemon::GlobalsLookup& globalsL
 	if (!loaded)
 		return false;
 
-	RMX_LOG_INFO("Loading scripts from binary: " << WString(loadedFilename).toStdString());
+	RMX_LOG_INFO("Loading scripts from binary: " << WString(loadedFilename).toStdString() << " bytes=" << buffer.size());
 
 	VectorBinarySerializer serializer(true, buffer);
 	loaded = mInternal.mScriptModule.serialize(serializer, globalsLookup, coreModuleDependencyHash, loadOptions.mAppVersion);
-	RMX_CHECK(loaded, "Failed to load 'scripts.bin'", );
-	return loaded;
+	if (!loaded || serializer.hasError())
+	{
+		RMX_LOG_WARNING("Failed to load compiled scripts from '" << WString(loadedFilename).toStdString() << "', falling back");
+		mInternal.mScriptModule.clear();
+		return false;
+	}
+	return true;
 }
 
 bool LemonScriptProgram::loadBaseScriptFromCache(lemon::GlobalsLookup& globalsLookup, uint32 coreModuleDependencyHash, const LoadOptions& loadOptions)
@@ -481,11 +501,18 @@ bool LemonScriptProgram::loadBaseScriptFromCache(lemon::GlobalsLookup& globalsLo
 	Configuration& config = Configuration::instance();
 	if (!FTX::FileSystem->readFile(config.mCompiledScriptSavePath, buffer))
 		return false;
-	
+
+	RMX_LOG_INFO("Loading scripts from cache: " << WString(config.mCompiledScriptSavePath).toStdString() << " bytes=" << buffer.size());
+
 	VectorBinarySerializer serializer(true, buffer);
 	const bool scriptsLoaded = mInternal.mScriptModule.serialize(serializer, globalsLookup, coreModuleDependencyHash, loadOptions.mAppVersion);
-	RMX_CHECK(scriptsLoaded, "Failed to deserialize scripts, possibly because the compiled script file '" << WString(config.mCompiledScriptSavePath).toStdString() << "' is using an older format", );
-	return scriptsLoaded;
+	if (!scriptsLoaded || serializer.hasError())
+	{
+		RMX_LOG_WARNING("Failed to deserialize compiled script cache '" << WString(config.mCompiledScriptSavePath).toStdString() << "', ignoring it");
+		mInternal.mScriptModule.clear();
+		return false;
+	}
+	return true;
 }
 
 LemonScriptProgram::LoadingResult LemonScriptProgram::loadScriptModule(lemon::Module& module, lemon::GlobalsLookup& globalsLookup, std::wstring_view filename)

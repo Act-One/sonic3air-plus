@@ -26,8 +26,8 @@
 namespace
 {
 #if defined(PLATFORM_WIIU)
-	constexpr int WIIU_PIXEL_PERFECT_GAME_WIDTH = 427;
-	constexpr int WIIU_PIXEL_PERFECT_GAME_HEIGHT = 240;
+	constexpr int WIIU_SAFE_GAME_WIDTH = 400;
+	constexpr int WIIU_SAFE_GAME_HEIGHT = 224;
 #endif
 
 	inline EmulatorInterface& getEmulatorInterface()
@@ -39,18 +39,18 @@ namespace
 	{
 		Vec2i screenSize = VideoOut::instance().getScreenSize();
 #if defined(PLATFORM_WIIU)
-		const Vec2i pixelPerfectSize(WIIU_PIXEL_PERFECT_GAME_WIDTH, WIIU_PIXEL_PERFECT_GAME_HEIGHT);
-		if (screenSize != pixelPerfectSize)
+		const Vec2i safeGameSize(WIIU_SAFE_GAME_WIDTH, WIIU_SAFE_GAME_HEIGHT);
+		if (screenSize != safeGameSize)
 		{
 			static bool sLoggedWiiUSizeCorrection = false;
 			if (!sLoggedWiiUSizeCorrection)
 			{
 				sLoggedWiiUSizeCorrection = true;
-				RMX_LOG_INFO("RendererBindings: using Wii U pixel-perfect game screen size "
-					<< pixelPerfectSize.x << " x " << pixelPerfectSize.y
+				RMX_LOG_INFO("RendererBindings: using Wii U safe game screen size "
+					<< safeGameSize.x << " x " << safeGameSize.y
 					<< " instead of VideoOut size " << screenSize.x << " x " << screenSize.y);
 			}
-			screenSize = pixelPerfectSize;
+			screenSize = safeGameSize;
 		}
 #else
 		if (screenSize.x < 128 || screenSize.x > 1024 || screenSize.y < 128 || screenSize.y > 1024)

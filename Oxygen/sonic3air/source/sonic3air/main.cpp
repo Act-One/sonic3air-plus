@@ -109,11 +109,17 @@ int main(int argc, char** argv)
 
 		// Now run the game
 		myMain.execute();
+#if defined(PLATFORM_WIIU)
+		RMX_LOG_INFO("main: EngineMain execute returned");
+#endif
 	}
 	catch (const std::exception& e)
 	{
 		RMX_ERROR("Caught unhandled exception in main loop: " << e.what(), );
 	}
 
+#if defined(PLATFORM_WIIU)
+	RMX_LOG_INFO("main: returning 0");
+#endif
 	return 0;
 }

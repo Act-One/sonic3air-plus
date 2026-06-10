@@ -105,9 +105,13 @@ void ScrollOffsetsManager::refresh(const RefreshParameters& refreshParameters)
 {
 	if (refreshParameters.mHasNewSimulationFrame)
 	{
+#if defined(PLATFORM_WIIU)
+		const bool hScrollSourceChanged = true;
+#else
 		const size_t hScrollBytes = (size_t)mHorizontalScrollMask * 4 + 4;
 		const bool hScrollSourceChanged = mHorizontalScrollSourceDirty ||
 			hasVRamRangeChanges(EmulatorInterface::instance().getVRamChangeBits(), mHorizontalScrollTableBase, hScrollBytes);
+#endif
 
 		for (int index = 0; index < 4; ++index)
 		{

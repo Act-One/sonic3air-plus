@@ -112,6 +112,19 @@ namespace lemon
 		template<typename T>
 		FORCE_INLINE T* accessLocalVariable(size_t offset) const
 		{
+			uint8* bytes = mCurrentLocalVariables + offset;
+		#if defined(PLATFORM_WIIU) || defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+			// Local variables are allocated as 64-bit slots. Narrow typed values
+			// live in the low bytes of that slot, which are at the end on PPC.
+			if constexpr (sizeof(T) > 0 && sizeof(T) < sizeof(uint64))
+				bytes += sizeof(uint64) - sizeof(T);
+		#endif
+			return reinterpret_cast<T*>(bytes);
+		}
+
+		template<typename T>
+		FORCE_INLINE T* accessLocalVariableRaw(size_t offset) const
+		{
 			return reinterpret_cast<T*>(mCurrentLocalVariables + offset);
 		}
 

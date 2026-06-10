@@ -10,6 +10,7 @@
 #include "lemon/compiler/frontend/CompilerFrontend.h"
 #include "lemon/compiler/frontend/BlockNodeStack.h"
 #include "lemon/compiler/frontend/NodesIterator.h"
+#include "lemon/compiler/Compiler.h"
 #include "lemon/compiler/LineNumberTranslation.h"
 #include "lemon/compiler/TokenHelper.h"
 #include "lemon/compiler/TokenTypes.h"
@@ -523,6 +524,8 @@ namespace lemon
 
 		// Processing
 		processUndefinedNodesInBlock(content, function, scopeContext);
+
+		checkForMissingReturn(functionNode);
 	}
 
 	void CompilerFrontend::processUndefinedNodesInBlock(BlockNode& blockNode, ScriptFunction& function, ScopeContext& scopeContext)
@@ -1213,6 +1216,74 @@ namespace lemon
 		CHECK_ERROR(castSuccessful, "Unable to cast constant from type " << constantDataType->getName().getString() << " to type " << dataType->getName().getString(), lineNumber);
 
 		return finalValue;
+	}
+
+	void CompilerFrontend::checkForMissingReturn(FunctionNode& functionNode)
+	{
+		ScriptFunction& function = *functionNode.mFunction;
+		if (function.getReturnType() == &PredefinedDataTypes::VOID)
+			return;
+
+		BlockNode& content = *functionNode.mContent;
+		if (!canReachEndOfBlock(content))
+			return;
+
+		const uint32 lineNumber = content.mNodes.empty() ? functionNode.getLineNumber() : content.mNodes.back().getLineNumber();
+		ADD_WARNING(CompilerWarning::Code::MISSING_RETURN, "Function '" << function.getName() << "' with return type " << function.getReturnType()->getName() << " is missing a return statement at the end", lineNumber);
+
+		ReturnNode& returnNode = content.mNodes.createBack<ReturnNode>();
+		returnNode.setLineNumber(lineNumber);
+
+		ConstantToken& constantToken = returnNode.mStatementToken.create<ConstantToken>();
+		constantToken.mValue.set<uint64>(0);
+		constantToken.mDataType = function.getReturnType();
+	}
+
+	bool CompilerFrontend::canReachNodeAfter(const Node& node) const
+	{
+		switch (node.getType())
+		{
+			case Node::Type::BLOCK:
+				return canReachEndOfBlock(node.as<BlockNode>());
+
+			case Node::Type::LABEL:
+				return true;
+
+			case Node::Type::JUMP:
+			case Node::Type::JUMP_INDIRECT:
+			case Node::Type::BREAK:
+			case Node::Type::CONTINUE:
+			case Node::Type::RETURN:
+				return false;
+
+			case Node::Type::EXTERNAL:
+				return (node.as<ExternalNode>().mSubType == ExternalNode::SubType::EXTERNAL_CALL);
+
+			case Node::Type::STATEMENT:
+				return true;
+
+			case Node::Type::IF_STATEMENT:
+			{
+				const IfStatementNode& ifNode = node.as<IfStatementNode>();
+				if (canReachNodeAfter(*ifNode.mContentIf))
+					return true;
+				if (!ifNode.mContentElse.valid() || canReachNodeAfter(*ifNode.mContentElse))
+					return true;
+				return false;
+			}
+
+			case Node::Type::WHILE_STATEMENT:
+			case Node::Type::FOR_STATEMENT:
+				return true;
+
+			default:
+				return true;
+		}
+	}
+
+	bool CompilerFrontend::canReachEndOfBlock(const BlockNode& blockNode) const
+	{
+		return blockNode.mNodes.empty() || canReachNodeAfter(blockNode.mNodes.back());
 	}
 
 }

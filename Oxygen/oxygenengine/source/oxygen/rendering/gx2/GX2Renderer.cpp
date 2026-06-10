@@ -28,12 +28,18 @@ namespace
 	constexpr bool ENABLE_GX2_RENDERER_DIAGNOSTIC_DUMPS = false;
 	constexpr bool ENABLE_GX2_RENDERER_FRAME_LOGS = false;
 	constexpr bool ENABLE_GX2_RENDERER_SPRITE_TRACE = false;
+	constexpr bool ENABLE_GX2_RENDERER_COMPATIBILITY_LOGS = false;
 	constexpr bool FORCE_SOFTWARE_GAME_RENDERER = false;
 	constexpr bool FORCE_NATIVE_WINDOW_GAME_OFFSCREEN = true;
 	constexpr bool USE_INDEXED_PALETTE_SPRITE_SHADER = true;
 	constexpr bool USE_ATLAS_VDP_SPRITE_SHADER = true;
 	constexpr bool ENABLE_GX2_FALLBACK_BITMAP_LOGS = false;
 	constexpr bool ENABLE_NATIVE_PRIORITY_DEPTH = true;
+#if defined(PLATFORM_WIIU)
+	constexpr int WIIU_SAFE_GAME_WIDTH = 400;
+	constexpr int WIIU_SAFE_GAME_HEIGHT = 224;
+#endif
+
 	bool isBlendModeSupported(BlendMode blendMode)
 	{
 		switch (blendMode)
@@ -102,6 +108,28 @@ namespace
 			case 0x4000:
 			case 0x4200:
 				return true;
+
+			default:
+				return false;
+		}
+	}
+
+	bool spriteNeedsSoftwareParityFallback(const SpriteGeometry& geometry)
+	{
+		const renderitems::SpriteInfo& spriteInfo = geometry.mSpriteInfo;
+		switch (spriteInfo.getType())
+		{
+			case RenderItem::Type::COMPONENT_SPRITE:
+			{
+				const renderitems::ComponentSpriteInfo& componentSprite = static_cast<const renderitems::ComponentSpriteInfo&>(spriteInfo);
+				return !componentSprite.mTransformation.isIdentity();
+			}
+
+			case RenderItem::Type::PALETTE_SPRITE:
+			{
+				const renderitems::PaletteSpriteInfo& paletteSprite = static_cast<const renderitems::PaletteSpriteInfo&>(spriteInfo);
+				return !paletteSprite.mTransformation.isIdentity();
+			}
 
 			default:
 				return false;
@@ -187,6 +215,30 @@ namespace
 
 		return sampleBitmapRegion(bitmap, Recti(0, 0, bitmap.getWidth(), bitmap.getHeight()));
 	}
+
+#if defined(PLATFORM_WIIU)
+	Recti getWiiUSafeSourceRect(const DrawerTexture& texture)
+	{
+		return Recti(0, 0, std::min(WIIU_SAFE_GAME_WIDTH, texture.getWidth()), std::min(WIIU_SAFE_GAME_HEIGHT, texture.getHeight()));
+	}
+
+	Recti getWiiUPresentRect(const Recti& viewport, const Recti& sourceRect)
+	{
+		return Recti(viewport.x + (viewport.width - sourceRect.width) / 2,
+			viewport.y + (viewport.height - sourceRect.height) / 2,
+			sourceRect.width,
+			sourceRect.height);
+	}
+
+	void drawWiiUPresentedGameTexture(Drawer& drawer, const Recti& viewport, DrawerTexture& texture)
+	{
+		const Recti sourceRect = getWiiUSafeSourceRect(texture);
+		if (!sourceRect.empty())
+		{
+			drawer.drawRect(viewport, texture, sourceRect, Color::WHITE);
+		}
+	}
+#endif
 
 	uint64 hashPointer(uint64 seed, const void* ptr)
 	{
@@ -342,7 +394,7 @@ void GX2Renderer::initialize()
 	}
 	else
 	{
-		RMX_LOG_INFO("GX2Renderer: native GX2 game renderer enabled, software fallback retained for unported geometry");
+		RMX_LOG_INFO("GX2Renderer: native GX2 game renderer enabled; software game bouncebacks disabled");
 	}
 }
 
@@ -367,6 +419,7 @@ void GX2Renderer::setGameResolution(const Vec2i& gameResolution)
 		mSoftwareRenderer.setGameResolution(gameResolution);
 	}
 	invalidateNativeRenderTarget();
+	mRenderResources.clearAllCaches();
 }
 
 void GX2Renderer::clearGameScreen()
@@ -428,38 +481,40 @@ void GX2Renderer::renderGameScreen(const std::vector<Geometry*>& geometries)
 		return;
 	}
 
-	if (shouldUseSoftwareGameRendering(geometries))
+	if constexpr (ENABLE_GX2_RENDERER_COMPATIBILITY_LOGS)
 	{
-		static uint32 sParityFallbackLogCount = 0;
-		if (sParityFallbackLogCount < 8)
+		if (shouldUseSoftwareGameRendering(geometries))
 		{
-			RMX_LOG_INFO("GX2Renderer: software parity fallback for complex plane/viewport/blur frame");
-			++sParityFallbackLogCount;
+			static uint32 sParityFallbackLogCount = 0;
+			if (sParityFallbackLogCount < 8)
+			{
+				RMX_LOG_INFO("GX2Renderer: formerly-software parity frame is using native GX2");
+				++sParityFallbackLogCount;
+			}
 		}
-		renderHybridGameScreen(geometries);
-		return;
 	}
 
 	mRenderResources.refresh();
-	if (!supportsNativeRendering(geometries))
+	if constexpr (ENABLE_GX2_RENDERER_COMPATIBILITY_LOGS)
 	{
-		static uint32 sFallbackLogCount = 0;
-		if (sFallbackLogCount < 8)
+		if (!supportsNativeRendering(geometries))
 		{
-			for (const Geometry* geometry : geometries)
+			static uint32 sFallbackLogCount = 0;
+			if (sFallbackLogCount < 8)
 			{
-				if (nullptr != geometry && !supportsNativeGeometry(*geometry))
+				for (const Geometry* geometry : geometries)
 				{
-					RMX_LOG_INFO("GX2Renderer: software fallback in offscreen path due to geometry=" << geometryTypeName(geometry->getType())
-						<< ((geometry->getType() == Geometry::Type::SPRITE) ? " sprite=" : "")
-						<< ((geometry->getType() == Geometry::Type::SPRITE) ? renderItemTypeName(geometry->as<SpriteGeometry>().mSpriteInfo.getType()) : ""));
-					++sFallbackLogCount;
-					break;
+					if (nullptr != geometry && !supportsNativeGeometry(*geometry))
+					{
+						RMX_LOG_INFO("GX2Renderer: native offscreen path will skip unsupported geometry=" << geometryTypeName(geometry->getType())
+							<< ((geometry->getType() == Geometry::Type::SPRITE) ? " sprite=" : "")
+							<< ((geometry->getType() == Geometry::Type::SPRITE) ? renderItemTypeName(geometry->as<SpriteGeometry>().mSpriteInfo.getType()) : ""));
+						++sFallbackLogCount;
+						break;
+					}
 				}
 			}
 		}
-		renderHybridGameScreen(geometries);
-		return;
 	}
 
 	renderNativeGameScreen(geometries);
@@ -518,24 +573,17 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 		return;
 	}
 
-	if (shouldUseSoftwareGameRendering(geometries))
+	if constexpr (ENABLE_GX2_RENDERER_COMPATIBILITY_LOGS)
 	{
-		static uint32 sDirectParityFallbackLogCount = 0;
-		if (sDirectParityFallbackLogCount < 8)
+		if (shouldUseSoftwareGameRendering(geometries))
 		{
-			RMX_LOG_INFO("GX2Renderer: software parity fallback in direct path for complex plane/viewport/blur frame");
-			++sDirectParityFallbackLogCount;
+			static uint32 sDirectParityFallbackLogCount = 0;
+			if (sDirectParityFallbackLogCount < 8)
+			{
+				RMX_LOG_INFO("GX2Renderer: formerly-software direct frame is using native GX2");
+				++sDirectParityFallbackLogCount;
+			}
 		}
-		renderHybridGameScreen(geometries);
-		DrawerTexture& presentTexture = updateGameScreenPresentTexture();
-		drawer.setWindowRenderTarget(viewport);
-		resetNativeQueuedState();
-		setNativeBlendMode(drawer, BlendMode::OPAQUE);
-		drawer.setSamplingMode(SamplingMode::POINT);
-		drawer.setWrapMode(TextureWrapMode::CLAMP);
-		drawer.drawRect(viewport, presentTexture);
-		mCurrentTargetAlreadyHasNativeFrame = true;
-		return;
 	}
 
 	mRenderResources.refresh();
@@ -615,28 +663,26 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 	}
 #endif
 
-	if (!supportsNativeRendering(geometries))
+	if constexpr (ENABLE_GX2_RENDERER_COMPATIBILITY_LOGS)
 	{
-		static uint32 sDirectFallbackLogCount = 0;
-		if (sDirectFallbackLogCount < 8)
+		if (!supportsNativeRendering(geometries))
 		{
-			for (const Geometry* geometry : geometries)
+			static uint32 sDirectFallbackLogCount = 0;
+			if (sDirectFallbackLogCount < 8)
 			{
-				if (nullptr != geometry && !supportsNativeGeometry(*geometry))
+				for (const Geometry* geometry : geometries)
 				{
-					RMX_LOG_INFO("GX2Renderer: software fallback in direct path due to geometry=" << geometryTypeName(geometry->getType())
-						<< ((geometry->getType() == Geometry::Type::SPRITE) ? " sprite=" : "")
-						<< ((geometry->getType() == Geometry::Type::SPRITE) ? renderItemTypeName(geometry->as<SpriteGeometry>().mSpriteInfo.getType()) : ""));
-					++sDirectFallbackLogCount;
-					break;
+					if (nullptr != geometry && !supportsNativeGeometry(*geometry))
+					{
+						RMX_LOG_INFO("GX2Renderer: native direct path will skip unsupported geometry=" << geometryTypeName(geometry->getType())
+							<< ((geometry->getType() == Geometry::Type::SPRITE) ? " sprite=" : "")
+							<< ((geometry->getType() == Geometry::Type::SPRITE) ? renderItemTypeName(geometry->as<SpriteGeometry>().mSpriteInfo.getType()) : ""));
+						++sDirectFallbackLogCount;
+						break;
+					}
 				}
 			}
 		}
-		std::vector<Geometry*> softwareGeometries;
-		prepareHybridOverlayGeometries(geometries, softwareGeometries);
-		renderHybridGameScreen(softwareGeometries);
-		updateGameScreenPresentTexture();
-		return;
 	}
 
 	if (requiresOffscreenNativeRendering(geometries))
@@ -653,7 +699,11 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 		setNativeBlendMode(drawer, BlendMode::OPAQUE);
 		drawer.setSamplingMode(SamplingMode::POINT);
 		drawer.setWrapMode(TextureWrapMode::CLAMP);
+#if defined(PLATFORM_WIIU)
+		drawWiiUPresentedGameTexture(drawer, viewport, mGameScreenTexture);
+#else
 		drawer.drawRect(viewport, mGameScreenTexture);
+#endif
 		mCurrentTargetAlreadyHasNativeFrame = true;
 		return;
 	}
@@ -708,18 +758,24 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 	mCurrentTargetAlreadyHasNativeFrame = true;
 }
 
-void GX2Renderer::drawPresentedGameScreenToCurrentTarget(const Recti& targetRect)
+bool GX2Renderer::canDrawPresentedGameScreenToCurrentTarget() const
+{
+	const DrawerTexture& presentTexture = mGameScreenPresentTextures[mGameScreenPresentTextureIndex];
+	return mCurrentTargetAlreadyHasNativeFrame || mNativeRenderTargetReady || !presentTexture.getBitmap().empty();
+}
+
+bool GX2Renderer::drawPresentedGameScreenToCurrentTarget(const Recti& targetRect)
 {
 	if (mCurrentTargetAlreadyHasNativeFrame)
 	{
 		mCurrentTargetAlreadyHasNativeFrame = false;
-		return;
+		return true;
 	}
 
 	DrawerTexture& presentTexture = mGameScreenPresentTextures[mGameScreenPresentTextureIndex];
 	DrawerTexture* texture = mNativeRenderTargetReady ? &mGameScreenTexture : (presentTexture.getBitmap().empty() ? nullptr : &presentTexture);
 	if (nullptr == texture)
-		return;
+		return false;
 
 	static bool sLoggedLateGameDraw = false;
 	if (!sLoggedLateGameDraw)
@@ -734,7 +790,11 @@ void GX2Renderer::drawPresentedGameScreenToCurrentTarget(const Recti& targetRect
 	setNativeBlendMode(drawer, BlendMode::OPAQUE);
 	drawer.setSamplingMode(SamplingMode::POINT);
 	drawer.setWrapMode(TextureWrapMode::CLAMP);
+#if defined(PLATFORM_WIIU)
+	drawWiiUPresentedGameTexture(drawer, viewport, *texture);
+#else
 	drawer.drawRect(viewport, *texture);
+#endif
 
 	if (!mNativeOverlayGeometries.empty())
 	{
@@ -757,13 +817,25 @@ void GX2Renderer::drawPresentedGameScreenToCurrentTarget(const Recti& targetRect
 			drawer.popScissor();
 		}
 	}
+	return true;
 }
 
 void GX2Renderer::renderDebugDraw(int debugDrawMode, const Recti& rect)
 {
+#if defined(PLATFORM_WIIU)
+	(void)debugDrawMode;
+	(void)rect;
+	static bool sLoggedDebugDrawDisabled = false;
+	if (!sLoggedDebugDrawDisabled)
+	{
+		sLoggedDebugDrawDisabled = true;
+		RMX_LOG_INFO("GX2Renderer: debug draw skipped on pure native GX2");
+	}
+#else
 	ensureSoftwareRendererInitialized();
 	mSoftwareRenderer.renderDebugDraw(debugDrawMode, rect);
 	invalidateNativeRenderTarget();
+#endif
 }
 
 void GX2Renderer::ensureSoftwareRendererInitialized()
@@ -781,6 +853,7 @@ void GX2Renderer::ensureSoftwareRendererInitialized()
 
 bool GX2Renderer::shouldUseSoftwareGameRendering(const std::vector<Geometry*>& geometries) const
 {
+	bool wouldHaveUsedSoftware = false;
 	for (const Geometry* geometry : geometries)
 	{
 		if (nullptr == geometry)
@@ -792,18 +865,37 @@ bool GX2Renderer::shouldUseSoftwareGameRendering(const std::vector<Geometry*>& g
 			{
 				const PlaneGeometry& plane = geometry->as<PlaneGeometry>();
 				if (!isDefaultPlaneRenderQueue(plane.mRenderQueue))
-					return true;
+					wouldHaveUsedSoftware = true;
+				break;
+			}
+
+			case Geometry::Type::SPRITE:
+			{
+				if (spriteNeedsSoftwareParityFallback(geometry->as<SpriteGeometry>()))
+					wouldHaveUsedSoftware = true;
 				break;
 			}
 
 			case Geometry::Type::VIEWPORT:
 			case Geometry::Type::EFFECT_BLUR:
-				return true;
+				wouldHaveUsedSoftware = true;
+				break;
 
 			default:
 				break;
 		}
 	}
+#if defined(PLATFORM_WIIU)
+	if (wouldHaveUsedSoftware)
+	{
+		static uint32 sNativeBouncebackLogCount = 0;
+		if (sNativeBouncebackLogCount < 8)
+		{
+			RMX_LOG_INFO("GX2Renderer: native GX2 is handling a former software bounceback frame");
+			++sNativeBouncebackLogCount;
+		}
+	}
+#endif
 	return false;
 }
 
@@ -895,12 +987,16 @@ bool GX2Renderer::requiresOffscreenNativeRendering(const std::vector<Geometry*>&
 void GX2Renderer::renderNativeGameScreen(const std::vector<Geometry*>& geometries)
 {
 	resetNativeBlurProcessingState();
+	mNativeOverlayGeometries.clear();
+	mNativeOverlayUsesInitialViewport = false;
+	mCurrentTargetAlreadyHasNativeFrame = false;
 	Drawer& drawer = EngineMain::instance().getDrawer();
 	if (!mNativeRenderTargetReady || mGameScreenTexture.getSize() != mGameResolution)
 	{
 		// Software fallback updates the same DrawerTexture as a bitmap-backed texture. Recreate it as a GX2 render target before native drawing.
 		mGameScreenTexture.invalidate();
 		mGameScreenTexture.ensureValidity();
+		mGameScreenTexture.setContentKnownOpaque(true);
 		mGameScreenTexture.setupAsRenderTarget(mGameResolution);
 		mNativeRenderTargetReady = true;
 	}
@@ -943,9 +1039,17 @@ void GX2Renderer::renderNativeGameScreen(const std::vector<Geometry*>& geometrie
 
 void GX2Renderer::renderHybridGameScreen(const std::vector<Geometry*>& geometries)
 {
+#if defined(PLATFORM_WIIU)
+	static uint32 sNativeHybridRedirectLogCount = 0;
+	if (sNativeHybridRedirectLogCount < 4)
+	{
+		RMX_LOG_INFO("GX2Renderer: hybrid software path redirected to native GX2");
+		++sNativeHybridRedirectLogCount;
+	}
+	renderNativeGameScreen(geometries);
+#else
 	ensureSoftwareRendererInitialized();
 	mSoftwareRenderer.renderGameScreen(geometries);
-#if defined(PLATFORM_WIIU)
 	if constexpr (ENABLE_GX2_FALLBACK_BITMAP_LOGS)
 	{
 		static uint32 sSoftwareBitmapLogCount = 0;
@@ -1000,8 +1104,8 @@ void GX2Renderer::renderHybridGameScreen(const std::vector<Geometry*>& geometrie
 			dumpBitmapPpmOnce(path, mGameScreenTexture.getBitmap());
 		}
 	}
-#endif
 	invalidateNativeRenderTarget();
+#endif
 }
 
 DrawerTexture& GX2Renderer::updateGameScreenPresentTexture()
@@ -1419,6 +1523,9 @@ void GX2Renderer::drawNativeSprite(const SpriteGeometry& geometry)
 
 void GX2Renderer::drawNativeVdpSprite(const renderitems::VdpSpriteInfo& spriteInfo)
 {
+	if (!isBlendModeSupported(spriteInfo.mBlendMode))
+		return;
+
 	Drawer& drawer = EngineMain::instance().getDrawer();
 	Color tintColor;
 	Color addedColor;
@@ -1429,7 +1536,8 @@ void GX2Renderer::drawNativeVdpSprite(const renderitems::VdpSpriteInfo& spriteIn
 	if constexpr (USE_ATLAS_VDP_SPRITE_SHADER)
 	{
 		const PaletteManager& paletteManager = RenderParts::instance().getPaletteManager();
-		drawer.drawGX2VdpSprite(rect, spriteInfo.mSize, spriteInfo.mFirstPattern, paletteManager.mSplitPositionY, tintColor, addedColor, spriteInfo.mPriorityFlag, paletteManager.useShadowHighlightMode(), mRenderResources);
+		const bool shadowHighlightMode = paletteManager.useShadowHighlightMode();
+		drawer.drawGX2VdpSprite(rect, spriteInfo.mSize, spriteInfo.mFirstPattern, paletteManager.mSplitPositionY, tintColor, addedColor, spriteInfo.mPriorityFlag, shadowHighlightMode, mRenderResources);
 	}
 	else
 	{
@@ -1440,6 +1548,9 @@ void GX2Renderer::drawNativeVdpSprite(const renderitems::VdpSpriteInfo& spriteIn
 
 void GX2Renderer::drawNativeComponentSprite(const renderitems::ComponentSpriteInfo& spriteInfo)
 {
+	if (spriteInfo.mSize.x <= 0 || spriteInfo.mSize.y <= 0 || nullptr == spriteInfo.mCacheItem || nullptr == spriteInfo.mCacheItem->mSprite || !isBlendModeSupported(spriteInfo.mBlendMode))
+		return;
+
 	Drawer& drawer = EngineMain::instance().getDrawer();
 	Color tintColor;
 	Color addedColor;
@@ -1462,6 +1573,9 @@ void GX2Renderer::drawNativeComponentSprite(const renderitems::ComponentSpriteIn
 
 void GX2Renderer::drawNativePaletteSprite(const renderitems::PaletteSpriteInfo& spriteInfo)
 {
+	if (spriteInfo.mSize.x <= 0 || spriteInfo.mSize.y <= 0 || nullptr == spriteInfo.mCacheItem || nullptr == spriteInfo.mCacheItem->mSprite || !isBlendModeSupported(spriteInfo.mBlendMode))
+		return;
+
 	Drawer& drawer = EngineMain::instance().getDrawer();
 	Color tintColor;
 	Color addedColor;
@@ -1478,13 +1592,15 @@ void GX2Renderer::drawNativePaletteSprite(const renderitems::PaletteSpriteInfo& 
 		if (spriteInfo.mTransformation.isIdentity())
 		{
 			const Recti rect(spriteInfo.mInterpolatedPosition + spriteInfo.mPivotOffset, spriteInfo.mSize);
-			drawer.drawGX2PaletteSprite(rect, dataTexture, paletteManager.mSplitPositionY, spriteInfo.mAtex, tintColor, addedColor, spriteInfo.mPriorityFlag, paletteManager.useShadowHighlightMode());
+			const bool shadowHighlightMode = paletteManager.useShadowHighlightMode();
+			drawer.drawGX2PaletteSprite(rect, dataTexture, paletteManager.mSplitPositionY, spriteInfo.mAtex, tintColor, addedColor, spriteInfo.mPriorityFlag, shadowHighlightMode);
 		}
 		else
 		{
 			std::vector<DrawerMeshVertex> vertices;
 			appendPaletteSpriteQuad(vertices, spriteInfo);
-			drawer.drawGX2PaletteSprite(vertices, spriteInfo.mSize, dataTexture, paletteManager.mSplitPositionY, spriteInfo.mAtex, tintColor, addedColor, spriteInfo.mPriorityFlag, paletteManager.useShadowHighlightMode());
+			const bool shadowHighlightMode = paletteManager.useShadowHighlightMode();
+			drawer.drawGX2PaletteSprite(vertices, spriteInfo.mSize, dataTexture, paletteManager.mSplitPositionY, spriteInfo.mAtex, tintColor, addedColor, spriteInfo.mPriorityFlag, shadowHighlightMode);
 		}
 	}
 	else
@@ -1542,4 +1658,8 @@ void GX2Renderer::drawNativeBlur(const EffectBlurGeometry& geometry)
 void GX2Renderer::invalidateNativeRenderTarget()
 {
 	mNativeRenderTargetReady = false;
+	mCurrentTargetAlreadyHasNativeFrame = false;
+	mNativeOverlayGeometries.clear();
+	mNativeOverlayUsesInitialViewport = false;
+	mNativeOverlayInitialViewport = Recti();
 }

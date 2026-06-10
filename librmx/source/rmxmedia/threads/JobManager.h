@@ -27,6 +27,7 @@ namespace rmx
 		JobManager();
 		~JobManager();
 
+		void shutdown();
 		void setMaxThreads(int count);
 
 		void insertJob(JobBase& job);

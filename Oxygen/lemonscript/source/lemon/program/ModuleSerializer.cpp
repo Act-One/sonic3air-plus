@@ -61,6 +61,13 @@ namespace lemon
 			BaseType::VOID,			// DUPLICATE
 		};
 
+	#if defined(PLATFORM_WIIU)
+		static constexpr bool ENABLE_WIIU_MODULE_SERIALIZER_TRACE = false;
+		#define WIIU_MODULE_SERIALIZER_TRACE(message) do { if (ENABLE_WIIU_MODULE_SERIALIZER_TRACE) { RMX_LOG_INFO("[WiiU ModuleSerializer] " << message); } } while (false)
+	#else
+		#define WIIU_MODULE_SERIALIZER_TRACE(message) do {} while (false)
+	#endif
+
 		void readAddressHooks(VectorBinarySerializer& serializer, std::vector<ScriptFunction::AddressHook>& addressHook)
 		{
 			const size_t hooksCount = (size_t)serializer.read<uint8>();
@@ -86,6 +93,8 @@ namespace lemon
 
 	bool ModuleSerializer::serialize(Module& module, VectorBinarySerializer& outerSerializer, const GlobalsLookup& globalsLookup, uint32 dependencyHash, uint32 appVersion)
 	{
+		WIIU_MODULE_SERIALIZER_TRACE((outerSerializer.isReading() ? "read" : "write") << " begin outerSize=" << outerSerializer.getSize() << " remaining=" << outerSerializer.getRemaining() << " dependency=" << dependencyHash << " app=" << appVersion);
+
 		// Format version history:
 		//  - 0x00 = First version, no signature yet
 		//  - 0x01 = Added signature and version number + serialize global variable initial values
@@ -121,20 +130,33 @@ namespace lemon
 		if (outerSerializer.isReading())
 		{
 			if (outerSerializer.getRemaining() < sizeof(SIGNATURE) || memcmp(outerSerializer.peek(), SIGNATURE, sizeof(SIGNATURE)) != 0)
+			{
+				WIIU_MODULE_SERIALIZER_TRACE("read failed: signature missing remaining=" << outerSerializer.getRemaining());
 				return false;
+			}
 
 			outerSerializer.skip(sizeof(SIGNATURE));
 			version = outerSerializer.read<uint16>();
 			if (version < MINIMUM_VERSION)
+			{
+				WIIU_MODULE_SERIALIZER_TRACE("read failed: version=" << version << " minimum=" << MINIMUM_VERSION);
 				return false;	// Loading older versions is not supported
+			}
 
 			const uint32 readDependencyHash = outerSerializer.read<uint32>();
 			if (readDependencyHash != dependencyHash)
+			{
+				WIIU_MODULE_SERIALIZER_TRACE("read failed: dependency=" << readDependencyHash << " expected=" << dependencyHash);
 				return false;
+			}
 
 			const uint32 readAppVersion = outerSerializer.read<uint32>();
 			if (readAppVersion != appVersion)
+			{
+				WIIU_MODULE_SERIALIZER_TRACE("read failed: appVersion=" << readAppVersion << " expected=" << appVersion);
 				return false;
+			}
+			WIIU_MODULE_SERIALIZER_TRACE("read header ok version=" << version << " compressedBytes=" << outerSerializer.getRemaining());
 		}
 		else
 		{
@@ -148,22 +170,31 @@ namespace lemon
 		std::vector<uint8> uncompressed;
 		if (outerSerializer.isReading())
 		{
-			if (!ZlibDeflate::decode(uncompressed, outerSerializer.peek(), outerSerializer.getRemaining()))
+			const size_t compressedBytes = outerSerializer.getRemaining();
+			WIIU_MODULE_SERIALIZER_TRACE("inflate begin compressedBytes=" << compressedBytes);
+			if (!ZlibDeflate::decode(uncompressed, outerSerializer.peek(), compressedBytes))
+			{
+				WIIU_MODULE_SERIALIZER_TRACE("inflate failed compressedBytes=" << compressedBytes);
 				return false;
-			outerSerializer.skip(outerSerializer.getRemaining());
+			}
+			WIIU_MODULE_SERIALIZER_TRACE("inflate ok uncompressedBytes=" << uncompressed.size());
+			outerSerializer.skip(compressedBytes);
 		}
 		VectorBinarySerializer serializer(outerSerializer.isReading(), uncompressed);
 
 		// Serialize module
+		WIIU_MODULE_SERIALIZER_TRACE("module header begin pos=" << serializer.getReadPosition());
 		serializer & module.mFirstFunctionID;
 		serializer & module.mFirstVariableID;
 		if (version >= 0x15)
 			serializer & module.mScriptFeatureLevel;
+		WIIU_MODULE_SERIALIZER_TRACE("module header end pos=" << serializer.getReadPosition() << " firstFunction=" << module.mFirstFunctionID << " firstVariable=" << module.mFirstVariableID << " feature=" << module.mScriptFeatureLevel);
 
 		// Serialize source file info
 		{
 			size_t numberOfSourceFiles = module.mAllSourceFiles.size();
 			serializer.serializeAs<uint16>(numberOfSourceFiles);
+			WIIU_MODULE_SERIALIZER_TRACE("source files begin count=" << numberOfSourceFiles << " pos=" << serializer.getReadPosition());
 
 			if (serializer.isReading())
 			{
@@ -184,12 +215,14 @@ namespace lemon
 					serializer.write(sourceFileInfo->mLocalPath, 255);
 				}
 			}
+			WIIU_MODULE_SERIALIZER_TRACE("source files end pos=" << serializer.getReadPosition());
 		}
 
 		// Serialize preprocessor definitions
 		{
 			size_t numberOfConstants = module.mPreprocessorDefinitions.size();
 			serializer.serializeAs<uint16>(numberOfConstants);
+			WIIU_MODULE_SERIALIZER_TRACE("preprocessor definitions begin count=" << numberOfConstants << " pos=" << serializer.getReadPosition());
 
 			if (serializer.isReading())
 			{
@@ -209,10 +242,13 @@ namespace lemon
 					serializer.write(constant->mValue.get<uint64>());
 				}
 			}
+			WIIU_MODULE_SERIALIZER_TRACE("preprocessor definitions end pos=" << serializer.getReadPosition());
 		}
 
 		// Serialize functions
+		WIIU_MODULE_SERIALIZER_TRACE("functions section begin pos=" << serializer.getReadPosition());
 		serializeFunctions(module, serializer, globalsLookup);
+		WIIU_MODULE_SERIALIZER_TRACE("functions section end pos=" << serializer.getReadPosition() << " error=" << serializer.hasError());
 
 		// Serialize callable function addresses
 		if (version >= 0x11)
@@ -220,6 +256,7 @@ namespace lemon
 			if (serializer.isReading())
 			{
 				const size_t count = (size_t)serializer.read<uint16>();
+				WIIU_MODULE_SERIALIZER_TRACE("callable functions begin count=" << count << " pos=" << serializer.getReadPosition());
 				module.mCallableFunctions.reserve(count);
 				for (size_t i = 0; i < count; ++i)
 				{
@@ -237,15 +274,18 @@ namespace lemon
 					serializer.write(nameHash);
 				}
 			}
+			WIIU_MODULE_SERIALIZER_TRACE("callable functions end pos=" << serializer.getReadPosition());
 		}
 
 		// Serialize global variables
 		if (serializer.isReading())
 		{
 			const uint32 numberOfUserDefined = serializer.read<uint32>();
+			WIIU_MODULE_SERIALIZER_TRACE("global variables begin userDefined=" << numberOfUserDefined << " existing=" << module.mGlobalVariables.size() << " pos=" << serializer.getReadPosition());
 			RMX_CHECK(module.mGlobalVariables.size() == (size_t)numberOfUserDefined, "Other number of user-defined variables", return false);
 
 			const uint32 numberOfGlobals = serializer.read<uint32>();
+			WIIU_MODULE_SERIALIZER_TRACE("global variables count=" << numberOfGlobals << " pos=" << serializer.getReadPosition());
 			for (uint32 i = 0; i < numberOfGlobals; ++i)
 			{
 				FlyweightString name;
@@ -255,6 +295,7 @@ namespace lemon
 				GlobalVariable& globalVariable = module.addGlobalVariable(name, dataType);
 				globalVariable.mInitialValue.set(initialValue);
 			}
+			WIIU_MODULE_SERIALIZER_TRACE("global variables end pos=" << serializer.getReadPosition());
 		}
 		else
 		{
@@ -286,6 +327,7 @@ namespace lemon
 		{
 			size_t numberOfConstants = module.mConstants.size();
 			serializer.serializeAs<uint16>(numberOfConstants);
+			WIIU_MODULE_SERIALIZER_TRACE("constants begin count=" << numberOfConstants << " pos=" << serializer.getReadPosition());
 
 			if (serializer.isReading())
 			{
@@ -307,16 +349,19 @@ namespace lemon
 					serializer.write(constant->mValue.get<uint64>());
 				}
 			}
+			WIIU_MODULE_SERIALIZER_TRACE("constants end pos=" << serializer.getReadPosition());
 		}
 
 		// Serialize constant arrays
 		{
 			size_t numberOfConstantArrays = module.mConstantArrays.size();
 			serializer.serializeAs<uint16>(numberOfConstantArrays);
+			WIIU_MODULE_SERIALIZER_TRACE("constant arrays begin count=" << numberOfConstantArrays << " pos=" << serializer.getReadPosition());
 
 			if (serializer.isReading())
 			{
 				const size_t numGlobalConstantArrays = (size_t)serializer.read<uint16>();
+				WIIU_MODULE_SERIALIZER_TRACE("constant arrays globals=" << numGlobalConstantArrays << " pos=" << serializer.getReadPosition());
 				for (size_t i = 0; i < numberOfConstantArrays; ++i)
 				{
 					FlyweightString name;
@@ -336,12 +381,14 @@ namespace lemon
 					constantArray->serializeData(serializer);
 				}
 			}
+			WIIU_MODULE_SERIALIZER_TRACE("constant arrays end pos=" << serializer.getReadPosition());
 		}
 
 		// Serialize defines
 		{
 			size_t numberOfDefines = module.mDefines.size();
 			serializer.serializeAs<uint16>(numberOfDefines);
+			WIIU_MODULE_SERIALIZER_TRACE("defines begin count=" << numberOfDefines << " pos=" << serializer.getReadPosition());
 
 			if (serializer.isReading())
 			{
@@ -364,21 +411,26 @@ namespace lemon
 					TokenSerializer::serializeTokenList(serializer, define->mContent, globalsLookup);
 				}
 			}
+			WIIU_MODULE_SERIALIZER_TRACE("defines end pos=" << serializer.getReadPosition());
 		}
 
 		// Serialize string literals
 		{
+			WIIU_MODULE_SERIALIZER_TRACE("string literals begin pos=" << serializer.getReadPosition());
 			serializer.serializeArraySize(module.mStringLiterals);
+			WIIU_MODULE_SERIALIZER_TRACE("string literals count=" << module.mStringLiterals.size() << " pos=" << serializer.getReadPosition());
 			for (FlyweightString& str : module.mStringLiterals)
 			{
 				str.serialize(serializer);
 			}
+			WIIU_MODULE_SERIALIZER_TRACE("string literals end pos=" << serializer.getReadPosition());
 		}
 
 		// Serialize data types
 		{
 			size_t numberOfDataTypes = module.mDataTypes.size();
 			serializer.serializeAs<uint16>(numberOfDataTypes);
+			WIIU_MODULE_SERIALIZER_TRACE("data types begin count=" << numberOfDataTypes << " pos=" << serializer.getReadPosition());
 
 			if (serializer.isReading())
 			{
@@ -438,6 +490,7 @@ namespace lemon
 					}
 				}
 			}
+			WIIU_MODULE_SERIALIZER_TRACE("data types end pos=" << serializer.getReadPosition());
 		}
 
 		if (!outerSerializer.isReading())
@@ -448,13 +501,15 @@ namespace lemon
 			outerSerializer.write(&compressed[0], compressed.size());
 		}
 
-		return true;
+		WIIU_MODULE_SERIALIZER_TRACE((outerSerializer.isReading() ? "read" : "write") << " end pos=" << serializer.getReadPosition() << " size=" << serializer.getSize() << " error=" << serializer.hasError());
+		return !serializer.hasError();
 	}
 
 	void ModuleSerializer::serializeFunctions(Module& module, VectorBinarySerializer& serializer, const GlobalsLookup& globalsLookup)
 	{
 		uint32 numberOfFunctions = (uint32)module.mFunctions.size();
 		serializer & numberOfFunctions;
+		WIIU_MODULE_SERIALIZER_TRACE("functions begin count=" << numberOfFunctions << " pos=" << serializer.getReadPosition());
 
 		enum FunctionSerializationFlags
 		{
@@ -479,6 +534,10 @@ namespace lemon
 
 				FlyweightString functionName;
 				functionName.serialize(serializer);
+				if (i < 16 || (i % 512) == 0)
+				{
+					WIIU_MODULE_SERIALIZER_TRACE("function read index=" << i << "/" << numberOfFunctions << " flags=" << (uint32)flags << " type=" << (uint32)type << " name=" << functionName.getString() << " pos=" << serializer.getReadPosition());
+				}
 
 				aliasNames.clear();
 				if (flags & FLAG_HAS_ALIAS_NAMES)
@@ -521,6 +580,10 @@ namespace lemon
 
 					// Opcodes
 					size_t count = (size_t)serializer.read<uint32>();
+					if (i < 16 || (i % 512) == 0)
+					{
+						WIIU_MODULE_SERIALIZER_TRACE("function opcodes index=" << i << " count=" << count << " pos=" << serializer.getReadPosition());
+					}
 					scriptFunc.mOpcodes.resize(count);
 					for (size_t k = 0; k < count; ++k)
 					{
@@ -571,6 +634,10 @@ namespace lemon
 
 					// Local variables
 					count = (size_t)serializer.read<uint32>();
+					if (i < 16 || (i % 512) == 0)
+					{
+						WIIU_MODULE_SERIALIZER_TRACE("function locals index=" << i << " count=" << count << " pos=" << serializer.getReadPosition());
+					}
 					for (size_t k = 0; k < count; ++k)
 					{
 						FlyweightString name;
@@ -584,6 +651,10 @@ namespace lemon
 					{
 						std::vector<ScriptFunction::AddressHook> labelAddressHooks;
 						count = (size_t)serializer.read<uint32>();
+						if (i < 16 || (i % 512) == 0)
+						{
+							WIIU_MODULE_SERIALIZER_TRACE("function labels index=" << i << " count=" << count << " pos=" << serializer.getReadPosition());
+						}
 						for (size_t k = 0; k < count; ++k)
 						{
 							FlyweightString name;
@@ -607,6 +678,10 @@ namespace lemon
 					if (flags & FLAG_HAS_PRAGMAS)
 					{
 						count = (size_t)serializer.read<uint32>();
+						if (i < 16 || (i % 512) == 0)
+						{
+							WIIU_MODULE_SERIALIZER_TRACE("function pragmas index=" << i << " count=" << count << " pos=" << serializer.getReadPosition());
+						}
 						for (size_t k = 0; k < count; ++k)
 						{
 							scriptFunc.mPragmas.emplace_back(serializer.read<std::string>());
@@ -751,6 +826,7 @@ namespace lemon
 				}
 			}
 		}
+		WIIU_MODULE_SERIALIZER_TRACE("functions end pos=" << serializer.getReadPosition() << " error=" << serializer.hasError());
 	}
 
 }

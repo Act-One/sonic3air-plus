@@ -285,8 +285,13 @@ void PlaneManager::refresh()
 				{
 					const uint16 planeBaseAddress = getPlaneBaseVRAMAddress(index);
 					const size_t planeBytes = (size_t)numPatterns * sizeof(uint16);
+#if defined(PLATFORM_WIIU)
+					const bool shouldCopy = true;
+					(void)planeBytes;
+#else
 					const bool shouldCopy = !mPlanePatternsBufferInitialized[index] ||
 						hasVRamRangeChanges(EmulatorInterface::instance().getVRamChangeBits(), planeBaseAddress, planeBytes);
+#endif
 					if (shouldCopy)
 					{
 						const bool copiedChanged = copyPlanePatternsWithWrap(buffer, planeBaseAddress, numPatterns);

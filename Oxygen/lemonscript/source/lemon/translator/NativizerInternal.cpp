@@ -128,9 +128,9 @@ namespace lemon
 
 					case Variable::Type::USER:
 					{
-						line += "context.mControlFlow->getProgram().getGlobalVariableByID(";
+						line += "context.mControlFlow->writeVariableGeneric(";
 						outputParameter(line, node.mParameterOffset, BaseType::UINT_32);
-						line += ").as<GlobalVariable>().setValue(";
+						line += ", ";
 						closeParenthesis = true;
 						break;
 					}
@@ -225,9 +225,9 @@ namespace lemon
 
 					case Variable::Type::USER:
 					{
-						line += "context.mControlFlow->getProgram().getGlobalVariableByID(";
+						line += "context.mControlFlow->readVariableGeneric(";
 						outputParameter(line, node.mParameterOffset, BaseType::UINT_32);
-						line += ").as<GlobalVariable>().getValue()";
+						line += ")";
 						break;
 					}
 

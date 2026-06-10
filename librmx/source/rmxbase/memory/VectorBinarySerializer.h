@@ -23,10 +23,10 @@ public:
 	inline bool isReading() const		   { return mReading; }
 	inline size_t getSize() const		   { return mBuffer.size(); }
 	inline size_t getReadPosition() const  { return mReadPosition; }
-	inline size_t getRemaining() const	   { return mBuffer.size() - mReadPosition; }
+	inline size_t getRemaining() const	   { return (mReadPosition < mBuffer.size()) ? (mBuffer.size() - mReadPosition) : 0; }
 
 	inline const std::vector<uint8>& getBuffer() const	 { return mBuffer; }
-	inline uint8* getBufferPointer(size_t offset) const	 { return &mBuffer[offset]; }
+	inline uint8* getBufferPointer(size_t offset) const	 { return (offset < mBuffer.size()) ? &mBuffer[offset] : nullptr; }
 
 	inline bool hasError() const  { return mHasError; }
 	inline void setError()		  { mHasError = true; }
@@ -124,7 +124,7 @@ public:
 	template <typename T>
 	T read()
 	{
-		T value;
+		T value = {};
 		serialize(value);
 		return value;
 	}

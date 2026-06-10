@@ -1570,6 +1570,16 @@ private:
 			mCycles += 1020;
 			zPlaySound_CheckRing();
 		}
+		else if (a == 0xe1)
+		{
+			mCycles += 255;
+			zStartMusicFadeOut();
+		}
+		else if (a == 0xe2)
+		{
+			IMPLEMENT_CYCLES("mCycles += ?");
+			zStopAllSound();
+		}
 		else if (a == 0xe0 || a >= 0xe6)
 		{
 			IMPLEMENT_CYCLES("mCycles += ?");
@@ -2048,6 +2058,16 @@ private:
 		mRam[zSongPSG3] = 0;
 
 		zPSGSilenceAll();
+	}
+
+	void zStartMusicFadeOut()
+	{
+		if (zFadeOutTimeout == 0)
+		{
+			zFadeOutTimeout = 0x80 | 0x40;
+			zFadeDelay = 2;
+			zFadeDelayTimeout = 1;
+		}
 	}
 
 	// Locations 0x0879 - ?

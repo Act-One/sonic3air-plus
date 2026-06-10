@@ -15,6 +15,167 @@
 
 namespace lemon
 {
+	namespace
+	{
+		FORCE_INLINE uint8* getExternalScalarPointerForType(int64* slot, const DataTypeDefinition& dataType)
+		{
+			(void)dataType;
+			return reinterpret_cast<uint8*>(slot);
+		}
+
+		int64 readExternalScalarValue(const ExternalVariable& variable)
+		{
+			const int64* slot = variable.mAccessor();
+			if (nullptr == slot)
+				return 0;
+
+			const DataTypeDefinition& dataType = *variable.getDataType();
+			const uint8* pointer = getExternalScalarPointerForType(const_cast<int64*>(slot), dataType);
+			switch (dataType.getBaseType())
+			{
+				case BaseType::UINT_8:  { uint8  value = 0; memcpy(&value, pointer, sizeof(value)); return value; }
+				case BaseType::INT_8:   { int8   value = 0; memcpy(&value, pointer, sizeof(value)); return value; }
+				case BaseType::UINT_16: { uint16 value = 0; memcpy(&value, pointer, sizeof(value)); return value; }
+				case BaseType::INT_16:  { int16  value = 0; memcpy(&value, pointer, sizeof(value)); return value; }
+				case BaseType::UINT_32: { uint32 value = 0; memcpy(&value, pointer, sizeof(value)); return value; }
+				case BaseType::INT_32:  { int32  value = 0; memcpy(&value, pointer, sizeof(value)); return value; }
+				case BaseType::UINT_64:
+				{
+					uint64 value = 0;
+					memcpy(&value, pointer, sizeof(value));
+					return (int64)value;
+				}
+				case BaseType::INT_64:
+				case BaseType::INT_CONST:
+				{
+					int64 value = 0;
+					memcpy(&value, pointer, sizeof(value));
+					return value;
+				}
+				case BaseType::FLOAT:
+				{
+					float value = 0.0f;
+					memcpy(&value, pointer, sizeof(value));
+					return AnyBaseValue(value).get<int64>();
+				}
+				case BaseType::DOUBLE:
+				{
+					double value = 0.0;
+					memcpy(&value, pointer, sizeof(value));
+					return AnyBaseValue(value).get<int64>();
+				}
+				default:
+					return *slot;
+			}
+		}
+
+		void writeExternalScalarValue(const ExternalVariable& variable, int64 value)
+		{
+			int64* slot = variable.mAccessor();
+			if (nullptr == slot)
+				return;
+
+			const DataTypeDefinition& dataType = *variable.getDataType();
+			uint8* pointer = getExternalScalarPointerForType(slot, dataType);
+			switch (dataType.getBaseType())
+			{
+				case BaseType::UINT_8:  { const uint8  stored = (uint8)value;  memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::INT_8:   { const int8   stored = (int8)value;   memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::UINT_16: { const uint16 stored = (uint16)value; memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::INT_16:  { const int16  stored = (int16)value;  memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::UINT_32: { const uint32 stored = (uint32)value; memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::INT_32:  { const int32  stored = (int32)value;  memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::UINT_64: { const uint64 stored = (uint64)value; memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::INT_64:
+				case BaseType::INT_CONST:
+				{
+					memcpy(pointer, &value, sizeof(value));
+					break;
+				}
+				case BaseType::FLOAT:
+				{
+					const float stored = AnyBaseValue((uint64)value).get<float>();
+					memcpy(pointer, &stored, sizeof(stored));
+					break;
+				}
+				case BaseType::DOUBLE:
+				{
+					const double stored = AnyBaseValue((uint64)value).get<double>();
+					memcpy(pointer, &stored, sizeof(stored));
+					break;
+				}
+				default:
+					*slot = value;
+					break;
+			}
+		}
+
+		int64 readLocalScalarValue(const ControlFlow& controlFlow, const LocalVariable& variable)
+		{
+			const DataTypeDefinition& dataType = *variable.getDataType();
+			const size_t baseBytes = BaseTypeHelper::getSizeOfBaseType(dataType.getBaseType());
+			if (baseBytes == 0 || dataType.getBytes() != baseBytes)
+			{
+				return controlFlow.readLocalVariable<int64>(variable.getLocalMemoryOffset());
+			}
+
+			const size_t offset = variable.getLocalMemoryOffset();
+			switch (dataType.getBaseType())
+			{
+				case BaseType::UINT_8:  return controlFlow.readLocalVariable<uint8>(offset);
+				case BaseType::INT_8:   return controlFlow.readLocalVariable<int8>(offset);
+				case BaseType::UINT_16: return controlFlow.readLocalVariable<uint16>(offset);
+				case BaseType::INT_16:  return controlFlow.readLocalVariable<int16>(offset);
+				case BaseType::UINT_32: return controlFlow.readLocalVariable<uint32>(offset);
+				case BaseType::INT_32:  return controlFlow.readLocalVariable<int32>(offset);
+				case BaseType::UINT_64: return (int64)controlFlow.readLocalVariable<uint64>(offset);
+				case BaseType::INT_64:
+				case BaseType::INT_CONST:
+					return controlFlow.readLocalVariable<int64>(offset);
+				case BaseType::FLOAT:
+					return AnyBaseValue(controlFlow.readLocalVariable<float>(offset)).get<int64>();
+				case BaseType::DOUBLE:
+					return AnyBaseValue(controlFlow.readLocalVariable<double>(offset)).get<int64>();
+				default:
+					return 0;
+			}
+		}
+
+		void writeLocalScalarValue(const ControlFlow& controlFlow, const LocalVariable& variable, int64 value)
+		{
+			const DataTypeDefinition& dataType = *variable.getDataType();
+			const size_t baseBytes = BaseTypeHelper::getSizeOfBaseType(dataType.getBaseType());
+			if (baseBytes == 0 || dataType.getBytes() != baseBytes)
+			{
+				controlFlow.writeLocalVariable(variable.getLocalMemoryOffset(), value);
+				return;
+			}
+
+			const size_t offset = variable.getLocalMemoryOffset();
+			switch (dataType.getBaseType())
+			{
+				case BaseType::UINT_8:  controlFlow.writeLocalVariable<uint8>(offset, (uint8)value); break;
+				case BaseType::INT_8:   controlFlow.writeLocalVariable<int8>(offset, (int8)value); break;
+				case BaseType::UINT_16: controlFlow.writeLocalVariable<uint16>(offset, (uint16)value); break;
+				case BaseType::INT_16:  controlFlow.writeLocalVariable<int16>(offset, (int16)value); break;
+				case BaseType::UINT_32: controlFlow.writeLocalVariable<uint32>(offset, (uint32)value); break;
+				case BaseType::INT_32:  controlFlow.writeLocalVariable<int32>(offset, (int32)value); break;
+				case BaseType::UINT_64: controlFlow.writeLocalVariable<uint64>(offset, (uint64)value); break;
+				case BaseType::INT_64:
+				case BaseType::INT_CONST:
+					controlFlow.writeLocalVariable<int64>(offset, value);
+					break;
+				case BaseType::FLOAT:
+					controlFlow.writeLocalVariable<float>(offset, AnyBaseValue((uint64)value).get<float>());
+					break;
+				case BaseType::DOUBLE:
+					controlFlow.writeLocalVariable<double>(offset, AnyBaseValue((uint64)value).get<double>());
+					break;
+				default:
+					break;
+			}
+		}
+	}
 
 	ControlFlow::ControlFlow(Runtime& runtime) :
 		mRuntime(runtime)
@@ -109,14 +270,13 @@ namespace lemon
 			case Variable::Type::LOCAL:
 			{
 				const LocalVariable& variable = getCurrentFunction()->getLocalVariableByID(variableId);
-				return readLocalVariable<int64>(variable.getLocalMemoryOffset());
+				return readLocalScalarValue(*this, variable);
 			}
 
 			case Variable::Type::GLOBAL:
 			{
 				const GlobalVariable& variable = mProgram->getGlobalVariableByID(variableId).as<GlobalVariable>();
-				const int64* valuePtr = getRuntime().accessGlobalVariableValue(variable);
-				return (nullptr != valuePtr) ? *valuePtr : 0;
+				return getRuntime().readGlobalVariableValue(variable);
 			}
 
 			case Variable::Type::USER:
@@ -129,8 +289,7 @@ namespace lemon
 			case Variable::Type::EXTERNAL:
 			{
 				const ExternalVariable& variable = mProgram->getGlobalVariableByID(variableId).as<ExternalVariable>();
-				const int64* valuePtr = variable.mAccessor();
-				return (nullptr != valuePtr) ? *valuePtr : 0;
+				return readExternalScalarValue(variable);
 			}
 		}
 	}
@@ -144,16 +303,14 @@ namespace lemon
 			case Variable::Type::LOCAL:
 			{
 				const LocalVariable& variable = getCurrentFunction()->getLocalVariableByID(variableId);
-				writeLocalVariable(variable.getLocalMemoryOffset(), value);
+				writeLocalScalarValue(*this, variable, value);
 				break;
 			}
 
 			case Variable::Type::GLOBAL:
 			{
 				const GlobalVariable& variable = mProgram->getGlobalVariableByID(variableId).as<GlobalVariable>();
-				int64* valuePtr = getRuntime().accessGlobalVariableValue(variable);
-				if (nullptr != valuePtr)
-					*valuePtr = value;
+				getRuntime().writeGlobalVariableValue(variable, value);
 				break;
 			}
 
@@ -168,9 +325,7 @@ namespace lemon
 			case Variable::Type::EXTERNAL:
 			{
 				const ExternalVariable& variable = mProgram->getGlobalVariableByID(variableId).as<ExternalVariable>();
-				int64* valuePtr = variable.mAccessor();
-				if (nullptr != valuePtr)
-					*valuePtr = value;
+				writeExternalScalarValue(variable, value);
 				break;
 			}
 		}
@@ -193,7 +348,7 @@ namespace lemon
 			case Variable::Type::GLOBAL:
 			{
 				const GlobalVariable& variable = mProgram->getGlobalVariableByID(variableId).as<GlobalVariable>();
-				return reinterpret_cast<uint8*>(getRuntime().accessGlobalVariableValue(variable));
+				return getRuntime().accessGlobalVariableStorage(variable);
 			}
 
 			default:

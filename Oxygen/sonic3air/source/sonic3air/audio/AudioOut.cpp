@@ -50,7 +50,8 @@ void AudioOut::startup()
 
 void AudioOut::shutdown()
 {
-	reset();
+	mAudioPlayer.stopAllSounds(true);
+	resetGame();
 
 	// Call base implementation
 	AudioOutBase::shutdown();

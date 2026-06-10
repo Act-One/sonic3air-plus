@@ -119,7 +119,7 @@ private:
 	LoadingResult loadAllScriptModules(const LoadOptions& loadOptions, std::wstring_view baseScriptFilename, const std::vector<const Mod*>& modsToLoad);
 
 	bool loadBaseScriptFromSource(lemon::GlobalsLookup& globalsLookup, std::wstring_view filename, uint32 coreModuleDependencyHash, const LoadOptions& loadOptions, LoadingResult& outLoadingResult);
-	bool loadBaseScriptFromBinary(lemon::GlobalsLookup& globalsLookup, std::wstring_view filename, uint32 coreModuleDependencyHash, const LoadOptions& loadOptions);
+	bool loadBaseScriptFromBinary(lemon::GlobalsLookup& globalsLookup, std::wstring_view filename, uint32 coreModuleDependencyHash, const LoadOptions& loadOptions, bool allowCompiledScriptFallback = true);
 	bool loadBaseScriptFromCache(lemon::GlobalsLookup& globalsLookup, uint32 coreModuleDependencyHash, const LoadOptions& loadOptions);
 
 	LoadingResult loadScriptModule(lemon::Module& module, lemon::GlobalsLookup& globalsLookup, std::wstring_view filename);

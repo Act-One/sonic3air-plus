@@ -19,6 +19,8 @@ public:
 	GX2Drawer();
 	~GX2Drawer();
 
+	static void releaseForegroundForProcUI();
+
 	Drawer::Type getType() override;
 	bool wasSetupSuccessful() override;
 

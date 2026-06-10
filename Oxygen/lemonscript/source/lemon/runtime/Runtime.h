@@ -157,6 +157,10 @@ namespace lemon
 
 		AnyBaseValue getGlobalVariableValue(const GlobalVariable& variable);
 		void setGlobalVariableValue(const GlobalVariable& variable, AnyBaseValue value);
+		int64 readGlobalVariableValue(const GlobalVariable& variable) const;
+		void writeGlobalVariableValue(const GlobalVariable& variable, int64 value);
+		const uint8* accessGlobalVariableStorage(const GlobalVariable& variable) const;
+		uint8* accessGlobalVariableStorage(const GlobalVariable& variable);
 		int64* accessGlobalVariableValue(const GlobalVariable& variable);
 
 		inline const ControlFlow& getMainControlFlow() const  { return *mControlFlows[0]; }

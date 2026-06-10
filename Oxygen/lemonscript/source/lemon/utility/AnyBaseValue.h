@@ -27,8 +27,8 @@ namespace lemon
 		inline explicit AnyBaseValue(int64  value)  { mUint64 = value; }
 		inline explicit AnyBaseValue(uint64 value)  { mUint64 = value; }
 		inline explicit AnyBaseValue(bool   value)  { mUint64 = (uint64)value; }
-		inline explicit AnyBaseValue(float  value)  { mFloat  = value; }
-		inline explicit AnyBaseValue(double value)  { mDouble = value; }
+		inline explicit AnyBaseValue(float  value)  { uint32 bits = 0; memcpy(&bits, &value, sizeof(value)); mUint64 = bits; }
+		inline explicit AnyBaseValue(double value)  { memcpy(&mUint64, &value, sizeof(value)); }
 
 		template<typename T> T get() const		{ return T::INVALID; }
 		template<typename T> void set(T value)	{ return T::INVALID; }
@@ -38,12 +38,7 @@ namespace lemon
 		template<typename S, typename T> void cast() { set<T>(static_cast<T>(get<S>())); }
 
 	private:
-		union
-		{
-			uint64 mUint64 = 0;
-			float  mFloat;
-			double mDouble;
-		};
+		uint64 mUint64 = 0;
 	};
 
 	template<> FORCE_INLINE int8   AnyBaseValue::get() const		{ return (int8)mUint64; }
@@ -55,8 +50,8 @@ namespace lemon
 	template<> FORCE_INLINE int64  AnyBaseValue::get() const		{ return mUint64; }
 	template<> FORCE_INLINE uint64 AnyBaseValue::get() const		{ return mUint64; }
 	template<> FORCE_INLINE bool   AnyBaseValue::get() const		{ return (bool)mUint64; }
-	template<> FORCE_INLINE float  AnyBaseValue::get() const		{ return mFloat; }
-	template<> FORCE_INLINE double AnyBaseValue::get() const		{ return mDouble; }
+	template<> FORCE_INLINE float  AnyBaseValue::get() const		{ const uint32 bits = (uint32)mUint64; float value; memcpy(&value, &bits, sizeof(value)); return value; }
+	template<> FORCE_INLINE double AnyBaseValue::get() const		{ double value; memcpy(&value, &mUint64, sizeof(value)); return value; }
 	template<> FORCE_INLINE AnyBaseValue AnyBaseValue::get() const  { return *this; }
 
 	template<> FORCE_INLINE void AnyBaseValue::set(int8 value)			{ mUint64 = (int64)value; }
@@ -68,8 +63,8 @@ namespace lemon
 	template<> FORCE_INLINE void AnyBaseValue::set(int64 value)			{ mUint64 = value; }
 	template<> FORCE_INLINE void AnyBaseValue::set(uint64 value)		{ mUint64 = value; }
 	template<> FORCE_INLINE void AnyBaseValue::set(bool value)			{ mUint64 = (uint64)value; }
-	template<> FORCE_INLINE void AnyBaseValue::set(float value)			{ mFloat  = value; }
-	template<> FORCE_INLINE void AnyBaseValue::set(double value)		{ mDouble = value; }
+	template<> FORCE_INLINE void AnyBaseValue::set(float value)			{ uint32 bits = 0; memcpy(&bits, &value, sizeof(value)); mUint64 = bits; }
+	template<> FORCE_INLINE void AnyBaseValue::set(double value)		{ memcpy(&mUint64, &value, sizeof(value)); }
 	template<> FORCE_INLINE void AnyBaseValue::set(AnyBaseValue value)  { *this = value; }
 
 

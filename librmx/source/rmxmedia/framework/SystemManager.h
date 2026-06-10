@@ -56,8 +56,21 @@ namespace rmx
 		// Consumption of the current event (like a keyboard, mouse, update, render call)
 		void  consumeCurrentEvent()		{ mCurrentEventConsumed = true; }
 		bool  wasEventConsumed() const	{ return mCurrentEventConsumed; }
+#if defined(PLATFORM_WIIU)
+		using WiiUProcUIForegroundReleaseHandler = void (*)();
+		bool  isWiiUProcUIRenderAllowed() const  { return mProcUIRenderAllowed; }
+		bool  isWiiUProcUIInitialized() const	{ return mProcUIInitialized; }
+		bool  isWiiUProcUIExitRequested() const	{ return mProcUIExitRequested; }
+		uint32 getWiiUProcUIForegroundGeneration() const  { return mProcUIForegroundGeneration; }
+		void  setWiiUProcUIForegroundReleaseHandler(WiiUProcUIForegroundReleaseHandler handler)  { mProcUIForegroundReleaseHandler = handler; }
+		void  notifyWiiUProcUIReleaseFromCallback();
+		void  notifyWiiUProcUIExitFromCallback();
+#endif
 
 	private:
+#if defined(PLATFORM_WIIU)
+		void releaseWiiUProcUIForeground(const char* reason);
+#endif
 		void run();
 		void checkSDLEvents();
 		void reshape(int width, int height);
@@ -77,6 +90,12 @@ namespace rmx
 		// you can probably guess what this does
 #if defined(PLATFORM_WIIU)
 		bool   mProcUIInitialized = false;
+		bool   mProcUIRenderAllowed = true;
+		bool   mProcUIExitRequested = false;
+		bool   mProcUIReleaseRequested = false;
+		bool   mProcUIReleaseAcknowledged = false;
+		uint32 mProcUIForegroundGeneration = 0;
+		WiiUProcUIForegroundReleaseHandler mProcUIForegroundReleaseHandler = nullptr;
 #endif
 		uint32 mTicks = 0;
 		float  mTotalTime = 0.0f;

@@ -85,18 +85,45 @@ Application::Application() :
 
 Application::~Application()
 {
+	SaveStateMenu* unparentedSaveStateMenu = (nullptr != mSaveStateMenu && nullptr == mSaveStateMenu->getParent()) ? mSaveStateMenu : nullptr;
+	TouchControlsOverlay* unparentedTouchControlsOverlay = (nullptr != mTouchControlsOverlay && nullptr == mTouchControlsOverlay->getParent()) ? mTouchControlsOverlay : nullptr;
+
+	RMX_LOG_INFO("Application destructor: deleting GUI children");
+	deleteAllChildren();
+	mGameView = nullptr;
+	mGameSetupScreen = nullptr;
+	mBackdropView = nullptr;
+	mTouchControlsOverlay = nullptr;
+	mCheatSheetOverlay = nullptr;
+	mOxygenMenu = nullptr;
+	mSaveStateMenu = nullptr;
+	mDebugSidePanel = nullptr;
+	mProfilingView = nullptr;
+	RMX_LOG_INFO("Application destructor: GUI children deleted");
+
 #if defined(SUPPORT_IMGUI)
 	// This will also shutdown ImGui itself
 	ImGuiManager::instance().clearProviders();
 #endif
 
+	RMX_LOG_INFO("Application destructor: shutting down engine server client");
 	EngineServerClient::instance().shutdownClient();
+	RMX_LOG_INFO("Application destructor: engine server client shut down");
 
+	RMX_LOG_INFO("Application destructor: deleting owned systems");
 	delete mGameLoader;
-	delete mSaveStateMenu;
+	delete unparentedSaveStateMenu;
+	delete unparentedTouchControlsOverlay;
 	delete mSimulation;
+	mGameLoader = nullptr;
+	mSaveStateMenu = nullptr;
+	mTouchControlsOverlay = nullptr;
+	mSimulation = nullptr;
+	RMX_LOG_INFO("Application destructor: owned systems deleted");
 
+	RMX_LOG_INFO("Application destructor: shutting down sockets");
 	Sockets::shutdownSockets();
+	RMX_LOG_INFO("Application destructor complete");
 }
 
 void Application::initialize()

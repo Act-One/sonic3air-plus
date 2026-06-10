@@ -20,6 +20,67 @@ namespace lemon
 	namespace
 	{
 		static const std::vector<Function*> EMPTY_FUNCTIONS;
+
+		uint32 addUint8ToDependencyHash(uint32 hash, uint8 value)
+		{
+			return rmx::addToFNV1a_32(hash, &value, sizeof(value));
+		}
+
+		uint32 addUint16ToDependencyHash(uint32 hash, uint16 value)
+		{
+			const uint8 bytes[2] =
+			{
+				static_cast<uint8>(value),
+				static_cast<uint8>(value >> 8)
+			};
+			return rmx::addToFNV1a_32(hash, bytes, sizeof(bytes));
+		}
+
+		uint32 addUint32ToDependencyHash(uint32 hash, uint32 value)
+		{
+			const uint8 bytes[4] =
+			{
+				static_cast<uint8>(value),
+				static_cast<uint8>(value >> 8),
+				static_cast<uint8>(value >> 16),
+				static_cast<uint8>(value >> 24)
+			};
+			return rmx::addToFNV1a_32(hash, bytes, sizeof(bytes));
+		}
+
+		uint32 addUint64ToDependencyHash(uint32 hash, uint64 value)
+		{
+			const uint8 bytes[8] =
+			{
+				static_cast<uint8>(value),
+				static_cast<uint8>(value >> 8),
+				static_cast<uint8>(value >> 16),
+				static_cast<uint8>(value >> 24),
+				static_cast<uint8>(value >> 32),
+				static_cast<uint8>(value >> 40),
+				static_cast<uint8>(value >> 48),
+				static_cast<uint8>(value >> 56)
+			};
+			return rmx::addToFNV1a_32(hash, bytes, sizeof(bytes));
+		}
+
+		uint32 addFlyweightToDependencyHash(uint32 hash, FlyweightString value)
+		{
+			return addUint64ToDependencyHash(hash, value.getHash());
+		}
+
+		uint32 addDataTypeToDependencyHash(uint32 hash, const DataTypeDefinition* dataType)
+		{
+			if (nullptr == dataType)
+			{
+				return addUint16ToDependencyHash(hash, 0xffff);
+			}
+			hash = addUint16ToDependencyHash(hash, dataType->getID());
+			hash = addUint8ToDependencyHash(hash, static_cast<uint8>(dataType->getClass()));
+			hash = addUint8ToDependencyHash(hash, static_cast<uint8>(dataType->getBaseType()));
+			hash = addUint32ToDependencyHash(hash, static_cast<uint32>(dataType->getBytes()));
+			return addFlyweightToDependencyHash(hash, dataType->getName());
+		}
 	}
 
 
@@ -457,8 +518,70 @@ namespace lemon
 
 	uint32 Module::buildDependencyHash() const
 	{
-		// Just a very simple "hash" that changes when a new definition gets added
-		return (uint32)(mFunctions.size() + mGlobalVariables.size() + mConstants.size() + mConstantArrays.size() + mDefines.size() + mStringLiterals.size());
+		uint32 hash = rmx::startFNV1a_32();
+		hash = addUint32ToDependencyHash(hash, 0x4c4d4432);	// LMD2: dependency hash includes binding identities, not just counts
+		hash = addUint64ToDependencyHash(hash, mModuleId);
+
+		hash = addUint32ToDependencyHash(hash, static_cast<uint32>(mFunctions.size()));
+		for (const Function* function : mFunctions)
+		{
+			hash = addUint8ToDependencyHash(hash, static_cast<uint8>(function->getType()));
+			hash = addUint32ToDependencyHash(hash, function->getID());
+			hash = addFlyweightToDependencyHash(hash, function->getContext());
+			hash = addFlyweightToDependencyHash(hash, function->getName());
+			hash = addUint32ToDependencyHash(hash, function->getSignatureHash());
+			hash = addDataTypeToDependencyHash(hash, function->getReturnType());
+			hash = addUint32ToDependencyHash(hash, static_cast<uint32>(function->getAliasNames().size()));
+			for (const Function::AliasName& aliasName : function->getAliasNames())
+			{
+				hash = addFlyweightToDependencyHash(hash, aliasName.mName);
+				hash = addUint8ToDependencyHash(hash, aliasName.mIsDeprecated ? 1 : 0);
+			}
+			hash = addUint32ToDependencyHash(hash, static_cast<uint32>(function->getParameters().size()));
+			for (const Function::Parameter& parameter : function->getParameters())
+			{
+				hash = addFlyweightToDependencyHash(hash, parameter.mName);
+				hash = addDataTypeToDependencyHash(hash, parameter.mDataType);
+			}
+		}
+
+		hash = addUint32ToDependencyHash(hash, static_cast<uint32>(mGlobalVariables.size()));
+		for (const Variable* variable : mGlobalVariables)
+		{
+			hash = addUint8ToDependencyHash(hash, static_cast<uint8>(variable->getType()));
+			hash = addUint32ToDependencyHash(hash, variable->getID());
+			hash = addFlyweightToDependencyHash(hash, variable->getName());
+			hash = addDataTypeToDependencyHash(hash, variable->getDataType());
+		}
+
+		hash = addUint32ToDependencyHash(hash, static_cast<uint32>(mConstants.size()));
+		for (const Constant* constant : mConstants)
+		{
+			hash = addFlyweightToDependencyHash(hash, constant->getName());
+			hash = addDataTypeToDependencyHash(hash, constant->getDataType());
+		}
+
+		hash = addUint32ToDependencyHash(hash, static_cast<uint32>(mConstantArrays.size()));
+		for (const ConstantArray* constantArray : mConstantArrays)
+		{
+			hash = addFlyweightToDependencyHash(hash, constantArray->getName());
+			hash = addDataTypeToDependencyHash(hash, constantArray->getElementDataType());
+		}
+
+		hash = addUint32ToDependencyHash(hash, static_cast<uint32>(mDefines.size()));
+		for (const Define* define : mDefines)
+		{
+			hash = addFlyweightToDependencyHash(hash, define->getName());
+			hash = addDataTypeToDependencyHash(hash, define->getDataType());
+		}
+
+		hash = addUint32ToDependencyHash(hash, static_cast<uint32>(mDataTypes.size()));
+		for (const DataTypeDefinition* dataType : mDataTypes)
+		{
+			hash = addDataTypeToDependencyHash(hash, dataType);
+		}
+
+		return (hash != 0) ? hash : 1;
 	}
 
 	bool Module::serialize(VectorBinarySerializer& outerSerializer, const GlobalsLookup& globalsLookup, uint32 dependencyHash, uint32 appVersion)

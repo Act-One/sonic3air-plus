@@ -124,16 +124,17 @@ namespace lemon
 						{
 							const uint32 variableId = (uint32)opcode.mParameter;
 							const ExternalVariable& variable = runtime.getProgram().getGlobalVariableByID(variableId).as<ExternalVariable>();
-							runtimeOpcode.setParameter(variable.mAccessor(), parameter.mOffset);
+							int64* valuePointer = variable.mAccessor ? variable.mAccessor() : nullptr;
+							runtimeOpcode.setParameter(reinterpret_cast<uint8*>(valuePointer), parameter.mOffset);
 							break;
 						}
 
 						case Nativizer::LookupEntry::ParameterInfo::Semantics::FIXED_MEMORY_ADDRESS:
 						{
-							// TODO: "opcode.mDataType" refers to the PUSH_CONSTANT opcode, so it actually does not tell us the correct data type; however, this shouldn't be much of a problem for now
 							const uint64 address = opcode.mParameter;
+							const Opcode& readMemoryOpcode = opcodes[parameter.mOpcodeIndex + 1];
 							MemoryAccessHandler::SpecializationResult result;
-							runtime.getMemoryAccessHandler()->getDirectAccessSpecialization(result, address, BaseTypeHelper::getSizeOfBaseType(opcode.mDataType), false);	// No support for write access here
+							runtime.getMemoryAccessHandler()->getDirectAccessSpecialization(result, address, BaseTypeHelper::getSizeOfBaseType(readMemoryOpcode.mDataType), false);	// No support for write access here
 							RMX_ASSERT(result.mResult == MemoryAccessHandler::SpecializationResult::Result::HAS_SPECIALIZATION, "No memory access specialization found even though this was previously checked");
 							runtimeOpcode.setParameter(result.mDirectAccessPointer, parameter.mOffset);
 							break;

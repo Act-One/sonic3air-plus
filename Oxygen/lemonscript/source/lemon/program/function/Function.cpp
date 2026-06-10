@@ -14,10 +14,21 @@ namespace lemon
 {
 	namespace detail
 	{
+		uint32 addUint32ToHash(uint32 hash, uint32 value)
+		{
+			const uint8 bytes[4] =
+			{
+				static_cast<uint8>(value),
+				static_cast<uint8>(value >> 8),
+				static_cast<uint8>(value >> 16),
+				static_cast<uint8>(value >> 24)
+			};
+			return rmx::addToFNV1a_32(hash, bytes, sizeof(bytes));
+		}
+
 		uint32 getVoidSignatureHash()
 		{
-			uint32 value = PredefinedDataTypes::VOID.getDataTypeHash();
-			return rmx::getFNV1a_32((const uint8*)&value, sizeof(uint32));
+			return addUint32ToHash(rmx::startFNV1a_32(), PredefinedDataTypes::VOID.getDataTypeHash());
 		}
 	}
 
@@ -35,11 +46,21 @@ namespace lemon
 
 	uint32 Function::SignatureBuilder::getSignatureHash()
 	{
-		uint32 hash = rmx::getFNV1a_32((const uint8*)&mData[0], mData.size() * sizeof(uint32));
+		auto calculateHash = [this]()
+		{
+			uint32 hash = rmx::startFNV1a_32();
+			for (uint32 value : mData)
+			{
+				hash = detail::addUint32ToHash(hash, value);
+			}
+			return hash;
+		};
+
+		uint32 hash = calculateHash();
 		while (hash == 0)		// That should be a really rare case anyway
 		{
 			mData.push_back(0xcd000000);		// Just add anything to get away from hash 0
-			hash = rmx::getFNV1a_32((const uint8*)&mData[0], mData.size() * sizeof(uint32));
+			hash = calculateHash();
 		}
 		return hash;
 	}

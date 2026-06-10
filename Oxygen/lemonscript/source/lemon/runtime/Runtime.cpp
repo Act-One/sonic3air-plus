@@ -24,6 +24,189 @@ namespace lemon
 		#define WIIU_LEMON_RUNTIME_TRACE_LOG(expr) do { if constexpr (ENABLE_WIIU_LEMON_RUNTIME_TRACE) { RMX_LOG_INFO(expr); } } while (false)
 	#endif
 
+		FORCE_INLINE uint8* accessScriptScalarSlot(uint8* storage, BaseType baseType)
+		{
+			const size_t bytes = BaseTypeHelper::getSizeOfBaseType(baseType);
+		#if defined(PLATFORM_WIIU) || defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+			if (bytes > 0 && bytes < sizeof(uint64))
+				return storage + (sizeof(uint64) - bytes);
+		#endif
+			return storage;
+		}
+
+		FORCE_INLINE const uint8* accessScriptScalarSlot(const uint8* storage, BaseType baseType)
+		{
+			return accessScriptScalarSlot(const_cast<uint8*>(storage), baseType);
+		}
+
+		int64 readScriptScalarValue(const DataTypeDefinition& dataType, const uint8* storage)
+		{
+			if (nullptr == storage)
+				return 0;
+
+			const uint8* pointer = accessScriptScalarSlot(storage, dataType.getBaseType());
+			switch (dataType.getBaseType())
+			{
+				case BaseType::UINT_8:  { uint8  value = 0; memcpy(&value, pointer, sizeof(value)); return value; }
+				case BaseType::INT_8:   { int8   value = 0; memcpy(&value, pointer, sizeof(value)); return value; }
+				case BaseType::UINT_16: { uint16 value = 0; memcpy(&value, pointer, sizeof(value)); return value; }
+				case BaseType::INT_16:  { int16  value = 0; memcpy(&value, pointer, sizeof(value)); return value; }
+				case BaseType::UINT_32: { uint32 value = 0; memcpy(&value, pointer, sizeof(value)); return value; }
+				case BaseType::INT_32:  { int32  value = 0; memcpy(&value, pointer, sizeof(value)); return value; }
+				case BaseType::UINT_64:
+				{
+					uint64 value = 0;
+					memcpy(&value, pointer, sizeof(value));
+					return (int64)value;
+				}
+				case BaseType::INT_64:
+				case BaseType::INT_CONST:
+				{
+					int64 value = 0;
+					memcpy(&value, pointer, sizeof(value));
+					return value;
+				}
+				case BaseType::FLOAT:
+				{
+					float value = 0.0f;
+					memcpy(&value, pointer, sizeof(value));
+					return AnyBaseValue(value).get<int64>();
+				}
+				case BaseType::DOUBLE:
+				{
+					double value = 0.0;
+					memcpy(&value, pointer, sizeof(value));
+					return AnyBaseValue(value).get<int64>();
+				}
+				default:
+					return 0;
+			}
+		}
+
+		void writeScriptScalarValue(const DataTypeDefinition& dataType, uint8* storage, int64 value)
+		{
+			if (nullptr == storage)
+				return;
+
+			uint8* pointer = accessScriptScalarSlot(storage, dataType.getBaseType());
+			switch (dataType.getBaseType())
+			{
+				case BaseType::UINT_8:  { const uint8  stored = (uint8)value;  memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::INT_8:   { const int8   stored = (int8)value;   memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::UINT_16: { const uint16 stored = (uint16)value; memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::INT_16:  { const int16  stored = (int16)value;  memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::UINT_32: { const uint32 stored = (uint32)value; memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::INT_32:  { const int32  stored = (int32)value;  memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::UINT_64: { const uint64 stored = (uint64)value; memcpy(pointer, &stored, sizeof(stored)); break; }
+				case BaseType::INT_64:
+				case BaseType::INT_CONST:
+				{
+					memcpy(pointer, &value, sizeof(value));
+					break;
+				}
+				case BaseType::FLOAT:
+				{
+					const float stored = AnyBaseValue((uint64)value).get<float>();
+					memcpy(pointer, &stored, sizeof(stored));
+					break;
+				}
+				case BaseType::DOUBLE:
+				{
+					const double stored = AnyBaseValue((uint64)value).get<double>();
+					memcpy(pointer, &stored, sizeof(stored));
+					break;
+				}
+				default:
+					break;
+			}
+		}
+
+		template<typename T>
+		void serializePayloadValue(VectorBinarySerializer& serializer, uint8* pointer)
+		{
+			T value = {};
+			if (serializer.isReading())
+			{
+				value = serializer.read<T>();
+				memcpy(pointer, &value, sizeof(T));
+			}
+			else
+			{
+				memcpy(&value, pointer, sizeof(T));
+				serializer.write(value);
+			}
+		}
+
+		bool serializeBaseTypePayload(VectorBinarySerializer& serializer, BaseType baseType, uint8* pointer)
+		{
+			switch (baseType)
+			{
+				case BaseType::UINT_8:
+				case BaseType::INT_8:
+					serializePayloadValue<uint8>(serializer, pointer);
+					return true;
+
+				case BaseType::UINT_16:
+				case BaseType::INT_16:
+					serializePayloadValue<uint16>(serializer, pointer);
+					return true;
+
+				case BaseType::UINT_32:
+				case BaseType::INT_32:
+					serializePayloadValue<uint32>(serializer, pointer);
+					return true;
+
+				case BaseType::UINT_64:
+				case BaseType::INT_64:
+				case BaseType::INT_CONST:
+					serializePayloadValue<uint64>(serializer, pointer);
+					return true;
+
+				case BaseType::FLOAT:
+					serializePayloadValue<float>(serializer, pointer);
+					return true;
+
+				case BaseType::DOUBLE:
+					serializePayloadValue<double>(serializer, pointer);
+					return true;
+
+				default:
+					return false;
+			}
+		}
+
+		bool serializeGlobalVariablePayload(VectorBinarySerializer& serializer, const DataTypeDefinition& dataType, uint8* storage)
+		{
+			if (dataType.isA<ArrayDataType>())
+			{
+				const ArrayDataType& arrayDataType = dataType.as<ArrayDataType>();
+				const DataTypeDefinition& elementType = arrayDataType.mElementType;
+				const size_t elementBytes = elementType.getBytes();
+				const size_t baseBytes = BaseTypeHelper::getSizeOfBaseType(elementType.getBaseType());
+				if (elementBytes == 0 || elementBytes != baseBytes)
+				{
+					serializer.serialize(storage, dataType.getBytes());
+					return false;
+				}
+
+				for (size_t i = 0; i < arrayDataType.mArraySize; ++i)
+				{
+					serializeBaseTypePayload(serializer, elementType.getBaseType(), storage + i * elementBytes);
+				}
+				return true;
+			}
+
+			const size_t baseBytes = BaseTypeHelper::getSizeOfBaseType(dataType.getBaseType());
+			if (baseBytes == 0 || dataType.getBytes() != baseBytes)
+			{
+				serializer.serialize(storage, dataType.getBytes());
+				return false;
+			}
+
+			serializeBaseTypePayload(serializer, dataType.getBaseType(), accessScriptScalarSlot(storage, dataType.getBaseType()));
+			return true;
+		}
+
 		int matchCallerProgramCounter(const Program& program, const ControlFlow::State& parentState, const ControlFlow::State& childLocation)
 		{
 			const std::vector<Opcode>& opcodes = parentState.mRuntimeFunction->mFunction->mOpcodes;
@@ -220,11 +403,22 @@ namespace lemon
 		WIIU_LEMON_RUNTIME_TRACE_LOG("[WiiU Lemon] Runtime::buildAllRuntimeFunctions begin");
 #endif
 		mIsBuildingAllRuntimeFunctions = true;
+		size_t scriptFunctionIndex = 0;
 		for (Function* function : mProgram->getFunctions())
 		{
 			if (function->isA<ScriptFunction>())
 			{
+#if defined(PLATFORM_WIIU)
+				if constexpr (ENABLE_WIIU_LEMON_RUNTIME_TRACE)
+				{
+					if ((scriptFunctionIndex & 0x7f) == 0)
+					{
+						RMX_LOG_INFO("[WiiU Lemon] Runtime::buildAllRuntimeFunctions progress index=" << scriptFunctionIndex << " function=" << function->getName());
+					}
+				}
+#endif
 				getRuntimeFunction(function->as<ScriptFunction>());
+				++scriptFunctionIndex;
 			}
 		}
 		mIsBuildingAllRuntimeFunctions = false;
@@ -315,26 +509,55 @@ namespace lemon
 	AnyBaseValue Runtime::getGlobalVariableValue(const GlobalVariable& variable)
 	{
 		AnyBaseValue result;
-		const int64* valuePtr = accessGlobalVariableValue(variable);
-		if (nullptr != valuePtr)
-			result.set<int64>(*valuePtr);
+		result.set<int64>(readGlobalVariableValue(variable));
 		return result;
 	}
 
 	void Runtime::setGlobalVariableValue(const GlobalVariable& variable, AnyBaseValue value)
 	{
-		int64* valuePtr = accessGlobalVariableValue(variable);
-		if (nullptr != valuePtr)
+		writeGlobalVariableValue(variable, value.get<int64>());
+	}
+
+	int64 Runtime::readGlobalVariableValue(const GlobalVariable& variable) const
+	{
+		const uint8* storage = accessGlobalVariableStorage(variable);
+		const DataTypeDefinition& dataType = *variable.getDataType();
+		const size_t baseBytes = BaseTypeHelper::getSizeOfBaseType(dataType.getBaseType());
+		if (nullptr != storage && baseBytes > 0 && dataType.getBytes() == baseBytes && variable.getStaticMemorySize() >= sizeof(uint64))
+			return readScriptScalarValue(dataType, storage);
+		return 0;
+	}
+
+	void Runtime::writeGlobalVariableValue(const GlobalVariable& variable, int64 value)
+	{
+		uint8* storage = accessGlobalVariableStorage(variable);
+		const DataTypeDefinition& dataType = *variable.getDataType();
+		const size_t baseBytes = BaseTypeHelper::getSizeOfBaseType(dataType.getBaseType());
+		if (nullptr != storage && baseBytes > 0 && dataType.getBytes() == baseBytes && variable.getStaticMemorySize() >= sizeof(uint64))
 		{
-			*valuePtr = value.get<int64>();
+			writeScriptScalarValue(dataType, storage, value);
 		}
+	}
+
+	const uint8* Runtime::accessGlobalVariableStorage(const GlobalVariable& variable) const
+	{
+		RMX_CHECK(variable.isA<GlobalVariable>(), "Variable " << variable.getName() << " is not a global variable", return nullptr);
+		const size_t offset = variable.getStaticMemoryOffset();
+		const size_t size = variable.getStaticMemorySize();
+		RMX_CHECK(size > 0, "Invalid static memory size for global variable " << variable.getName(), return nullptr);
+		RMX_CHECK(offset <= mStaticMemory.size() && size <= mStaticMemory.size() - offset, "Invalid static memory range for global variable " << variable.getName(), return nullptr);
+		return &mStaticMemory[offset];
+	}
+
+	uint8* Runtime::accessGlobalVariableStorage(const GlobalVariable& variable)
+	{
+		return const_cast<uint8*>(static_cast<const Runtime*>(this)->accessGlobalVariableStorage(variable));
 	}
 
 	int64* Runtime::accessGlobalVariableValue(const GlobalVariable& variable)
 	{
-		RMX_CHECK(variable.isA<GlobalVariable>(), "Variable " << variable.getName() << " is not a global variable", return nullptr);
-		const size_t offset = variable.getStaticMemoryOffset();
-		return (int64*)&mStaticMemory[offset];
+		RMX_CHECK(variable.getStaticMemorySize() >= sizeof(int64), "Invalid scalar static memory size for global variable " << variable.getName(), return nullptr);
+		return reinterpret_cast<int64*>(accessGlobalVariableStorage(variable));
 	}
 
 	void Runtime::callRuntimeFunction(const RuntimeFunction& runtimeFunction, size_t baseCallIndex)
@@ -812,6 +1035,7 @@ namespace lemon
 		// Format version history:
 		//  - 0x00 = First version, no signature yet
 		//  - 0x01 = Added signature and version number + serialize global variable names
+		//  - 0x02 = Serialize full typed global variable payloads
 
 		if (nullptr == mProgram)
 		{
@@ -833,7 +1057,7 @@ namespace lemon
 		// Signature and version number
 		const uint8 SIGNATURE[4] = { 'L', 'M', 'N', '|' };
 		const uint8 LEGACY_BIG_ENDIAN_SIGNATURE[4] = { '|', 'N', 'M', 'L' };
-		uint16 version = 0x01;
+		uint16 version = 0x02;
 		if (serializer.isReading())
 		{
 			const uint8* signature = (serializer.getRemaining() >= sizeof(SIGNATURE)) ? serializer.peek() : nullptr;
@@ -947,7 +1171,64 @@ namespace lemon
 
 		// Serialize global variables
 		const size_t numGlobals = mProgram->getGlobalVariables().size();
-		if (version >= 0x01)
+		if (version >= 0x02)
+		{
+			if (serializer.isReading())
+			{
+				const size_t numGlobalsSerialized = (size_t)serializer.read<uint32>();
+				std::string name;
+				for (size_t i = 0; i < numGlobalsSerialized; ++i)
+				{
+					serializer.serialize(name);
+					const uint32 payloadBytes = serializer.read<uint32>();
+					const uint64 nameHash = rmx::getMurmur2_64(name);
+					Variable* variable = mProgram->getGlobalVariableByName(nameHash);
+					if (nullptr != variable && variable->isA<GlobalVariable>() && variable->getDataType()->getBytes() == payloadBytes)
+					{
+						GlobalVariable& globalVariable = variable->as<GlobalVariable>();
+						uint8* storage = accessGlobalVariableStorage(globalVariable);
+						if (nullptr != storage)
+						{
+							memset(storage, 0, globalVariable.getStaticMemorySize());
+							serializeGlobalVariablePayload(serializer, *variable->getDataType(), storage);
+						}
+						else
+						{
+							serializer.skip(payloadBytes);
+						}
+					}
+					else
+					{
+						serializer.skip(payloadBytes);
+					}
+				}
+			}
+			else
+			{
+				serializer.writeAs<uint32>(numGlobals);
+				for (size_t i = 0; i < numGlobals; ++i)
+				{
+					Variable* variable = mProgram->getGlobalVariables()[i];
+					serializer.write(variable->getName().getString());
+					const uint32 payloadBytes = (variable->isA<GlobalVariable>()) ? (uint32)variable->getDataType()->getBytes() : 0;
+					serializer.write(payloadBytes);
+					if (payloadBytes > 0 && variable->isA<GlobalVariable>())
+					{
+						uint8* storage = accessGlobalVariableStorage(variable->as<GlobalVariable>());
+						if (nullptr != storage)
+						{
+							serializeGlobalVariablePayload(serializer, *variable->getDataType(), storage);
+						}
+						else
+						{
+							for (uint32 k = 0; k < payloadBytes; ++k)
+								serializer.writeAs<uint8>(0);
+						}
+					}
+				}
+			}
+		}
+		else if (version >= 0x01)
 		{
 			if (serializer.isReading())
 			{
@@ -961,9 +1242,7 @@ namespace lemon
 					Variable* variable = mProgram->getGlobalVariableByName(nameHash);
 					if (nullptr != variable && variable->isA<GlobalVariable>())
 					{
-						const size_t offset = variable->as<GlobalVariable>().getStaticMemoryOffset();
-						if (offset < mStaticMemory.size())
-							memcpy(&mStaticMemory[offset], &value, sizeof(int64));
+						writeGlobalVariableValue(variable->as<GlobalVariable>(), value);
 					}
 				}
 			}
@@ -977,9 +1256,7 @@ namespace lemon
 					const size_t offset = (variable->isA<GlobalVariable>()) ? variable->as<GlobalVariable>().getStaticMemoryOffset() : 0xffffffff;
 					if (offset < mStaticMemory.size())
 					{
-						int64 value = 0;
-						memcpy(&value, &mStaticMemory[offset], sizeof(int64));
-						serializer.write(value);
+						serializer.write(readGlobalVariableValue(variable->as<GlobalVariable>()));
 					}
 					else
 						serializer.write<int64>(0);
@@ -1000,13 +1277,12 @@ namespace lemon
 					Variable* variable = mProgram->getGlobalVariables()[i];
 					if (variable->isA<GlobalVariable>())
 					{
-						const size_t offset = variable->as<GlobalVariable>().getStaticMemoryOffset();
-						memcpy(&mStaticMemory[offset], &value, sizeof(int64));
+						writeGlobalVariableValue(variable->as<GlobalVariable>(), value);
 					}
 				}
 				if (numGlobalsSerialized > numGlobals)
 				{
-					serializer.skip((numGlobalsShared - numGlobals) * 8);
+					serializer.skip((numGlobalsSerialized - numGlobalsShared) * 8);
 				}
 			}
 			else
@@ -1040,7 +1316,7 @@ namespace lemon
 			}
 		}
 
-		mStaticMemory.resize(totalSize);
+		mStaticMemory.assign(totalSize, 0);
 
 		for (size_t index = 0; index < mProgram->getGlobalVariables().size(); ++index)
 		{
@@ -1050,8 +1326,7 @@ namespace lemon
 				GlobalVariable& variable = var.as<GlobalVariable>();
 				if (variable.getStaticMemorySize() > 0)
 				{
-					const int64 value = variable.mInitialValue.get<int64>();
-					memcpy(&mStaticMemory[variable.getStaticMemoryOffset()], &value, sizeof(value));
+					writeGlobalVariableValue(variable, variable.mInitialValue.get<int64>());
 				}
 			}
 		}

@@ -13,7 +13,6 @@
 uint64 FileStructureTree::getLowercaseStringHash(const wchar_t* string, size_t length)
 {
 	// Get hash of the lowercase version of the input string, to allow for case insensitive comparisons
-	// Note: This can produce different hashes on different platforms
 	static std::vector<wchar_t> lowercaseString;
 	lowercaseString.resize(std::max<size_t>(1, length));
 	for (size_t k = 0; k < length; ++k)
@@ -23,12 +22,11 @@ uint64 FileStructureTree::getLowercaseStringHash(const wchar_t* string, size_t l
 			character += 32;
 		lowercaseString[k] = character;
 	}
-	return rmx::getMurmur2_64((const uint8*)&lowercaseString[0], length * sizeof(wchar_t));
+	return rmx::getMurmur2_64(std::wstring_view(&lowercaseString[0], length));
 }
-
 uint64 FileStructureTree::getLowercaseStringHash(const std::wstring& string)
 {
-	return getLowercaseStringHash(&string[0], string.length());
+	return getLowercaseStringHash(string.data(), string.length());
 }
 
 

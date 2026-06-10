@@ -18,16 +18,21 @@ void PatternManager::refresh()
 
 	// Update pattern cache content
 	const BitArray<0x800>& changeBits = EmulatorInterface::instance().getVRamChangeBits();
+#if defined(PLATFORM_WIIU)
+	constexpr bool VALIDATE_ALL_PATTERNS = true;
+#else
+	constexpr bool VALIDATE_ALL_PATTERNS = false;
+#endif
 	for (int bitSetChunkIndex = 0; bitSetChunkIndex < 32; ++bitSetChunkIndex)	// Each chunk is 64 bits, each representing one pattern (= 32 bytes of VRAM)
 	{
-		if (changeBits.anyBitSetInChunk(bitSetChunkIndex))
+		if (VALIDATE_ALL_PATTERNS || changeBits.anyBitSetInChunk(bitSetChunkIndex))
 		{
 			const uint8* src = EmulatorInterface::instance().getVRam() + (size_t)bitSetChunkIndex * 0x800;
 			for (int bitIndex = 0; bitIndex < 64; ++bitIndex)
 			{
 				// Check the change bit
 				const int patternIndex = (bitSetChunkIndex << 6) + bitIndex;
-				if (changeBits.isBitSet(patternIndex))
+				if (VALIDATE_ALL_PATTERNS || changeBits.isBitSet(patternIndex))
 				{
 					CacheItem& cacheItem = mPatternCache[patternIndex];
 

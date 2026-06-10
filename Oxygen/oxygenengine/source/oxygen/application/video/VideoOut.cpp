@@ -62,8 +62,10 @@ namespace
 {
 #if defined(PLATFORM_WIIU)
 	constexpr bool ENABLE_WIIU_VIDEOOUT_TIMING_LOGS = false;
-	constexpr int WIIU_PIXEL_PERFECT_GAME_WIDTH = 427;
-	constexpr int WIIU_PIXEL_PERFECT_GAME_HEIGHT = 240;
+	constexpr int WIIU_SAFE_GAME_WIDTH = 400;
+	constexpr int WIIU_SAFE_GAME_HEIGHT = 224;
+	constexpr int WIIU_SCANOUT_WIDTH = 427;
+	constexpr int WIIU_SCANOUT_HEIGHT = 240;
 
 	double getElapsedMilliseconds(uint64 start, uint64 end)
 	{
@@ -74,19 +76,19 @@ namespace
 	Vec2i sanitizeGameResolution(const Vec2i& screenSize)
 	{
 #if defined(PLATFORM_WIIU)
-		const Vec2i pixelPerfectSize(WIIU_PIXEL_PERFECT_GAME_WIDTH, WIIU_PIXEL_PERFECT_GAME_HEIGHT);
-		if (screenSize == pixelPerfectSize)
+		const Vec2i scanoutSize(WIIU_SCANOUT_WIDTH, WIIU_SCANOUT_HEIGHT);
+		if (screenSize == scanoutSize)
 			return screenSize;
 
 		static bool sLoggedWiiUPixelPerfectSize = false;
 		if (!sLoggedWiiUPixelPerfectSize)
 		{
 			sLoggedWiiUPixelPerfectSize = true;
-			RMX_LOG_INFO("VideoOut: using Wii U pixel-perfect logical game resolution "
-				<< pixelPerfectSize.x << " x " << pixelPerfectSize.y
+			RMX_LOG_INFO("VideoOut: using Wii U pixel-perfect scanout resolution "
+				<< scanoutSize.x << " x " << scanoutSize.y
 				<< " because the live size was " << screenSize.x << " x " << screenSize.y);
 		}
-		return pixelPerfectSize;
+		return scanoutSize;
 #else
 		if (screenSize.x >= 128 && screenSize.x <= 1024 && screenSize.y >= 128 && screenSize.y <= 1024)
 			return screenSize;
@@ -104,17 +106,21 @@ namespace
 
 uint32 VideoOut::getScreenWidth() const
 {
-	return (uint32)sanitizeGameResolution(mGameResolution).x;
+	return (uint32)getScreenSize().x;
 }
 
 uint32 VideoOut::getScreenHeight() const
 {
-	return (uint32)sanitizeGameResolution(mGameResolution).y;
+	return (uint32)getScreenSize().y;
 }
 
 Vec2i VideoOut::getScreenSize() const
 {
+#if defined(PLATFORM_WIIU)
+	return Vec2i(WIIU_SAFE_GAME_WIDTH, WIIU_SAFE_GAME_HEIGHT);
+#else
 	return sanitizeGameResolution(mGameResolution);
+#endif
 }
 
 Recti VideoOut::getScreenRect() const
@@ -122,6 +128,19 @@ Recti VideoOut::getScreenRect() const
 	const Vec2i screenSize = getScreenSize();
 	return Recti(0, 0, screenSize.x, screenSize.y);
 }
+
+#if defined(PLATFORM_WIIU)
+Vec2i VideoOut::getScanoutSize() const
+{
+	return sanitizeGameResolution(mGameResolution);
+}
+
+Recti VideoOut::getScanoutRect() const
+{
+	const Vec2i scanoutSize = getScanoutSize();
+	return Recti(0, 0, scanoutSize.x, scanoutSize.y);
+}
+#endif
 
 void VideoOut::startup()
 {
@@ -157,8 +176,11 @@ void VideoOut::reset()
 
 	mFrameInterpolation.mUseInterpolationLastUpdate = false;
 	mFrameInterpolation.mUseInterpolationThisUpdate = false;
+	mFrameInterpolation.mCurrentlyInterpolating = false;
 	mDebugDrawRenderingRequested = false;
 	mPreviouslyHadNewRenderItems = false;
+	mFrameState = FrameState::OUTSIDE_FRAME;
+	mRequireGameScreenUpdate = false;
 }
 
 void VideoOut::handleActiveModsChanged()
@@ -174,20 +196,31 @@ void VideoOut::createRenderer(bool reset)
 
 void VideoOut::destroyRenderer()
 {
+	RMX_LOG_INFO("VideoOut: destroyRenderer software begin");
 	SAFE_DELETE(mSoftwareRenderer);
+	RMX_LOG_INFO("VideoOut: destroyRenderer software complete");
 #if defined(PLATFORM_WINDOWS)
+	RMX_LOG_INFO("VideoOut: destroyRenderer d3d11 begin");
 	SAFE_DELETE(mD3D11Renderer);
+	RMX_LOG_INFO("VideoOut: destroyRenderer d3d11 complete");
 #endif
 #if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
+	RMX_LOG_INFO("VideoOut: destroyRenderer vulkan begin");
 	SAFE_DELETE(mVulkanRenderer);
+	RMX_LOG_INFO("VideoOut: destroyRenderer vulkan complete");
 #endif
 #ifdef RMX_WITH_OPENGL_SUPPORT
+	RMX_LOG_INFO("VideoOut: destroyRenderer opengl begin");
 	SAFE_DELETE(mOpenGLRenderer);
+	RMX_LOG_INFO("VideoOut: destroyRenderer opengl complete");
 #endif
 #if defined(PLATFORM_WIIU)
+	RMX_LOG_INFO("VideoOut: destroyRenderer gx2 begin");
 	SAFE_DELETE(mGX2Renderer);
+	RMX_LOG_INFO("VideoOut: destroyRenderer gx2 complete");
 #endif
 	mActiveRenderer = nullptr;
+	RMX_LOG_INFO("VideoOut: destroyRenderer complete");
 }
 
 void VideoOut::setActiveRenderer(Configuration::RenderMethod renderMethod, bool reset)
@@ -395,12 +428,18 @@ bool VideoOut::updateGameScreenOnCurrentTarget(const Recti& targetRect)
 	return result;
 }
 
-void VideoOut::drawGameScreenOnCurrentTarget(const Recti& targetRect)
+bool VideoOut::canDrawGameScreenOnCurrentTarget() const
+{
+	return mActiveRenderer == mGX2Renderer && nullptr != mGX2Renderer && mGX2Renderer->canDrawPresentedGameScreenToCurrentTarget();
+}
+
+bool VideoOut::drawGameScreenOnCurrentTarget(const Recti& targetRect)
 {
 	if (mActiveRenderer == mGX2Renderer && nullptr != mGX2Renderer)
 	{
-		mGX2Renderer->drawPresentedGameScreenToCurrentTarget(targetRect);
+		return mGX2Renderer->drawPresentedGameScreenToCurrentTarget(targetRect);
 	}
+	return false;
 }
 #endif
 

@@ -45,8 +45,11 @@ namespace
 	{
 		if (reading)
 		{
-			if (readPosition + sizeof(T) > buffer.size())
+			if (readPosition > buffer.size() || sizeof(T) > buffer.size() - readPosition)
+			{
+				value = {};
 				return false;
+			}
 
 			memcpy(&value, &buffer[readPosition], sizeof(T));
 			if (sizeof(T) > 1 && needsPortableEndianSwap())
@@ -75,14 +78,18 @@ namespace
 		if (reading)
 		{
 			if (readPosition >= buffer.size())
+			{
+				value = false;
 				return false;
+			}
 
-		#if !defined(PLATFORM_VITA)
-			value = *(bool*)&buffer[readPosition];
+			uint8 storedValue = 0;
+		#if defined(PLATFORM_VITA)
+			sceClibMemcpy(&storedValue, &buffer[readPosition], sizeof(storedValue));
 		#else
-			// Use memcpy to avoid issues with unaligned memory access
-			sceClibMemcpy(&value, &buffer[readPosition], sizeof(bool));
+			memcpy(&storedValue, &buffer[readPosition], sizeof(storedValue));
 		#endif
+			value = (storedValue != 0);
 			++readPosition;
 		}
 		else
@@ -114,6 +121,10 @@ void VectorBinarySerializer::read(void* pointer, size_t size)
 	if (nullptr != source)
 	{
 		memcpy(pointer, source, size);
+	}
+	else if (nullptr != pointer && size > 0)
+	{
+		memset(pointer, 0, size);
 	}
 }
 
@@ -255,14 +266,20 @@ void VectorBinarySerializer::serialize(WString& value)
 {
 	if (mReading)
 	{
-		value.expand((int)read<uint32>());
-		read(value.accessData(), value.length() * sizeof(wchar_t));			// TODO: This is not compatible among different platforms! Use UTF-8 encoding here as well
+		value.clear();
+		const size_t length = readSize(0xffffffff);
+		if (length > 0)
+		{
+			const char* pointer = (const char*)readAccess(length);
+			if (nullptr != pointer)
+			{
+				value.fromUTF8(pointer, length);
+			}
+		}
 	}
 	else
 	{
-		writeAs<uint32>(value.length());
-		if (!value.empty())
-			write(value.accessData(), value.length() * sizeof(wchar_t));	// TODO: This is not compatible among different platforms! Use UTF-8 encoding here as well
+		write(std::wstring_view(value));
 	}
 }
 
@@ -374,13 +391,21 @@ void VectorBinarySerializer::skip(size_t bytes)
 {
 	if (mReading)
 	{
-		mReadPosition += bytes;
+		if (bytes > getRemaining())
+		{
+			mHasError = true;
+			mReadPosition = mBuffer.size();
+		}
+		else
+		{
+			mReadPosition += bytes;
+		}
 	}
 }
 
 const uint8* VectorBinarySerializer::peek() const
 {
-	if (mReading)
+	if (mReading && mReadPosition < mBuffer.size())
 	{
 		return &mBuffer[mReadPosition];
 	}
@@ -393,7 +418,7 @@ const uint8* VectorBinarySerializer::peek() const
 const uint8* VectorBinarySerializer::readAccess(size_t size)
 {
 	// Don't read more data than there is
-	if (mReadPosition + size > mBuffer.size())
+	if (size > getRemaining())
 	{
 		mHasError = true;
 		mReadPosition = mBuffer.size();

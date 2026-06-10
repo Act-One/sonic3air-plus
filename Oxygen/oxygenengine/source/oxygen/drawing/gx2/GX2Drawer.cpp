@@ -43,6 +43,7 @@
 	#include <gx2/utils.h>
 	#include <gx2r/resource.h>
 	#include <gx2r/surface.h>
+	#include <proc_ui/procui.h>
 	#include <whb/gfx.h>
 	#include <whb/proc.h>
 #endif
@@ -52,6 +53,24 @@
 
 namespace
 {
+	bool procUIAllowsRendering()
+	{
+		if (ProcUIIsRunning() && (ProcUIInShutdown() || !ProcUIInForeground()))
+			return false;
+		return nullptr == FTX::System || FTX::System->isWiiUProcUIRenderAllowed();
+	}
+
+	bool isProcUITeardownActive()
+	{
+		const bool appProcUIActive = nullptr != FTX::System && FTX::System->isWiiUProcUIInitialized();
+		const bool appProcUIExiting = nullptr != FTX::System && FTX::System->isWiiUProcUIExitRequested();
+		if (appProcUIExiting)
+			return false;
+		if (appProcUIActive && ProcUIIsRunning() && (ProcUIInShutdown() || !ProcUIInForeground()))
+			return true;
+		return appProcUIActive && !FTX::System->isWiiUProcUIRenderAllowed();
+	}
+
 	struct PresentVertex
 	{
 		float x;
@@ -162,6 +181,7 @@ namespace
 	static constexpr bool FORCE_COLOR_SHADER_TEST_RECT = false;
 	static constexpr bool SKIP_GX2_TEARDOWN_ON_EXIT = false;
 	static constexpr bool WAIT_FOR_SCAN_FLIP = false;
+	static constexpr bool WAIT_FOR_GPU_BEFORE_SCAN_COPY = false;
 	static constexpr bool USE_DIRECT_NATIVE_SCANOUT = false;
 	static constexpr bool USE_GX2_DEPTH_BUFFER = true;
 	static constexpr bool COPY_DRC_SCANOUT = true;
@@ -182,9 +202,30 @@ namespace
 	static constexpr uint32 GX2_BLEND_MASK_ALL_TARGETS = 0xff;
 	// originally going to be called GX2_COMMAND_BUFFER_SIZE, but there was a naming collision. Oops
 	static constexpr uint32 NATIVE_GX2_COMMAND_BUFFER_SIZE = 0x400000;
-	static constexpr size_t NATIVE_GX2_UNIFORM_BUFFER_MIN_SIZE = 0x40000;
+	static constexpr size_t NATIVE_GX2_VERTEX_BUFFER_MIN_SIZE = 0x400000;
+	static constexpr size_t NATIVE_GX2_UNIFORM_BUFFER_MIN_SIZE = 0x80000;
 	static CafeCompiler gCafeCompiler;
 	static bool gSkipGX2TextureDestroy = false;
+	static bool gGX2TeardownCanWaitForGpu = true;
+	static GX2Drawer* gActiveProcUIDrawer = nullptr;
+
+	void registerProcUIForegroundReleaseHandler(GX2Drawer* drawer, const char* reason)
+	{
+		if (nullptr == drawer)
+			return;
+
+		gActiveProcUIDrawer = drawer;
+		if (nullptr != FTX::System)
+		{
+			FTX::System->setWiiUProcUIForegroundReleaseHandler(&GX2Drawer::releaseForegroundForProcUI);
+			static uint32 sRegistrationLogCount = 0;
+			if (sRegistrationLogCount < 8)
+			{
+				RMX_LOG_INFO("GX2Drawer: ProcUI foreground release handler registered (" << reason << ")");
+				++sRegistrationLogCount;
+			}
+		}
+	}
 
 	static constexpr const char* PRESENT_VS = R"(
 #version 330
@@ -459,11 +500,20 @@ void main()
 	vec2 rectPos = vec2(uConfig0.x, uConfig0.y);
 	vec2 rectSize = vec2(uConfig0.z, uConfig0.w);
 	vec2 local = floor(vLocalOffset - rectPos + vec2(0.0001));
+	local = clamp(local, vec2(0.0), rectSize - vec2(1.0));
 	float sourceIndex = decodeByte(sampleSpriteData(local.x, local.y).r);
 	if (mod(sourceIndex, 16.0) < 0.5)
 		discard;
 
 	float paletteIndex = sourceIndex + uConfig1.y;
+	float shadowHighlightMode = uConfig1.z;
+	if (shadowHighlightMode >= 0.5 && paletteIndex >= 62.0 && paletteIndex < 64.0)
+	{
+		float intensity = (paletteIndex >= 63.0) ? 1.0 : 0.0;
+		gl_FragColor = vec4(intensity, intensity, intensity, 0.5);
+		return;
+	}
+
 	float paletteX = mod(paletteIndex, 256.0);
 	float paletteY = floor(paletteIndex / 256.0);
 	float paletteOffset = (vScreenPosition.y < uConfig1.x) ? 0.0 : 2.0;
@@ -662,7 +712,7 @@ void main()
 			return 0;
 		if (nullptr != text.mString)
 			return rmx::getMurmur2_64((const uint8*)text.mString, text.mLength * sizeof(char));
-		return rmx::getMurmur2_64((const uint8*)text.mWString, text.mLength * sizeof(wchar_t));
+		return rmx::getMurmur2_64(std::wstring_view(text.mWString, text.mLength));
 	}
 
 	void* gx2Alloc(uint32 size, uint32 alignment)
@@ -677,6 +727,14 @@ void main()
 		if (nullptr != ptr)
 		{
 			MEMFreeToDefaultHeap(ptr);
+		}
+	}
+
+	void waitForGpuBeforeTeardown()
+	{
+		if (gGX2TeardownCanWaitForGpu)
+		{
+			GX2DrawDone();
 		}
 	}
 
@@ -1392,7 +1450,7 @@ void main()
 	{
 		if (ownsImage && nullptr != texture.surface.image)
 		{
-			GX2DrawDone();
+			waitForGpuBeforeTeardown();
 			GX2RDestroySurfaceEx(&texture.surface, texture.surface.resourceFlags);
 		}
 		memset(&texture, 0, sizeof(texture));
@@ -1485,6 +1543,8 @@ void main()
 
 		GX2RUnlockSurfaceEx(&texture.surface, 0, GX2R_RESOURCE_USAGE_CPU_WRITE);
 		invalidateCpuTextureRegion(texture, rect, dstPitchBytes);
+		GX2RInvalidateSurface(&texture.surface, 0, cpuWriteToGpuReadFlags());
+		GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, texture.surface.image, texture.surface.imageSize);
 	}
 
 	void uploadBitmapRegionsToTexture(GX2Texture& texture, const Bitmap& bitmap, const std::vector<Recti>& inputRects)
@@ -1526,6 +1586,8 @@ void main()
 		{
 			invalidateCpuTextureRegion(texture, rect, dstPitchBytes);
 		}
+		GX2RInvalidateSurface(&texture.surface, 0, cpuWriteToGpuReadFlags());
+		GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, texture.surface.image, texture.surface.imageSize);
 	}
 
 	void uploadBitmapToTexture(GX2Texture& texture, const Bitmap& bitmap)
@@ -1794,8 +1856,9 @@ void main()
 
 		void destroy()
 		{
-			if (gSkipGX2TextureDestroy)
+			if (gSkipGX2TextureDestroy || isProcUITeardownActive())
 			{
+				gSkipGX2TextureDestroy = true;
 				memset(&mColorBuffer, 0, sizeof(mColorBuffer));
 				memset(&mTexture, 0, sizeof(mTexture));
 				mOwnsTextureImage = false;
@@ -1805,7 +1868,7 @@ void main()
 			}
 			if (nullptr != mColorBuffer.surface.image)
 			{
-				GX2DrawDone();
+				waitForGpuBeforeTeardown();
 				gx2Free(mColorBuffer.surface.image);
 				memset(&mColorBuffer, 0, sizeof(mColorBuffer));
 			}
@@ -1878,6 +1941,40 @@ public:
 		GX2Texture mTexture = {};
 		Vec2i mSize;
 		Recti mInnerRect;
+		bool mContainsTransparentPixels = false;
+		uint32 mLastUsedFrame = 0;
+	};
+
+	struct CachedGlyphKey
+	{
+		uintptr_t mFontPtr = 0;
+		uint32 mFontChangeCounter = 0;
+		uint32 mCharacter = 0;
+
+		bool operator==(const CachedGlyphKey& other) const
+		{
+			return mFontPtr == other.mFontPtr
+				&& mFontChangeCounter == other.mFontChangeCounter
+				&& mCharacter == other.mCharacter;
+		}
+	};
+
+	struct CachedGlyphKeyHasher
+	{
+		size_t operator()(const CachedGlyphKey& key) const
+		{
+			uint64 hash = hashCombine64((uint64)key.mFontPtr, key.mFontChangeCounter);
+			hash = hashCombine64(hash, key.mCharacter);
+			return (size_t)hash;
+		}
+	};
+
+	struct CachedGlyphTexture
+	{
+		GX2Texture mTexture = {};
+		Vec2i mSize;
+		int mBorderLeft = 0;
+		int mBorderTop = 0;
 		bool mContainsTransparentPixels = false;
 		uint32 mLastUsedFrame = 0;
 	};
@@ -1966,11 +2063,38 @@ public:
 	~Internal()
 	{
 		RMX_LOG_INFO("GX2Drawer: shutdown begin");
+		const bool appProcUIActive = nullptr != FTX::System && FTX::System->isWiiUProcUIInitialized();
+		const bool appOwnsForeground = !appProcUIActive || !ProcUIIsRunning() || ProcUIInForeground();
 		if constexpr (SKIP_GX2_TEARDOWN_ON_EXIT)
 		{
 			RMX_LOG_INFO("GX2Drawer: leaving GX2 resources for process teardown");
 			gSkipGX2TextureDestroy = true;
 			return;
+		}
+		const bool previousTeardownCanWaitForGpu = gGX2TeardownCanWaitForGpu;
+		gGX2TeardownCanWaitForGpu = appOwnsForeground;
+		if (!appOwnsForeground)
+		{
+			RMX_LOG_INFO("GX2Drawer: app no longer owns foreground; using background-safe GX2 teardown");
+		}
+		if (mFrameActive && appOwnsForeground)
+		{
+			RMX_LOG_INFO("GX2Drawer: finishing active frame during shutdown");
+			GX2DrawDone();
+			finishFrame();
+		}
+		else if (mFrameActive)
+		{
+			RMX_LOG_INFO("GX2Drawer: dropping active frame state during background teardown");
+			finishFrame();
+		}
+		if (mCommandBuffer && appOwnsForeground)
+		{
+			RMX_LOG_INFO("GX2Drawer: disabling scanout during shutdown");
+			GX2SetTVEnable(FALSE);
+			GX2SetDRCEnable(FALSE);
+			GX2Flush();
+			GX2DrawDone();
 		}
 		destroyCpuColorBuffer();
 		destroyDepthBuffers();
@@ -1984,6 +2108,11 @@ public:
 			destroyCachedTextTexture(pair.second);
 		}
 		mTextTextures.clear();
+		for (auto& pair : mGlyphTextures)
+		{
+			destroyCachedGlyphTexture(pair.second);
+		}
+		mGlyphTextures.clear();
 		for (ScratchTextureSlot& slot : mScratchTextures)
 		{
 			destroyTextureStorage(slot.mTexture, true);
@@ -2074,11 +2203,13 @@ public:
 		{
 			gx2Free(mTvScanBuffer);
 			mTvScanBuffer = nullptr;
+			mTvScanBufferSize = 0;
 		}
 		if (mDrcScanBuffer)
 		{
 			gx2Free(mDrcScanBuffer);
 			mDrcScanBuffer = nullptr;
+			mDrcScanBufferSize = 0;
 		}
 		if (mCommandBuffer)
 		{
@@ -2088,13 +2219,18 @@ public:
 			gx2Free(mCommandBuffer);
 			mCommandBuffer = nullptr;
 		}
-		shutdownCafe();
+		if (gCafeCompiler.ready)
+		{
+			RMX_LOG_INFO("GX2Drawer: leaving CafeGLSL compiler module for process teardown");
+			gCafeCompiler = CafeCompiler();
+		}
+		gGX2TeardownCanWaitForGpu = previousTeardownCanWaitForGpu;
 		RMX_LOG_INFO("GX2Drawer: shutdown complete");
 	}
 
 	bool initializeNativeDisplay()
 	{
-		if (!WHBProcIsRunning())
+		if (!ProcUIIsRunning())
 		{
 			RMX_LOG_WARNING("GX2Drawer: ProcUI was not initialized before GX2 setup");
 		}
@@ -2138,6 +2274,8 @@ public:
 			return false;
 		GX2Invalidate(GX2_INVALIDATE_MODE_CPU, mTvScanBuffer, tvScanBufferSize);
 		GX2SetTVBuffer(mTvScanBuffer, tvScanBufferSize, tvConfig.renderMode, GX2_SURFACE_FORMAT_UNORM_R8_G8_B8_A8, GX2_BUFFERING_MODE_DOUBLE);
+		mTvScanBufferSize = tvScanBufferSize;
+		mTvRenderMode = tvConfig.renderMode;
 		mTvScanoutSize = Vec2i((int)tvConfig.width, (int)tvConfig.height);
 		GX2SetTVScale(tvConfig.width, tvConfig.height);
 		GX2SetTVEnable(TRUE);
@@ -2151,6 +2289,7 @@ public:
 		{
 			GX2Invalidate(GX2_INVALIDATE_MODE_CPU, mDrcScanBuffer, drcScanBufferSize);
 			GX2SetDRCBuffer(mDrcScanBuffer, drcScanBufferSize, GX2_DRC_RENDER_MODE_SINGLE, GX2_SURFACE_FORMAT_UNORM_R8_G8_B8_A8, GX2_BUFFERING_MODE_DOUBLE);
+			mDrcScanBufferSize = drcScanBufferSize;
 			GX2SetDRCScale(DRC_SCANOUT_WIDTH, DRC_SCANOUT_HEIGHT);
 			GX2SetDRCEnable(TRUE);
 			mDrcScanoutSize = Vec2i((int)DRC_SCANOUT_WIDTH, (int)DRC_SCANOUT_HEIGHT);
@@ -2172,6 +2311,60 @@ public:
 			<< " tvScanBytes=" << tvScanBufferSize
 			<< " drcScanBytes=" << drcScanBufferSize);
 		return true;
+	}
+
+	void restoreNativeDisplayState(const char* reason)
+	{
+		if constexpr (USE_WHB_PRESENT)
+			return;
+		if (nullptr == mCommandBuffer)
+			return;
+
+		if (mFrameActive)
+			finishFrame();
+		mCurrentColorBuffer = nullptr;
+		mDepthActiveForTarget = false;
+		mWindowTargetBound = false;
+		mWindowTargetCleared = false;
+		mInvalidScissorRegion = false;
+		mScissorStack.clear();
+
+		static uint32 sRestoreLogCount = 0;
+		if (sRestoreLogCount < 12)
+		{
+			RMX_LOG_INFO("GX2Drawer: restoring native display state (" << reason << ") tvScanBytes=" << mTvScanBufferSize
+				<< " drcScanBytes=" << mDrcScanBufferSize);
+			++sRestoreLogCount;
+		}
+		if (nullptr != mNativeContext)
+			GX2SetContextState(mNativeContext);
+		if (nullptr != mTvScanBuffer && mTvScanBufferSize != 0)
+		{
+			GX2SetTVBuffer(mTvScanBuffer, mTvScanBufferSize, mTvRenderMode, GX2_SURFACE_FORMAT_UNORM_R8_G8_B8_A8, GX2_BUFFERING_MODE_DOUBLE);
+			GX2SetTVScale((uint32)std::max(1, mTvScanoutSize.x), (uint32)std::max(1, mTvScanoutSize.y));
+			GX2SetTVEnable(TRUE);
+		}
+		if (nullptr != mDrcScanBuffer && mDrcScanBufferSize != 0)
+		{
+			GX2SetDRCBuffer(mDrcScanBuffer, mDrcScanBufferSize, GX2_DRC_RENDER_MODE_SINGLE, GX2_SURFACE_FORMAT_UNORM_R8_G8_B8_A8, GX2_BUFFERING_MODE_DOUBLE);
+			GX2SetDRCScale(DRC_SCANOUT_WIDTH, DRC_SCANOUT_HEIGHT);
+			GX2SetDRCEnable(TRUE);
+		}
+		GX2SetSwapInterval(0);
+		GX2Flush();
+		mProcUIForegroundReleased = false;
+	}
+
+	void syncProcUIForegroundState()
+	{
+		if (nullptr == FTX::System)
+			return;
+		const uint32 foregroundGeneration = FTX::System->getWiiUProcUIForegroundGeneration();
+		if (!mProcUIForegroundReleased && foregroundGeneration == mObservedProcUIForegroundGeneration)
+			return;
+
+		mObservedProcUIForegroundGeneration = foregroundGeneration;
+		restoreNativeDisplayState("ProcUI foreground reacquire");
 	}
 
 	void showStartupFailureColor(float r, float g, float b)
@@ -2207,7 +2400,7 @@ public:
 	{
 		if (nullptr != mCpuColorBuffer.surface.image)
 		{
-			GX2DrawDone();
+			waitForGpuBeforeTeardown();
 			if (mCpuColorBuffer.surface.resourceFlags != 0)
 				GX2RDestroySurfaceEx(&mCpuColorBuffer.surface, mCpuColorBuffer.surface.resourceFlags);
 			else
@@ -2222,7 +2415,7 @@ public:
 	{
 		if (nullptr != slot.mBuffer.surface.image)
 		{
-			GX2DrawDone();
+			waitForGpuBeforeTeardown();
 			gx2Free(slot.mBuffer.surface.image);
 			memset(&slot.mBuffer, 0, sizeof(slot.mBuffer));
 			slot.mSize.clear();
@@ -2356,7 +2549,7 @@ public:
 	{
 		if (nullptr != colorBuffer.surface.image)
 		{
-			GX2DrawDone();
+			waitForGpuBeforeTeardown();
 			gx2Free(colorBuffer.surface.image);
 			memset(&colorBuffer, 0, sizeof(colorBuffer));
 			colorBufferSize.clear();
@@ -3017,7 +3210,7 @@ public:
 			mDynamicVertexWriteOffset = 0;
 		}
 
-		mDynamicVertexCapacity = std::max<size_t>(requiredBytes, 1024 * 1024);
+		mDynamicVertexCapacity = std::max<size_t>(requiredBytes, NATIVE_GX2_VERTEX_BUFFER_MIN_SIZE);
 		mDynamicVertexBuffer = static_cast<uint8*>(gx2Alloc((uint32)mDynamicVertexCapacity, 0x40));
 		return nullptr != mDynamicVertexBuffer;
 	}
@@ -3180,7 +3373,11 @@ public:
 		mCurrentViewportTargetRect = Recti(0, 0, targetWidth, targetHeight);
 		if (windowTarget && viewport.width > 0 && viewport.height > 0)
 		{
-			mCurrentViewportTargetRect = getIntegerLetterBoxRect(viewport.getSize(), Vec2i(targetWidth, targetHeight));
+#if defined(PLATFORM_WIIU)
+			mCurrentViewportTargetRect = Recti(0, 0, targetWidth, targetHeight);
+#else
+			mCurrentViewportTargetRect = getIntegerFillRect(viewport.getSize(), Vec2i(targetWidth, targetHeight));
+#endif
 		}
 
 		const float scaleX = (float)mCurrentViewportTargetRect.width / (float)std::max(1, viewport.width);
@@ -3337,7 +3534,7 @@ public:
 				GX2SetAlphaTest(TRUE, GX2_COMPARE_FUNC_GREATER, 0.0f);
 				GX2SetColorControl(GX2_LOGIC_OP_COPY, GX2_BLEND_MASK_ALL_TARGETS, FALSE, TRUE);
 				GX2SetBlendControl(GX2_RENDER_TARGET_0, GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ONE, GX2_BLEND_COMBINE_MODE_MIN, TRUE,
-					GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ONE, GX2_BLEND_COMBINE_MODE_MIN);
+					GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ZERO, GX2_BLEND_COMBINE_MODE_ADD);
 				break;
 			}
 			case BlendMode::MAXIMUM:
@@ -3345,7 +3542,7 @@ public:
 				GX2SetAlphaTest(TRUE, GX2_COMPARE_FUNC_GREATER, 0.0f);
 				GX2SetColorControl(GX2_LOGIC_OP_COPY, GX2_BLEND_MASK_ALL_TARGETS, FALSE, TRUE);
 				GX2SetBlendControl(GX2_RENDER_TARGET_0, GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ONE, GX2_BLEND_COMBINE_MODE_MAX, TRUE,
-					GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ONE, GX2_BLEND_COMBINE_MODE_MAX);
+					GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ZERO, GX2_BLEND_COMBINE_MODE_ADD);
 				break;
 			}
 			case BlendMode::MULTIPLICATIVE:
@@ -3353,15 +3550,15 @@ public:
 				GX2SetAlphaTest(TRUE, GX2_COMPARE_FUNC_GREATER, 0.0f);
 				GX2SetColorControl(GX2_LOGIC_OP_COPY, GX2_BLEND_MASK_ALL_TARGETS, FALSE, TRUE);
 				GX2SetBlendControl(GX2_RENDER_TARGET_0, GX2_BLEND_MODE_DST_COLOR, GX2_BLEND_MODE_ZERO, GX2_BLEND_COMBINE_MODE_ADD, TRUE,
-					GX2_BLEND_MODE_DST_ALPHA, GX2_BLEND_MODE_ZERO, GX2_BLEND_COMBINE_MODE_ADD);
+					GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ZERO, GX2_BLEND_COMBINE_MODE_ADD);
 				break;
 			}
 			case BlendMode::ONE_BIT:
 			{
 				GX2SetAlphaTest(TRUE, GX2_COMPARE_FUNC_GREATER, 0.0f);
 				GX2SetColorControl(GX2_LOGIC_OP_COPY, GX2_BLEND_MASK_ALL_TARGETS, FALSE, TRUE);
-				GX2SetBlendControl(GX2_RENDER_TARGET_0, GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ZERO, GX2_BLEND_COMBINE_MODE_ADD, GX2_DISABLE,
-					GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ZERO, GX2_BLEND_COMBINE_MODE_ADD);
+				GX2SetBlendControl(GX2_RENDER_TARGET_0, GX2_BLEND_MODE_SRC_ALPHA, GX2_BLEND_MODE_INV_SRC_ALPHA, GX2_BLEND_COMBINE_MODE_ADD, TRUE,
+					GX2_BLEND_MODE_SRC_ALPHA, GX2_BLEND_MODE_INV_SRC_ALPHA, GX2_BLEND_COMBINE_MODE_ADD);
 				break;
 			}
 			case BlendMode::ALPHA:
@@ -3370,7 +3567,7 @@ public:
 				GX2SetAlphaTest(TRUE, GX2_COMPARE_FUNC_GREATER, 0.0f);
 				GX2SetColorControl(GX2_LOGIC_OP_COPY, GX2_BLEND_MASK_ALL_TARGETS, FALSE, TRUE);
 				GX2SetBlendControl(GX2_RENDER_TARGET_0, GX2_BLEND_MODE_SRC_ALPHA, GX2_BLEND_MODE_INV_SRC_ALPHA, GX2_BLEND_COMBINE_MODE_ADD, TRUE,
-					GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_INV_SRC_ALPHA, GX2_BLEND_COMBINE_MODE_ADD);
+					GX2_BLEND_MODE_SRC_ALPHA, GX2_BLEND_MODE_INV_SRC_ALPHA, GX2_BLEND_COMBINE_MODE_ADD);
 				break;
 			}
 		}
@@ -3403,6 +3600,7 @@ public:
 		if (mFrameActive)
 			return true;
 
+		syncProcUIForegroundState();
 		mFrameActive = true;
 		mCurrentBlendMode = BlendMode::OPAQUE;
 		mCurrentSamplingMode = SamplingMode::POINT;
@@ -3436,6 +3634,43 @@ public:
 		{
 			slot.mUsedThisFrame = false;
 		}
+	}
+
+	void cancelFrameForProcUI()
+	{
+		if (!mFrameActive)
+			return;
+
+		GX2DrawDone();
+		finishFrame();
+	}
+
+	void releaseForegroundForProcUI()
+	{
+		if (!mSetupSuccessful || nullptr == mCommandBuffer)
+			return;
+
+		static uint32 sReleaseLogCount = 0;
+		if (sReleaseLogCount < 8)
+		{
+			RMX_LOG_INFO("GX2Drawer: releasing GX2 foreground resources for ProcUI");
+			++sReleaseLogCount;
+		}
+
+		if (mFrameActive)
+		{
+			cancelFrameForProcUI();
+		}
+		else
+		{
+			GX2DrawDone();
+		}
+
+		if (nullptr != mNativeContext)
+			GX2SetContextState(mNativeContext);
+		GX2Flush();
+		GX2DrawDone();
+		mProcUIForegroundReleased = true;
 	}
 
 	bool bindWindowTarget(const Recti& viewport)
@@ -3734,6 +3969,7 @@ public:
 	void prepareRenderTargetTextureForRead(GX2DrawerTextureImplementation& implementation)
 	{
 		GX2Flush();
+		GX2DrawDone();
 		invalidateSurfaceAfterColorWrite(implementation.mColorBuffer.surface);
 	}
 
@@ -3815,7 +4051,7 @@ public:
 		return true;
 	}
 
-	bool drawDrawerTextureRect(const Recti& rect, DrawerTexture& texture, const Color& tintColor, const Color& addedColor, const Vec2f& uv0, const Vec2f& uv1, bool useSpriteDepth = false, float depth = 0.0f)
+	bool drawDrawerTextureRect(const Recti& rect, DrawerTexture& texture, const Color& tintColor, const Color& addedColor, const Vec2f& uv0, const Vec2f& uv1, bool useSpriteDepth = false, float depth = 0.0f, bool allowOpaqueAlphaPromotion = true)
 	{
 		GX2DrawerTextureImplementation* implementation = texture.getImplementation<GX2DrawerTextureImplementation>();
 		if (nullptr == implementation)
@@ -3832,10 +4068,13 @@ public:
 		if (implementation->mRenderTarget)
 		{
 			prepareRenderTargetTextureForRead(*implementation);
-			const bool result = drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(implementation->mContainsTransparentPixels, tintColor, addedColor), [&]()
+			const auto drawFunc = [&]()
 			{
 				return drawTexturedRect(rect, implementation->mTexture, uv0, uv1, mCurrentSamplingMode, mCurrentWrapMode, tintColor, addedColor, useSpriteDepth, depth);
-			});
+			};
+			const bool result = allowOpaqueAlphaPromotion
+				? drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(implementation->mContainsTransparentPixels, tintColor, addedColor), drawFunc)
+				: drawFunc();
 			if (shouldLogGamePresentDraw)
 			{
 				RMX_LOG_INFO("GX2Drawer: game present render-target draw"
@@ -3859,10 +4098,13 @@ public:
 		if (nullptr == implementation->mTexture.surface.image)
 			return false;
 
-		const bool result = drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(implementation->mContainsTransparentPixels, tintColor, addedColor), [&]()
+		const auto drawFunc = [&]()
 		{
 			return drawTexturedRect(rect, implementation->mTexture, uv0, uv1, mCurrentSamplingMode, mCurrentWrapMode, tintColor, addedColor, useSpriteDepth, depth);
-		});
+		};
+		const bool result = allowOpaqueAlphaPromotion
+			? drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(implementation->mContainsTransparentPixels, tintColor, addedColor), drawFunc)
+			: drawFunc();
 		if (shouldLogGamePresentDraw)
 		{
 			RMX_LOG_INFO("GX2Drawer: game present bitmap draw"
@@ -3919,7 +4161,7 @@ public:
 		{
 			if (dc.mRect.empty())
 				return false;
-			return drawDrawerTextureRect(dc.mRect, *dc.mTexture, dc.mTintColor, dc.mAddedColor, Vec2f(0.0f, 0.0f), Vec2f(1.0f, 1.0f), true, spriteDepth(dc.mPriorityFlag));
+			return drawDrawerTextureRect(dc.mRect, *dc.mTexture, dc.mTintColor, dc.mAddedColor, Vec2f(0.0f, 0.0f), Vec2f(1.0f, 1.0f), true, spriteDepth(dc.mPriorityFlag), false);
 		}
 
 		if (dc.mTriangles.empty())
@@ -3955,10 +4197,7 @@ public:
 			vertices[i] = makePresentVertex(toClipX(src.mPosition.x), toClipY(src.mPosition.y), src.mTexcoords.x, src.mTexcoords.y, spriteDepth(dc.mPriorityFlag));
 		}
 
-		return drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(implementation->mContainsTransparentPixels, dc.mTintColor, dc.mAddedColor), [&]()
-		{
-			return submitTextureVertices(implementation->mTexture, vertices, (uint32)dc.mTriangles.size(), mCurrentSamplingMode, mCurrentWrapMode, dc.mTintColor, dc.mAddedColor, true);
-		});
+		return submitTextureVertices(implementation->mTexture, vertices, (uint32)dc.mTriangles.size(), mCurrentSamplingMode, mCurrentWrapMode, dc.mTintColor, dc.mAddedColor, true);
 	}
 
 	bool drawMeshVertexColor(const MeshVertexColorDrawCommand& dc)
@@ -4275,7 +4514,18 @@ public:
 		if (nullptr == dc.mResources || !PlaneManager::isRenderablePlaneIndex(dc.mPlaneIndex))
 			return false;
 		if (dc.mPriorityFlag && !dc.mResources->hasPriorityPlanePatterns(dc.mPlaneIndex))
-			return true;
+		{
+			static uint32 sLoggedMissingPriorityPlaneCount = 0;
+			if (sLoggedMissingPriorityPlaneCount < 2)
+			{
+				++sLoggedMissingPriorityPlaneCount;
+				RMX_LOG_INFO("GX2Drawer: skipping empty priority plane"
+					<< " plane=" << dc.mPlaneIndex
+					<< " rect=" << dc.mActiveRect.x << "," << dc.mActiveRect.y << " " << dc.mActiveRect.width << "x" << dc.mActiveRect.height
+					<< " scroll=" << (int)dc.mScrollOffsets);
+			}
+			return false;
+		}
 
 		RenderParts& renderParts = dc.mResources->getRenderParts();
 		const int splitY = renderParts.getPaletteManager().mSplitPositionY;
@@ -4579,7 +4829,7 @@ public:
 		bindPaletteSpriteState(mCurrentColorBuffer->surface.width, mCurrentColorBuffer->surface.height, *dataTexture);
 		setPaletteSpriteUniforms(
 			Vec4f((float)configRect.x, (float)configRect.y, (float)configRect.width, (float)configRect.height),
-			Vec4f((float)dc.mSplitY, (float)dc.mAtex, (float)dataTexture->surface.width, (float)dataTexture->surface.height),
+			Vec4f((float)dc.mSplitY, (float)dc.mAtex, dc.mShadowHighlightMode ? 1.0f : 0.0f, dc.mPriorityFlag ? 1.0f : 0.0f),
 			Vec4f(dc.mTintColor.r, dc.mTintColor.g, dc.mTintColor.b, dc.mTintColor.a),
 			Vec4f(dc.mAddedColor.r, dc.mAddedColor.g, dc.mAddedColor.b, dc.mAddedColor.a));
 		applySpriteDepthTest();
@@ -4700,9 +4950,51 @@ public:
 		cached.mContainsTransparentPixels = false;
 	}
 
+	CachedGlyphTexture* getCachedGlyphTexture(Font& font, const Font::TypeInfo& typeInfo)
+	{
+		if (nullptr == typeInfo.mBitmap)
+			return nullptr;
+
+		CachedGlyphKey key;
+		key.mFontPtr = (uintptr_t)&font;
+		key.mFontChangeCounter = font.getChangeCounter();
+		key.mCharacter = typeInfo.mUnicode;
+
+		auto it = mGlyphTextures.find(key);
+		if (it == mGlyphTextures.end())
+		{
+			it = mGlyphTextures.emplace(std::piecewise_construct, std::forward_as_tuple(key), std::forward_as_tuple()).first;
+			CachedGlyphTexture& cached = it->second;
+			Font::CharacterInfo& characterInfo = font.applyEffects(typeInfo);
+			if (characterInfo.mCachedBitmap.empty() || !initializeTextureStorage(cached.mTexture, characterInfo.mCachedBitmap.getSize()))
+			{
+				mGlyphTextures.erase(it);
+				return nullptr;
+			}
+			uploadBitmapToTexture(cached.mTexture, characterInfo.mCachedBitmap);
+			cached.mSize = characterInfo.mCachedBitmap.getSize();
+			cached.mBorderLeft = characterInfo.mBorderLeft;
+			cached.mBorderTop = characterInfo.mBorderTop;
+			cached.mContainsTransparentPixels = bitmapContainsTransparentPixels(characterInfo.mCachedBitmap);
+		}
+
+		CachedGlyphTexture& cached = it->second;
+		cached.mLastUsedFrame = mPresentCount;
+		return &cached;
+	}
+
+	void destroyCachedGlyphTexture(CachedGlyphTexture& cached)
+	{
+		destroyTextureStorage(cached.mTexture, true);
+		cached.mSize.clear();
+		cached.mBorderLeft = 0;
+		cached.mBorderTop = 0;
+		cached.mContainsTransparentPixels = false;
+	}
+
 	void cleanupTextTextureCache()
 	{
-		if ((int32)(mPresentCount - mNextTextCacheCleanupFrame) < 0 && mTextTextures.size() <= TEXT_TEXTURE_CACHE_LIMIT)
+		if ((int32)(mPresentCount - mNextTextCacheCleanupFrame) < 0 && mTextTextures.size() <= TEXT_TEXTURE_CACHE_LIMIT && mGlyphTextures.size() <= TEXT_TEXTURE_CACHE_LIMIT)
 			return;
 
 		for (auto it = mTextTextures.begin(); it != mTextTextures.end(); )
@@ -4728,6 +5020,31 @@ public:
 			}
 			destroyCachedTextTexture(oldest->second);
 			mTextTextures.erase(oldest);
+		}
+
+		for (auto it = mGlyphTextures.begin(); it != mGlyphTextures.end(); )
+		{
+			if ((uint32)(mPresentCount - it->second.mLastUsedFrame) > TEXT_TEXTURE_CACHE_KEEP_FRAMES)
+			{
+				destroyCachedGlyphTexture(it->second);
+				it = mGlyphTextures.erase(it);
+			}
+			else
+			{
+				++it;
+			}
+		}
+
+		while (mGlyphTextures.size() > TEXT_TEXTURE_CACHE_LIMIT)
+		{
+			auto oldest = mGlyphTextures.begin();
+			for (auto it = std::next(mGlyphTextures.begin()); it != mGlyphTextures.end(); ++it)
+			{
+				if ((uint32)(mPresentCount - it->second.mLastUsedFrame) > (uint32)(mPresentCount - oldest->second.mLastUsedFrame))
+					oldest = it;
+			}
+			destroyCachedGlyphTexture(oldest->second);
+			mGlyphTextures.erase(oldest);
 		}
 
 		mNextTextCacheCleanupFrame = mPresentCount + TEXT_TEXTURE_CACHE_CLEANUP_INTERVAL;
@@ -4771,20 +5088,21 @@ public:
 	template<typename T>
 	void printText(Font& font, const T& text, const Recti& rect, const DrawerPrintOptions& printOptions)
 	{
-		CachedTextTexture* cachedText = getCachedTextTexture(font, text, printOptions.mSpacing);
-		if (nullptr == cachedText || nullptr == cachedText->mTexture.surface.image)
+		const StringReader reader(text);
+		if (reader.mLength == 0)
 			return;
 
-		const Vec2i drawPosition = Font::applyAlignment(rect, cachedText->mInnerRect, printOptions.mAlignment);
-		const Vec2i textureSize = cachedText->mSize;
-		if (textureSize.x <= 0 || textureSize.y <= 0)
+		const Vec2i textPosition = font.alignText(rect, reader, printOptions.mAlignment);
+		mTempTextTypeInfos.clear();
+		font.getTypeInfos(mTempTextTypeInfos, textPosition, reader, printOptions.mSpacing);
+		if (mTempTextTypeInfos.empty())
 			return;
 
 		const BlendMode previousBlendMode = mCurrentBlendMode;
 		const SamplingMode previousSamplingMode = mCurrentSamplingMode;
 		const TextureWrapMode previousWrapMode = mCurrentWrapMode;
-		// Match the mature Vulkan/D3D text path: font bitmaps carry antialiasing
-		// in alpha, so one-bit alpha testing makes menu text look washed out.
+		// Match OpenGL text composition: draw each processed glyph separately so
+		// outlines and shadows are blended in the same order as the PC renderer.
 		mCurrentBlendMode = BlendMode::ALPHA;
 		mCurrentSamplingMode = SamplingMode::POINT;
 		mCurrentWrapMode = TextureWrapMode::CLAMP;
@@ -4793,16 +5111,23 @@ public:
 			if (mTextDebugLogCount < 16 || ((mPresentCount % 300) == 0 && mTextDebugLogCount < 64))
 			{
 				RMX_LOG_INFO("GX2Drawer: text draw rect=" << rect.x << "," << rect.y << " " << rect.width << "x" << rect.height
-					<< " out=" << drawPosition.x << "," << drawPosition.y << " " << textureSize.x << "x" << textureSize.y
+					<< " glyphs=" << mTempTextTypeInfos.size()
 					<< " align=" << printOptions.mAlignment
 					<< " tintA=" << printOptions.mTintColor.a);
 				++mTextDebugLogCount;
 			}
 		}
-		drawWithTextureAlphaMode(shouldUseAlphaBlendForTexture(cachedText->mContainsTransparentPixels, printOptions.mTintColor, Color::TRANSPARENT), [&]()
+
+		for (const Font::TypeInfo& typeInfo : mTempTextTypeInfos)
 		{
-			return drawTexturedRect(Recti(drawPosition, textureSize), cachedText->mTexture, Vec2f(0.0f, 0.0f), Vec2f(1.0f, 1.0f), SamplingMode::POINT, TextureWrapMode::CLAMP, printOptions.mTintColor, Color::TRANSPARENT);
-		});
+			CachedGlyphTexture* cachedGlyph = getCachedGlyphTexture(font, typeInfo);
+			if (nullptr == cachedGlyph || nullptr == cachedGlyph->mTexture.surface.image || cachedGlyph->mSize.x <= 0 || cachedGlyph->mSize.y <= 0)
+				continue;
+
+			const Vec2i drawPosition = typeInfo.mPosition - Vec2i(cachedGlyph->mBorderLeft, cachedGlyph->mBorderTop);
+			drawTexturedRect(Recti(drawPosition, cachedGlyph->mSize), cachedGlyph->mTexture, Vec2f(0.0f, 0.0f), Vec2f(1.0f, 1.0f), SamplingMode::POINT, TextureWrapMode::CLAMP, printOptions.mTintColor, Color::TRANSPARENT);
+		}
+
 		mCurrentWrapMode = previousWrapMode;
 		mCurrentSamplingMode = previousSamplingMode;
 		mCurrentBlendMode = previousBlendMode;
@@ -5098,6 +5423,8 @@ public:
 		if (!mSetupSuccessful)
 			return;
 
+		syncProcUIForegroundState();
+
 		if (!mWindowTargetBound)
 		{
 			if (mScreenBitmap.empty())
@@ -5118,8 +5445,13 @@ public:
 			}
 		}
 
-		GX2ColorBuffer* drcColorBuffer = WHBGfxGetDRCColourBuffer();
-		GX2ColorBuffer* tvColorBuffer = WHBGfxGetTVColourBuffer();
+		GX2ColorBuffer* drcColorBuffer = nullptr;
+		GX2ColorBuffer* tvColorBuffer = nullptr;
+		if constexpr (USE_WHB_PRESENT)
+		{
+			drcColorBuffer = WHBGfxGetDRCColourBuffer();
+			tvColorBuffer = WHBGfxGetTVColourBuffer();
+		}
 		if constexpr (ENABLE_GX2_DRAWER_DIAGNOSTICS)
 		{
 			if (mPresentCount < 8)
@@ -5169,6 +5501,11 @@ public:
 				if (!cpuPresent)
 				{
 					GX2Flush();
+					if constexpr (WAIT_FOR_GPU_BEFORE_SCAN_COPY)
+					{
+						GX2DrawDone();
+					}
+					invalidateSurfaceAfterColorWrite(mCpuColorBuffer.surface);
 				}
 				const bool tvScanoutReady = (mTvScanoutSize.x > 0 && mTvScanoutSize.y > 0);
 				const bool drcScanoutReady = COPY_DRC_SCANOUT && (nullptr != mDrcScanBuffer && mDrcScanoutSize.x > 0 && mDrcScanoutSize.y > 0);
@@ -5235,6 +5572,10 @@ public:
 				GX2Flush();
 				GX2SwapScanBuffers();
 				GX2SetTVEnable(TRUE);
+				if (drcScanoutReady)
+				{
+					GX2SetDRCEnable(TRUE);
+				}
 				if constexpr (WAIT_FOR_SCAN_FLIP)
 				{
 					GX2WaitForFlip();
@@ -5293,6 +5634,9 @@ public:
 	void* mCommandBuffer = nullptr;
 	void* mTvScanBuffer = nullptr;
 	void* mDrcScanBuffer = nullptr;
+	uint32 mTvScanBufferSize = 0;
+	uint32 mDrcScanBufferSize = 0;
+	GX2TVRenderMode mTvRenderMode = GX2_TV_RENDER_MODE_WIDE_720P;
 	GX2ContextState* mNativeContext = nullptr;
 	Vec2i mNativeDrawableSize = Vec2i((int)FALLBACK_TV_WIDTH, (int)FALLBACK_TV_HEIGHT);
 	Vec2i mTvScanoutSize = Vec2i((int)FALLBACK_TV_WIDTH, (int)FALLBACK_TV_HEIGHT);
@@ -5347,6 +5691,7 @@ public:
 	uint32 mPresentModeLogCount = 0;
 	uint32 mResolvePresentLogCount = 0;
 	uint32 mPresentCount = 0;
+	uint32 mObservedProcUIForegroundGeneration = 0;
 	GX2ColorBuffer mCpuColorBuffer = {};
 	Vec2i mCpuColorBufferSize;
 	std::array<DepthBufferSlot, DEPTH_BUFFER_CACHE_SIZE> mDepthBuffers;
@@ -5377,6 +5722,7 @@ public:
 	bool mWindowTargetBound = false;
 	bool mWindowTargetCleared = false;
 	bool mDepthActiveForTarget = false;
+	bool mProcUIForegroundReleased = false;
 	BlendMode mCurrentBlendMode = BlendMode::OPAQUE;
 	SamplingMode mCurrentSamplingMode = SamplingMode::POINT;
 	TextureWrapMode mCurrentWrapMode = TextureWrapMode::CLAMP;
@@ -5390,6 +5736,7 @@ public:
 	std::unordered_map<uint64, CachedSpriteTexture> mComponentSpriteTextures;
 	std::unordered_map<uint64, CachedSpriteTexture> mPaletteSpriteTextures;
 	std::unordered_map<CachedTextKey, CachedTextTexture, CachedTextKeyHasher> mTextTextures;
+	std::unordered_map<CachedGlyphKey, CachedGlyphTexture, CachedGlyphKeyHasher> mGlyphTextures;
 	uint32 mNextTextCacheCleanupFrame = 0;
 	Bitmap mScratchBitmap;
 	int mScratchBitmapReservedSize = 0;
@@ -5397,6 +5744,7 @@ public:
 	int mSolidBitmapReservedSize = 0;
 	Bitmap mTempTextBitmap;
 	int mTempTextReservedSize = 0;
+	std::vector<Font::TypeInfo> mTempTextTypeInfos;
 };
 
 #else
@@ -5413,12 +5761,42 @@ struct GX2Drawer::Internal
 GX2Drawer::GX2Drawer() :
 	mInternal(*new Internal())
 {
+#if defined(PLATFORM_WIIU)
+	registerProcUIForegroundReleaseHandler(this, "constructor");
+#endif
 }
 
 GX2Drawer::~GX2Drawer()
 {
+#if defined(PLATFORM_WIIU)
+	if (gActiveProcUIDrawer == this)
+	{
+		if (nullptr != FTX::System)
+			FTX::System->setWiiUProcUIForegroundReleaseHandler(nullptr);
+		gActiveProcUIDrawer = nullptr;
+	}
+#endif
 	mSoftwareDrawer.clearExternalOutputBitmap();
 	delete &mInternal;
+}
+
+void GX2Drawer::releaseForegroundForProcUI()
+{
+#if defined(PLATFORM_WIIU)
+	if (nullptr != gActiveProcUIDrawer)
+	{
+		gActiveProcUIDrawer->mInternal.releaseForegroundForProcUI();
+	}
+	else
+	{
+		static uint32 sMissingDrawerLogCount = 0;
+		if (sMissingDrawerLogCount < 8)
+		{
+			RMX_LOG_WARNING("GX2Drawer: ProcUI foreground release requested without active drawer");
+			++sMissingDrawerLogCount;
+		}
+	}
+#endif
 }
 
 Drawer::Type GX2Drawer::getType()
@@ -5453,6 +5831,7 @@ void GX2Drawer::setupRenderWindow(SDL_Window* window)
 {
 	(void)window;
 #if defined(PLATFORM_WIIU)
+	registerProcUIForegroundReleaseHandler(this, "setupRenderWindow");
 	mInternal.ensureScreenBitmap();
 	mSoftwareDrawer.setExternalOutputBitmap(&mInternal.mScreenBitmap);
 #endif
@@ -5464,6 +5843,8 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 #if defined(PLATFORM_WIIU)
 	const std::vector<DrawCommand*>& drawCommands = drawCollection.getDrawCommands();
 	if (drawCommands.empty())
+		return;
+	if (!procUIAllowsRendering())
 		return;
 
 	if (!mInternal.beginFrame())
@@ -6222,6 +6603,18 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 
 	for (DrawCommand* drawCommand : drawCommands)
 	{
+		if (!procUIAllowsRendering())
+		{
+			static uint32 sMidRenderProcUIAbortLogCount = 0;
+			if (sMidRenderProcUIAbortLogCount < 8)
+			{
+				RMX_LOG_INFO("GX2Drawer: aborting render command list for ProcUI foreground release");
+				++sMidRenderProcUIAbortLogCount;
+			}
+			mInternal.cancelFrameForProcUI();
+			return;
+		}
+
 		switch (drawCommand->getType())
 		{
 			case DrawCommand::Type::UNDEFINED:
@@ -6463,6 +6856,12 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 void GX2Drawer::presentScreen()
 {
 #if defined(PLATFORM_WIIU)
+	registerProcUIForegroundReleaseHandler(this, "presentScreen");
+	if (!procUIAllowsRendering())
+	{
+		mInternal.cancelFrameForProcUI();
+		return;
+	}
 	mInternal.present();
 #endif
 }

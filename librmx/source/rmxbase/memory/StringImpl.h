@@ -1177,12 +1177,18 @@ TEMPLATE bool STRING::readUnicode(const uint8* data, size_t datasize, UnicodeEnc
 			size_t remaining = blob.getRemaining() / 2;
 			expand(remaining);
 
-			uint16 value;
+			const uint8* ptr = blob.getCursor();
+			const auto read16 = [&](const uint8* source) -> uint16
+			{
+				if (encoding == UnicodeEncoding::UTF16LE)
+					return (uint16)(((uint16)source[0]) | ((uint16)source[1] << 8));
+				return (uint16)(((uint16)source[0] << 8) | ((uint16)source[1]));
+			};
+
 			while (remaining > 0)
 			{
-				blob >> value;
-				if (encoding == UnicodeEncoding::UTF16BE)
-					value = swapBytes16(value);
+				uint16 value = read16(ptr);
+				ptr += 2;
 				--remaining;
 
 				if (value <= 0xd7ff || value >= 0xe000)
@@ -1194,10 +1200,8 @@ TEMPLATE bool STRING::readUnicode(const uint8* data, size_t datasize, UnicodeEnc
 					if (remaining < 1)
 						ABORT;
 
-					uint16 second;
-					blob >> second;
-					if (encoding == UnicodeEncoding::UTF16BE)
-						second = swapBytes16(second);
+					uint16 second = read16(ptr);
+					ptr += 2;
 					--remaining;
 					code = 0x10000 + ((value - 0xd800) << 10) + (second - 0xdc00);
 				}
@@ -1215,21 +1219,26 @@ TEMPLATE bool STRING::readUnicode(const uint8* data, size_t datasize, UnicodeEnc
 			expand(len);
 			mLength = (int)len;
 
-			if (encoding == UnicodeEncoding::UTF32LE)
+			const uint8* ptr = blob.getCursor();
+			const auto read32 = [&](const uint8* source) -> uint32
 			{
-				for (size_t pos = 0; pos < len; ++pos)
+				if (encoding == UnicodeEncoding::UTF32LE)
 				{
-					blob >> code;
-					mData[pos] = rmx::StringTraits<CHAR>::fromUnicode(code);
+					return ((uint32)source[0]) |
+						((uint32)source[1] << 8) |
+						((uint32)source[2] << 16) |
+						((uint32)source[3] << 24);
 				}
-			}
-			else
+				return ((uint32)source[0] << 24) |
+					((uint32)source[1] << 16) |
+					((uint32)source[2] << 8) |
+					((uint32)source[3]);
+			};
+			for (size_t pos = 0; pos < len; ++pos)
 			{
-				for (size_t pos = 0; pos < len; ++pos)
-				{
-					blob >> code;
-					mData[pos] = rmx::StringTraits<CHAR>::fromUnicode(swapBytes32(code));
-				}
+				code = read32(ptr);
+				ptr += 4;
+				mData[pos] = rmx::StringTraits<CHAR>::fromUnicode(code);
 			}
 		}
 
@@ -1282,6 +1291,8 @@ TEMPLATE void STRING::writeUnicode(std::vector<uint8>& buffer, UnicodeEncoding e
 		}
 
 		buffer.resize(size);
+		if (size == 0)
+			return;
 		uint8* ptr = &buffer[0];
 		if (addBOM)
 		{
@@ -1336,35 +1347,42 @@ TEMPLATE void STRING::writeUnicode(std::vector<uint8>& buffer, UnicodeEncoding e
 		}
 
 		buffer.resize(size);
+		if (size == 0)
+			return;
 		if (addBOM)
 			memcpy(&buffer[0], *bom, bom.length());
-		uint16* start = (uint16*)&buffer[0] + size4bom;
-		uint16* end = (uint16*)&buffer[0] +  size;
+		uint8* ptr = &buffer[0] + size4bom;
+		const uint8* const end = &buffer[0] + size;
+		const auto write16 = [&](uint16 value)
+		{
+			if (encoding == UnicodeEncoding::UTF16LE)
+			{
+				ptr[0] = (uint8)(value & 0xff);
+				ptr[1] = (uint8)(value >> 8);
+			}
+			else
+			{
+				ptr[0] = (uint8)(value >> 8);
+				ptr[1] = (uint8)(value & 0xff);
+			}
+			ptr += 2;
+		};
 
-		uint16* ptr = start;
 		for (size_t i = 0; i < (size_t)mLength; ++i)
 		{
 			uint32 code = rmx::StringTraits<CHAR>::toUnicode(mData[i]);
 			if (code <= 0xffff)
 			{
-				ptr[0] = (uint16)code;
-				++ptr;
+				write16((uint16)code);
 			}
 			else
 			{
 				code -= 0x10000;
-				ptr[0] = 0xd800 + ((code >> 10) & 0x3ff);
-				ptr[1] = 0xdc00 + (code & 0x3ff);
-				ptr += 2;
+				write16((uint16)(0xd800 + ((code >> 10) & 0x3ff)));
+				write16((uint16)(0xdc00 + (code & 0x3ff)));
 			}
 		}
 		assert(ptr == end);
-
-		if (encoding == UnicodeEncoding::UTF16BE)
-		{
-			for (ptr = start; ptr < end; ++ptr)
-				*ptr = swapBytes16(*ptr);
-		}
 	}
 	else if (encoding == UnicodeEncoding::UTF32LE || encoding == UnicodeEncoding::UTF32BE)
 	{
@@ -1374,19 +1392,33 @@ TEMPLATE void STRING::writeUnicode(std::vector<uint8>& buffer, UnicodeEncoding e
 		size_t size = size4bom + mLength * 4;
 
 		buffer.resize(size);
+		if (size == 0)
+			return;
 		if (addBOM)
 			memcpy(&buffer[0], *bom, bom.length());
 
-		uint32* ptr = (uint32*)&buffer[size4bom];
-		if (encoding == UnicodeEncoding::UTF32LE)
+		uint8* ptr = &buffer[0] + size4bom;
+		const auto write32 = [&](uint32 value)
 		{
-			for (size_t i = 0; i < (size_t)mLength; ++i)
-				ptr[i] = rmx::StringTraits<CHAR>::toUnicode(mData[i]);
-		}
-		else
+			if (encoding == UnicodeEncoding::UTF32LE)
+			{
+				ptr[0] = (uint8)(value & 0xff);
+				ptr[1] = (uint8)((value >> 8) & 0xff);
+				ptr[2] = (uint8)((value >> 16) & 0xff);
+				ptr[3] = (uint8)(value >> 24);
+			}
+			else
+			{
+				ptr[0] = (uint8)(value >> 24);
+				ptr[1] = (uint8)((value >> 16) & 0xff);
+				ptr[2] = (uint8)((value >> 8) & 0xff);
+				ptr[3] = (uint8)(value & 0xff);
+			}
+			ptr += 4;
+		};
+		for (size_t i = 0; i < (size_t)mLength; ++i)
 		{
-			for (size_t i = 0; i < (size_t)mLength; ++i)
-				ptr[i] = swapBytes32(rmx::StringTraits<CHAR>::toUnicode(mData[i]));
+			write32(rmx::StringTraits<CHAR>::toUnicode(mData[i]));
 		}
 	}
 	else

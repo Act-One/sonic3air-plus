@@ -98,7 +98,9 @@ private:
 
 		float mBaseVolume = 1.0f;
 		float mRelativeVolume = 1.0f;
+		float mRelativeVolumeTarget = 1.0f;
 		float mRelativeVolumeChange = 0.0f;
+		bool mStopOnFadeOut = false;
 		int mContextId = -1;
 		int mChannelId = -1;
 		State mState = State::PLAYING;
@@ -158,6 +160,8 @@ private:
 	PlayingSound* getPlayingSound(AudioReference& audioRef);
 	const PlayingSound* getPlayingSound(AudioReference& audioRef) const;
 
+	void quickStopAndForget(PlayingSound& sound);
+	void scheduleFadeOutStop(PlayingSound& sound, float length);
 	void applyChannelOverride(int overriddenChannelId, uint8 contextId);
 	void removeChannelOverride(int overriddenChannelId, uint8 contextId);
 	bool isChannelOverridden(int channelId, uint8 contextId) const;

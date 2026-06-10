@@ -15,10 +15,21 @@
 #include "oxygen/helper/Logging.h"
 #include "oxygen/platform/PlatformFunctions.h"
 
+namespace
+{
+#if defined(PLATFORM_WIIU)
+	constexpr bool ENABLE_WIIU_ROM_LOAD_TRACE = false;
+	#define WIIU_ROM_LOAD_TRACE_LOG(expr) do { if constexpr (ENABLE_WIIU_ROM_LOAD_TRACE) { RMX_LOG_INFO(expr); } } while (false)
+#else
+	#define WIIU_ROM_LOAD_TRACE_LOG(expr) do {} while (false)
+#endif
+}
+
 
 bool ResourcesCache::loadRom()
 {
 	mRom.clear();
+	WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] loadRom begin");
 
 	// Load ROM content
 	Configuration& config = Configuration::instance();
@@ -33,6 +44,7 @@ bool ResourcesCache::loadRom()
 		for (const GameProfile::RomInfo& romInfo : gameProfile.mRomInfos)
 		{
 			romPath = config.mGameAppDataPath + romInfo.mSteamRomName;
+			WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] trying app data path: " << WString(romPath).toStdString());
 			loaded = loadRomFile(romPath, romInfo);
 			if (loaded)
 				break;
@@ -48,6 +60,7 @@ bool ResourcesCache::loadRom()
 	if (!loaded && !config.mLastRomPath.empty() && gameProfile.mIdentifier == "Sonic3AIR")
 	{
 		romPath = config.mLastRomPath;
+		WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] trying last path: " << WString(romPath).toStdString());
 		loaded = loadRomFile(romPath);
 	}
 
@@ -55,6 +68,7 @@ bool ResourcesCache::loadRom()
 	if (!loaded && !config.mRomPath.empty())
 	{
 		romPath = config.mRomPath;
+		WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] trying configured path: " << WString(romPath).toStdString());
 		loaded = loadRomFile(romPath);
 	}
 #endif
@@ -65,6 +79,7 @@ bool ResourcesCache::loadRom()
 		for (const GameProfile::RomInfo& romInfo : gameProfile.mRomInfos)
 		{
 			romPath = romInfo.mSteamRomName;
+			WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] trying install path: " << WString(romPath).toStdString());
 			loaded = loadRomFile(romPath, romInfo);
 			if (loaded)
 				break;
@@ -92,11 +107,13 @@ bool ResourcesCache::loadRom()
 	// If ROM was still not loaded, it's time to give up now...
 	if (!loaded)
 	{
+		WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] loadRom failed");
 		return false;
 	}
 
 	if (saveRom)
 	{
+		WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] saving ROM copy to app data");
 		// Note that this updates the config
 		saveRomToAppData();
 	}
@@ -105,12 +122,14 @@ bool ResourcesCache::loadRom()
 		// Update config if there was a change
 		if (romPath != config.mLastRomPath)
 		{
+			WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] updating last ROM path");
 			config.mLastRomPath = romPath;
 			config.saveSettings();
 		}
 	}
 
 	// Done
+	WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] loadRom end success bytes=" << mRom.size());
 	return true;
 }
 
@@ -143,8 +162,13 @@ bool ResourcesCache::loadRomFile(const std::wstring& filename)
 	const GameProfile::RomCheck& romCheck = GameProfile::instance().mRomCheck;
 	std::vector<uint8> content;
 	content.reserve(romCheck.mSize > 0 ? romCheck.mSize : 0x400000);
+	WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] read generic begin: " << WString(filename).toStdString());
 	if (!FTX::FileSystem->readFile(filename, content))
+	{
+		WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] read generic failed: " << WString(filename).toStdString());
 		return false;
+	}
+	WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] read generic end bytes=" << content.size());
 
 	return loadRomMemory(content);
 }
@@ -153,27 +177,38 @@ bool ResourcesCache::loadRomFile(const std::wstring& filename, const GameProfile
 {
 	const GameProfile::RomCheck& romCheck = GameProfile::instance().mRomCheck;
 	mRom.reserve(romCheck.mSize > 0 ? romCheck.mSize : 0x400000);
+	WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] read checked begin: " << WString(filename).toStdString());
 	if (!FTX::FileSystem->readFile(filename, mRom))
+	{
+		WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] read checked failed: " << WString(filename).toStdString());
 		return false;
+	}
+	WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] read checked end bytes=" << mRom.size());
 
 	// If ROM info defines a required header checksum, make sure it fits (this is meant to be an early-out before doing the potentially expensive code below)
 	const uint64 headerChecksum = getHeaderChecksum(mRom);
 	if (romInfo.mHeaderChecksum != 0 && romInfo.mHeaderChecksum != headerChecksum)
+	{
+		WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] header checksum mismatch expected=0x" << rmx::hexString(romInfo.mHeaderChecksum, 16) << " actual=0x" << rmx::hexString(headerChecksum, 16));
 		return false;
+	}
 
 	if (applyRomModifications(romInfo))
 	{
 		if (checkRomContent())
 		{
 			mLoadedRomInfo = &romInfo;
+			WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] checked ROM accepted");
 			return true;
 		}
 	}
+	WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] checked ROM rejected after modifications/content check");
 	return false;
 }
 
 bool ResourcesCache::loadRomMemory(const std::vector<uint8>& content)
 {
+	WIIU_ROM_LOAD_TRACE_LOG("[WiiU ROM] loadRomMemory bytes=" << content.size());
 	const uint64 headerChecksum = getHeaderChecksum(content);
 	if (GameProfile::instance().mRomInfos.empty())
 	{
@@ -233,12 +268,9 @@ bool ResourcesCache::applyRomModifications(const GameProfile::RomInfo& romInfo)
 		if (content->size() != mRom.size())
 			return false;
 
-		uint64* ptr = (uint64*)&mRom[0];
-		uint64* diff = (uint64*)&(*content)[0];
-		const size_t count = content->size() / 8;
-		for (size_t i = 0; i < count; ++i)
+		for (size_t i = 0; i < content->size(); ++i)
 		{
-			ptr[i] ^= diff[i];
+			mRom[i] ^= (*content)[i];
 		}
 	}
 
@@ -297,4 +329,3 @@ void ResourcesCache::saveRomToAppData()
 		}
 	}
 }
-

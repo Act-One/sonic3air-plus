@@ -184,10 +184,13 @@ namespace oxygen
 
 	void Logging::shutdown()
 	{
-		rmx::Logging::clear();
 #if defined(PLATFORM_WIIU)
-		WHBLogUdpDeinit();
-		WHBLogCafeDeinit();
+		// On Wii U this can run after ProcUI has already started handing control
+		// back to the shell. Leave the loggers alive for process teardown so the
+		// final return path stays observable and does not hang in WHB log deinit.
+		rmx::Logging::log(rmx::LogLevel::INFO, "Wii U logging left active for process exit");
+#else
+		rmx::Logging::clear();
 #endif
 	}
 

@@ -23,9 +23,49 @@ namespace rmx
 
 	JobManager::~JobManager()
 	{
+		shutdown();
+		if (nullptr != mConditionVariable)
+		{
+			SDL_DestroyCond(mConditionVariable);
+			mConditionVariable = nullptr;
+		}
+		if (nullptr != mConditionLock)
+		{
+			SDL_DestroyMutex(mConditionLock);
+			mConditionLock = nullptr;
+		}
+	}
+
+	void JobManager::shutdown()
+	{
+		if (nullptr == mConditionLock)
+			return;
+
+		SDL_LockMutex(mConditionLock);
+		mSearchforJobs = false;
+		for (JobBase* job : mJobs)
+		{
+			if (nullptr != job)
+				job->mJobShouldBeRunning.store(false, std::memory_order_release);
+		}
+		SDL_CondBroadcast(mConditionVariable);
+		SDL_UnlockMutex(mConditionLock);
+
 		stopAllThreads();
-		SDL_DestroyCond(mConditionVariable);
-		SDL_DestroyMutex(mConditionLock);
+
+		SDL_LockMutex(mConditionLock);
+		for (JobBase* job : mJobs)
+		{
+			if (nullptr == job)
+				continue;
+			job->mRegisteredAtManager = nullptr;
+			job->mJobPriority = -1.0f;
+			job->mJobShouldBeRunning.store(false, std::memory_order_release);
+			job->mJobState.store(JobBase::JobState::INACTIVE, std::memory_order_release);
+		}
+		mJobs.clear();
+		mNextDelayedJobTicks = 0xffffffff;
+		SDL_UnlockMutex(mConditionLock);
 	}
 
 	void JobManager::setMaxThreads(int count)

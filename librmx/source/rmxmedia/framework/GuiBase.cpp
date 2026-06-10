@@ -8,6 +8,23 @@
 
 #include "rmxmedia.h"
 
+#if defined(PLATFORM_WIIU)
+	#include <proc_ui/procui.h>
+#endif
+
+
+#if defined(PLATFORM_WIIU)
+namespace
+{
+	bool isProcUIExitTeardownActive()
+	{
+		if (ProcUIIsRunning() && ProcUIInShutdown())
+			return true;
+		return nullptr != FTX::System && FTX::System->isWiiUProcUIExitRequested();
+	}
+}
+#endif
+
 
 GuiBase::GuiBase()
 {
@@ -40,6 +57,22 @@ void GuiBase::removeChild(GuiBase& child)
 	if (child.mParent != this)
 		return;
 
+#if defined(PLATFORM_WIIU)
+	if (isProcUIExitTeardownActive())
+	{
+		child.mParent = nullptr;
+		if (mIteratingChildren)
+		{
+			mChildrenToRemove.push_back(&child);
+		}
+		else
+		{
+			internalRemoveChild(child);
+		}
+		return;
+	}
+#endif
+
 	child.deinitialize();
 	child.mParent = nullptr;
 
@@ -61,6 +94,21 @@ void GuiBase::deleteChild(GuiBase& child)
 
 void GuiBase::removeAllChildren()
 {
+#if defined(PLATFORM_WIIU)
+	if (isProcUIExitTeardownActive())
+	{
+		for (GuiBase* child : mChildren)
+		{
+			if (nullptr != child)
+				child->mParent = nullptr;
+		}
+		mChildren.clear();
+		mChildrenToRemove.clear();
+		mIteratingChildren = false;
+		return;
+	}
+#endif
+
 	for (GuiBase* child : mChildren)
 	{
 		child->deinitialize();
@@ -71,6 +119,26 @@ void GuiBase::removeAllChildren()
 
 void GuiBase::deleteAllChildren()
 {
+#if defined(PLATFORM_WIIU)
+	if (isProcUIExitTeardownActive())
+	{
+		static uint32 sDetachLogCount = 0;
+		if (!mChildren.empty() && sDetachLogCount < 8)
+		{
+			++sDetachLogCount;
+			RMX_LOG_INFO("GuiBase: detaching " << (uint32)mChildren.size() << " GUI children during ProcUI exit teardown");
+		}
+		for (GuiBase* child : mChildren)
+		{
+			if (nullptr != child)
+				child->mParent = nullptr;
+		}
+		mChildren.clear();
+		mChildrenToRemove.clear();
+		mIteratingChildren = false;
+		return;
+	}
+#endif
 	for (GuiBase* child : mChildren)
 	{
 		child->deinitialize();

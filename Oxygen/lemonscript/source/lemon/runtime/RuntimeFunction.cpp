@@ -23,6 +23,13 @@ namespace lemon
 	#if defined(PLATFORM_WIIU)
 		static constexpr bool ENABLE_WIIU_LEMON_RUNTIME_FUNCTION_TRACE = false;
 	#endif
+
+		static constexpr size_t RUNTIME_OPCODE_ALIGNMENT = RuntimeOpcode::PARAMETER_ALIGNMENT;
+
+		static constexpr size_t alignRuntimeOpcodeOffset(size_t value)
+		{
+			return (value + RUNTIME_OPCODE_ALIGNMENT - 1) & ~(RUNTIME_OPCODE_ALIGNMENT - 1);
+		}
 	}
 
 	RuntimeOpcodeBuffer::~RuntimeOpcodeBuffer()
@@ -40,7 +47,7 @@ namespace lemon
 
 	void RuntimeOpcodeBuffer::reserveForOpcodes(size_t numOpcodes)
 	{
-		const size_t memoryRequired = numOpcodes * (sizeof(RuntimeOpcode) + 16);	// Estimate for maximum size
+		const size_t memoryRequired = numOpcodes * alignRuntimeOpcodeOffset(RuntimeOpcode::PARAMETER_OFFSET + 16);	// Estimate for maximum size
 		if (memoryRequired > mReserved)
 		{
 			if (mSelfManagedBuffer)
@@ -54,7 +61,8 @@ namespace lemon
 
 	RuntimeOpcode& RuntimeOpcodeBuffer::addOpcode(size_t parameterSize)
 	{
-		const size_t size = sizeof(RuntimeOpcode) + parameterSize;
+		mSize = alignRuntimeOpcodeOffset(mSize);
+		const size_t size = alignRuntimeOpcodeOffset(RuntimeOpcode::PARAMETER_OFFSET + parameterSize);
 		RMX_ASSERT(mSize + size <= mReserved, "Exceeding reserved size of runtime opcode buffer");
 		RMX_ASSERT(size <= 0xc0, "Got large parameter size of " << parameterSize << " bytes");		// Actual hard limit is 0xff, but everything larger than 0xc0 is suspicious and a hint that the limit might be too low
 
@@ -101,7 +109,9 @@ namespace lemon
 
 #if defined(PLATFORM_WIIU)
 		static int sBuildLogCount = 0;
+		static int sBuildDetailLogCount = 0;
 		const bool logBuild = ENABLE_WIIU_LEMON_RUNTIME_FUNCTION_TRACE && (sBuildLogCount < 256);
+		const bool logDetail = logBuild && (sBuildDetailLogCount < 160);
 		if (logBuild)
 		{
 			RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build begin function=" << mFunction->getName() << " opcodes=" << mFunction->mOpcodes.size() << " opt=" << runtime.getProgram().getOptimizationLevel() << " nativeProvider=" << (nullptr != runtime.getProgram().mNativizedOpcodeProvider));
@@ -117,12 +127,40 @@ namespace lemon
 
 			// Preparation: Build some useful information about opcodes
 			static std::vector<OpcodeProcessor::OpcodeData> opcodeData;
+#if defined(PLATFORM_WIIU)
+			if (logDetail)
+			{
+				RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build opcodeData begin function=" << mFunction->getName());
+				++sBuildDetailLogCount;
+			}
+#endif
 			OpcodeProcessor::buildOpcodeData(opcodeData, *mFunction);
+#if defined(PLATFORM_WIIU)
+			if (logDetail)
+			{
+				RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build opcodeData end function=" << mFunction->getName());
+				++sBuildDetailLogCount;
+			}
+#endif
 
 			// Using a static buffer as temporary buffer before knowing the final size
 			static RuntimeOpcodeBuffer tempBuffer;
 			tempBuffer.clear();
+#if defined(PLATFORM_WIIU)
+			if (logDetail)
+			{
+				RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build reserve begin function=" << mFunction->getName() << " numOpcodes=" << numOpcodes);
+				++sBuildDetailLogCount;
+			}
+#endif
 			tempBuffer.reserveForOpcodes(numOpcodes);
+#if defined(PLATFORM_WIIU)
+			if (logDetail)
+			{
+				RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build reserve end function=" << mFunction->getName());
+				++sBuildDetailLogCount;
+			}
+#endif
 
 			mProgramCounterByOpcodeIndex.resize(numOpcodes, 0xffffffff);
 
@@ -132,10 +170,36 @@ namespace lemon
 				//  -> They may choose to merge more than one opcode into a runtime opcode, where that's feasible
 				for (size_t i = 0; i < numOpcodes; )
 				{
-					const size_t start = tempBuffer.size();
+					const size_t opcodePointerIndex = tempBuffer.getOpcodePointers().size();
 					int numOpcodesConsumed = 1;
+#if defined(PLATFORM_WIIU)
+					if (logDetail)
+					{
+						const Opcode& opcode = opcodes[i];
+						RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build emit begin function=" << mFunction->getName()
+							<< " index=" << i
+							<< " type=" << (int)opcode.mType
+							<< " dataType=0x" << rmx::hexString((uint8)opcode.mDataType, 2)
+							<< " param=0x" << rmx::hexString((uint64)opcode.mParameter, 16)
+							<< " remain=" << opcodeData[i].mRemainingSequenceLength);
+						++sBuildDetailLogCount;
+					}
+#endif
 					createRuntimeOpcode(tempBuffer, &opcodes[i], opcodeData[i].mRemainingSequenceLength, (int)i, numOpcodesConsumed, runtime);
+#if defined(PLATFORM_WIIU)
+					if (logDetail)
+					{
+						RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build emit end function=" << mFunction->getName()
+							<< " index=" << i
+							<< " consumed=" << numOpcodesConsumed
+							<< " tempBytes=" << tempBuffer.size()
+							<< " runtimeOpcodes=" << tempBuffer.getOpcodePointers().size());
+						++sBuildDetailLogCount;
+					}
+#endif
 
+					RMX_ASSERT(opcodePointerIndex < tempBuffer.getOpcodePointers().size(), "Runtime opcode provider did not emit an opcode");
+					const size_t start = (size_t)((const uint8*)tempBuffer.getOpcodePointers()[opcodePointerIndex] - tempBuffer.getStart());
 					for (int k = 0; k < numOpcodesConsumed; ++k)
 					{
 						mProgramCounterByOpcodeIndex[k + i] = start;
@@ -150,11 +214,32 @@ namespace lemon
 			}
 
 			// Copy the runtime opcodes over into the actual opcode buffer for this function
+#if defined(PLATFORM_WIIU)
+			if (logDetail)
+			{
+				RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build copy begin function=" << mFunction->getName() << " tempBytes=" << tempBuffer.size());
+				++sBuildDetailLogCount;
+			}
+#endif
 			mRuntimeOpcodeBuffer.copyFrom(tempBuffer, runtime.mRuntimeOpcodesPool);
+#if defined(PLATFORM_WIIU)
+			if (logDetail)
+			{
+				RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build copy end function=" << mFunction->getName() << " bytes=" << mRuntimeOpcodeBuffer.size() << " first=" << (const void*)mRuntimeOpcodeBuffer.getStart());
+				++sBuildDetailLogCount;
+			}
+#endif
 		}
 
 		// Post-processing
 		{
+#if defined(PLATFORM_WIIU)
+			if (logDetail)
+			{
+				RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build post begin function=" << mFunction->getName());
+				++sBuildDetailLogCount;
+			}
+#endif
 			// Translation of jumps
 			const std::vector<RuntimeOpcode*>& runtimeOpcodePointers = mRuntimeOpcodeBuffer.getOpcodePointers();
 			for (size_t i = 0; i < runtimeOpcodePointers.size(); ++i)
@@ -216,6 +301,13 @@ namespace lemon
 					// Continue the for-loop, in case mNext is yet another jump that can be resolved by a shortcut
 				}
 			}
+#if defined(PLATFORM_WIIU)
+			if (logDetail)
+			{
+				RMX_LOG_INFO("[WiiU Lemon] RuntimeFunction::build post end function=" << mFunction->getName());
+				++sBuildDetailLogCount;
+			}
+#endif
 		}
 
 #if defined(PLATFORM_WIIU)

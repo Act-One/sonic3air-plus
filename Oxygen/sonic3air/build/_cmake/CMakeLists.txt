@@ -74,11 +74,26 @@ if (PLATFORM_WIIU_BUILD)
 	set(S3AIR_WIIU_WUHB_ICON "${S3AIR_WIIU_ASSET_DIR}/wuhb_icon.png")
 	set(S3AIR_WIIU_WUHB_TV_SPLASH "${S3AIR_WIIU_ASSET_DIR}/wuhb_tv.png")
 	set(S3AIR_WIIU_WUHB_DRC_SPLASH "${S3AIR_WIIU_ASSET_DIR}/wuhb_drc.png")
+	set(S3AIR_WIIU_WUHB_BOOT_SOUND "${S3AIR_WIIU_ASSET_DIR}/boot.btsnd")
+	set(S3AIR_WIIU_WUHB_BOOT_SOUND_INJECTOR "${WORKSPACE_DIR}/tools/wiiu_inject_wuhb_bootsound.py")
+	if (NOT S3AIR_WIIU_PYTHON_EXECUTABLE OR S3AIR_WIIU_PYTHON_EXECUTABLE MATCHES "NOTFOUND$")
+		find_program(S3AIR_WIIU_DETECTED_PYTHON NAMES python3 python py py.exe PATHS "C:/Windows" "/c/Windows")
+		if (NOT S3AIR_WIIU_DETECTED_PYTHON)
+			message(FATAL_ERROR "Missing Python for WUHB post-processing")
+		endif()
+		set(S3AIR_WIIU_PYTHON_EXECUTABLE "${S3AIR_WIIU_DETECTED_PYTHON}" CACHE FILEPATH "Python executable for WUHB post-processing" FORCE)
+	endif()
+	get_filename_component(S3AIR_WIIU_PYTHON_NAME "${S3AIR_WIIU_PYTHON_EXECUTABLE}" NAME_WE)
+	if (S3AIR_WIIU_PYTHON_NAME STREQUAL "py" AND NOT DEFINED S3AIR_WIIU_PYTHON_ARGUMENTS)
+		set(S3AIR_WIIU_PYTHON_ARGUMENTS "-3" CACHE STRING "Arguments passed before the WUHB post-processing script")
+	elseif (NOT DEFINED S3AIR_WIIU_PYTHON_ARGUMENTS)
+		set(S3AIR_WIIU_PYTHON_ARGUMENTS "" CACHE STRING "Arguments passed before the WUHB post-processing script")
+	endif()
 
 	if (NOT EXISTS "${S3AIR_WIIU_GLSLCOMPILER_RPL}")
 		message(FATAL_ERROR "Missing CafeGLSL glslcompiler.rpl: ${S3AIR_WIIU_GLSLCOMPILER_RPL}")
 	endif()
-	foreach(required_asset "${S3AIR_WIIU_WUHB_ICON}" "${S3AIR_WIIU_WUHB_TV_SPLASH}" "${S3AIR_WIIU_WUHB_DRC_SPLASH}")
+	foreach(required_asset "${S3AIR_WIIU_WUHB_ICON}" "${S3AIR_WIIU_WUHB_TV_SPLASH}" "${S3AIR_WIIU_WUHB_DRC_SPLASH}" "${S3AIR_WIIU_WUHB_BOOT_SOUND}" "${S3AIR_WIIU_WUHB_BOOT_SOUND_INJECTOR}")
 		if (NOT EXISTS "${required_asset}")
 			message(FATAL_ERROR "Missing Wii U WUHB asset: ${required_asset}")
 		endif()
@@ -87,6 +102,7 @@ if (PLATFORM_WIIU_BUILD)
 	add_custom_target(wiiu_layout ALL
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${S3AIR_WIIU_WUHB_CONTENT_DIR}"
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${S3AIR_WIIU_SD_APP_DIR}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${S3AIR_WIIU_SD_APP_DIR}/data"
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${S3AIR_WIIU_SD_LIB_DIR}"
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${S3AIR_WIIU_BARE_CODE_DIR}"
 		COMMAND ${CMAKE_COMMAND} -E rm -f "${S3AIR_WIIU_WUHB_CONTENT_DIR}/glslcompiler.rpl"
@@ -95,9 +111,10 @@ if (PLATFORM_WIIU_BUILD)
 		COMMAND ${CMAKE_COMMAND} -E rm -rf "${S3AIR_WIIU_SD_APP_DIR}/content"
 		COMMAND ${CMAKE_COMMAND} -E rm -rf "${S3AIR_WIIU_SD_APP_DIR}/scripts"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${WORKSPACE_DIR}/Oxygen/sonic3air/scripts" "${S3AIR_WIIU_SD_APP_DIR}/scripts"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WORKSPACE_DIR}/Oxygen/sonic3air/saves/scripts.bin" "${S3AIR_WIIU_SD_APP_DIR}/data/scripts.bin"
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${S3AIR_WIIU_GLSLCOMPILER_RPL}" "${S3AIR_WIIU_SD_LIB_DIR}/glslcompiler.rpl"
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${S3AIR_WIIU_GLSLCOMPILER_RPL}" "${S3AIR_WIIU_BARE_CODE_DIR}/glslcompiler.rpl"
-		DEPENDS "${S3AIR_WIIU_GLSLCOMPILER_RPL}"
+		DEPENDS "${S3AIR_WIIU_GLSLCOMPILER_RPL}" "${WORKSPACE_DIR}/Oxygen/sonic3air/saves/scripts.bin"
 		COMMENT "Staging glslcompiler.rpl for CafeGLSL"
 		VERBATIM
 	)
@@ -108,7 +125,7 @@ option(S3AIR_WIIU_BUILD_GX2GL_COMPAT "Build the legacy gx2gl/OpenGL compatibilit
 option(S3AIR_WIIU_BUILD_GX2VK "Build gx2vk alongside native GX2 for Wii U renderer experiments" OFF)
 option(S3AIR_WIIU_ENABLE_GX2VK_RENDERER "Enable Sonic 3 A.I.R.'s Vulkan renderer on Wii U through gx2vk" OFF)
 set(S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL "3" CACHE STRING "Forced LemonScript optimization level for Wii U builds")
-option(S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT "Disable Wii U LemonScript nativized provider for crash isolation" OFF)
+option(S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT "Disable Wii U LemonScript nativized provider for crash isolation" ON)
 if (PLATFORM_WIIU_BUILD AND (S3AIR_WIIU_BUILD_GX2GL_COMPAT OR S3AIR_WIIU_BUILD_GX2VK OR S3AIR_WIIU_ENABLE_GX2VK_RENDERER))
 	message(FATAL_ERROR "Wii U build is native GX2 only; gx2gl/gx2vk are off.")
 endif()
@@ -530,6 +547,7 @@ if (PLATFORM_WIIU_BUILD)
 		VERBATIM
 	)
 	add_custom_command(TARGET Sonic3AIR_WUHB POST_BUILD
+		COMMAND "${S3AIR_WIIU_PYTHON_EXECUTABLE}" ${S3AIR_WIIU_PYTHON_ARGUMENTS} "${S3AIR_WIIU_WUHB_BOOT_SOUND_INJECTOR}" "${CMAKE_CURRENT_BINARY_DIR}/sonic3air.wuhb" "${S3AIR_WIIU_WUHB_BOOT_SOUND}"
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/sonic3air.wuhb" "${S3AIR_WIIU_SD_APP_DIR}/sonic3air.wuhb"
 		VERBATIM
 	)
@@ -541,4 +559,3 @@ if (PLATFORM_WIIU_BUILD)
 		endif()
 	endforeach()
 endif()
-

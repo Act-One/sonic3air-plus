@@ -48,6 +48,10 @@ public:
 	uint32 getScreenHeight() const;
 	Vec2i getScreenSize() const;
 	Recti getScreenRect() const;
+#if defined(PLATFORM_WIIU)
+	Vec2i getScanoutSize() const;
+	Recti getScanoutRect() const;
+#endif
 
 	void setScreenSize(uint32 width, uint32 height);
 	inline void setScreenSize(Vec2i size)	{ setScreenSize(size.x, size.y); }
@@ -64,7 +68,8 @@ public:
 	bool updateGameScreen();
 #if defined(PLATFORM_WIIU)
 	bool updateGameScreenOnCurrentTarget(const Recti& targetRect);
-	void drawGameScreenOnCurrentTarget(const Recti& targetRect);
+	bool canDrawGameScreenOnCurrentTarget() const;
+	bool drawGameScreenOnCurrentTarget(const Recti& targetRect);
 #endif
 	void blurGameScreen();
 
