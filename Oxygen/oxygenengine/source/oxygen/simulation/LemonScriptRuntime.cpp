@@ -171,13 +171,16 @@ void LemonScriptRuntime::onProgramUpdated()
 	// Reset the lookup table for address hook runtime functions
 	mInternal.mAddressHookLookup.clear();
 
-	// Build all runtime functions right away
+	// Build all runtime functions right away. Wii keeps nativized opcode execution enabled,
+	// but builds runtime buffers lazily to avoid burning the small MEM1 budget at startup.
+#if !defined(S3AIR_WII_LOW_MEMORY_PROFILE)
 #if defined(PLATFORM_WIIU)
 	wiiuLemonTrace("onProgramUpdated: buildAllRuntimeFunctions begin");
 #endif
 	mInternal.mRuntime.buildAllRuntimeFunctions();
 #if defined(PLATFORM_WIIU)
 	WIIU_LEMON_TRACE_LOG("[WiiU Lemon] onProgramUpdated: buildAllRuntimeFunctions end canExecute=" << mInternal.mRuntime.canExecuteSteps());
+#endif
 #endif
 }
 

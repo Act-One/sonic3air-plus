@@ -21,7 +21,7 @@
 
 // OpenGL support master switch
 //  -> Can be disabled for platforms where OpenGL does not work
-#if !defined(PLATFORM_UWP) && !defined(PLATFORM_WIIU)
+#if !defined(PLATFORM_UWP) && !defined(PLATFORM_WII) && !defined(PLATFORM_WIIU)
 	#define RMX_WITH_OPENGL_SUPPORT
 #endif
 // Disabled OpenGL on UWP so we can use d3d11 instead when the time comes i guess

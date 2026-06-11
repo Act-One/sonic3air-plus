@@ -301,6 +301,25 @@ namespace lemon
 					// Continue the for-loop, in case mNext is yet another jump that can be resolved by a shortcut
 				}
 			}
+
+#if defined(PLATFORM_WII)
+			if (!runtimeOpcodePointers.empty())
+			{
+				const uint8* bufferStart = mRuntimeOpcodeBuffer.getStart();
+				const uint8* bufferEnd = mRuntimeOpcodeBuffer.getEnd();
+				for (size_t i = 0; i + 1 < runtimeOpcodePointers.size(); ++i)
+				{
+					RuntimeOpcode& runtimeOpcode = *runtimeOpcodePointers[i];
+					const uint8* next = reinterpret_cast<const uint8*>(runtimeOpcode.mNext);
+					if (nullptr != bufferStart && bufferStart < bufferEnd && (next < bufferStart || next >= bufferEnd))
+					{
+						const uint8* fallback = reinterpret_cast<const uint8*>(&runtimeOpcode) + runtimeOpcode.mSize;
+						if (runtimeOpcode.mSize > 0 && fallback >= bufferStart && fallback < bufferEnd)
+							runtimeOpcode.mNext = reinterpret_cast<RuntimeOpcode*>(const_cast<uint8*>(fallback));
+					}
+				}
+			}
+#endif
 #if defined(PLATFORM_WIIU)
 			if (logDetail)
 			{

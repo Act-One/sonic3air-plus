@@ -320,59 +320,70 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 	if constexpr (ENABLE_GX2_RENDERER_FRAME_LOGS)
 	{
 		static uint32 sDirectSummaryLogCount = 0;
-		if (sDirectSummaryLogCount < 12)
+		static uint64 sLastDirectSignature = UINT64_MAX;
+		uint32 planeCount = 0;
+		uint32 spriteCount = 0;
+		uint32 vdpSpriteCount = 0;
+		uint32 paletteSpriteCount = 0;
+		uint32 componentSpriteCount = 0;
+		uint32 maskSpriteCount = 0;
+		uint32 rectCount = 0;
+		uint32 texturedRectCount = 0;
+		uint32 blurCount = 0;
+		uint32 viewportCount = 0;
+		uint32 nativeCount = 0;
+		for (const Geometry* geometry : geometries)
 		{
-			uint32 planeCount = 0;
-			uint32 spriteCount = 0;
-			uint32 vdpSpriteCount = 0;
-			uint32 paletteSpriteCount = 0;
-			uint32 componentSpriteCount = 0;
-			uint32 maskSpriteCount = 0;
-			uint32 rectCount = 0;
-			uint32 texturedRectCount = 0;
-			uint32 blurCount = 0;
-			uint32 viewportCount = 0;
-			uint32 nativeCount = 0;
-			for (const Geometry* geometry : geometries)
+			if (nullptr == geometry)
+				continue;
+			if (supportsNativeGeometry(*geometry))
+				++nativeCount;
+			switch (geometry->getType())
 			{
-				if (nullptr == geometry)
-					continue;
-				if (supportsNativeGeometry(*geometry))
-					++nativeCount;
-				switch (geometry->getType())
+				case Geometry::Type::PLANE:
+					++planeCount;
+					break;
+				case Geometry::Type::SPRITE:
 				{
-					case Geometry::Type::PLANE:
-						++planeCount;
-						break;
-					case Geometry::Type::SPRITE:
+					++spriteCount;
+					switch (geometry->as<SpriteGeometry>().mSpriteInfo.getType())
 					{
-						++spriteCount;
-						switch (geometry->as<SpriteGeometry>().mSpriteInfo.getType())
-						{
-							case RenderItem::Type::VDP_SPRITE:		++vdpSpriteCount; break;
-							case RenderItem::Type::PALETTE_SPRITE:	++paletteSpriteCount; break;
-							case RenderItem::Type::COMPONENT_SPRITE:	++componentSpriteCount; break;
-							case RenderItem::Type::SPRITE_MASK:		++maskSpriteCount; break;
-							default: break;
-						}
-						break;
+						case RenderItem::Type::VDP_SPRITE:		++vdpSpriteCount; break;
+						case RenderItem::Type::PALETTE_SPRITE:	++paletteSpriteCount; break;
+						case RenderItem::Type::COMPONENT_SPRITE:	++componentSpriteCount; break;
+						case RenderItem::Type::SPRITE_MASK:		++maskSpriteCount; break;
+						default: break;
 					}
-					case Geometry::Type::RECT:
-						++rectCount;
-						break;
-					case Geometry::Type::TEXTURED_RECT:
-						++texturedRectCount;
-						break;
-					case Geometry::Type::EFFECT_BLUR:
-						++blurCount;
-						break;
-					case Geometry::Type::VIEWPORT:
-						++viewportCount;
-						break;
-					default:
-						break;
+					break;
 				}
+				case Geometry::Type::RECT:
+					++rectCount;
+					break;
+				case Geometry::Type::TEXTURED_RECT:
+					++texturedRectCount;
+					break;
+				case Geometry::Type::EFFECT_BLUR:
+					++blurCount;
+					break;
+				case Geometry::Type::VIEWPORT:
+					++viewportCount;
+					break;
+				default:
+					break;
 			}
+		}
+		const uint64 signature =
+			((uint64)geometries.size() & 0xffu)
+			| ((uint64)planeCount << 8)
+			| ((uint64)spriteCount << 16)
+			| ((uint64)paletteSpriteCount << 24)
+			| ((uint64)componentSpriteCount << 32)
+			| ((uint64)maskSpriteCount << 40)
+			| ((uint64)rectCount << 48)
+			| ((uint64)texturedRectCount << 56);
+		if (sDirectSummaryLogCount < 12 || (signature != sLastDirectSignature && sDirectSummaryLogCount < 64))
+		{
+			sLastDirectSignature = signature;
 			RMX_LOG_INFO("GX2Renderer: direct frame geometries=" << geometries.size()
 				<< " native=" << nativeCount
 				<< " planes=" << planeCount
@@ -464,7 +475,7 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 
 bool GX2Renderer::canDrawPresentedGameScreenToCurrentTarget() const
 {
-	return true;
+	return mCurrentTargetAlreadyHasNativeFrame || mNativeRenderTargetReady;
 }
 
 bool GX2Renderer::drawPresentedGameScreenToCurrentTarget(const Recti& targetRect)
@@ -476,7 +487,7 @@ bool GX2Renderer::drawPresentedGameScreenToCurrentTarget(const Recti& targetRect
 	}
 
 	DrawerTexture* texture = &mGameScreenTexture;
-	if (nullptr == texture)
+	if (nullptr == texture || !mNativeRenderTargetReady)
 		return false;
 
 	static bool sLoggedLateGameDraw = false;
@@ -622,12 +633,27 @@ void GX2Renderer::renderNativeGameScreen(const std::vector<Geometry*>& geometrie
 		beginNativeBlurProcessingTarget(drawer, false, viewport);
 	}
 
+	const bool usingSpriteMask = isUsingSpriteMask(geometries);
 	bool scissorActive = false;
+	uint16 lastRenderQueue = 0xffff;
 	for (const Geometry* geometry : geometries)
 	{
 		if (nullptr != geometry)
 		{
+			const uint16 renderQueue = geometry->mRenderQueue;
+			if (usingSpriteMask && lastRenderQueue < 0x8000 && renderQueue >= 0x8000)
+			{
+				if (scissorActive)
+				{
+					drawer.popScissor();
+					scissorActive = false;
+				}
+				drawer.performRendering();
+				resetNativeQueuedState();
+				copyNativeGameScreenToProcessingTexture(viewport);
+			}
 			drawNativeGeometry(*geometry, scissorActive);
+			lastRenderQueue = renderQueue;
 		}
 	}
 	if (scissorActive)

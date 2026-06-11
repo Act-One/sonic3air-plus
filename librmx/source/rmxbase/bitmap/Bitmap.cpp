@@ -174,7 +174,7 @@ void Bitmap::clearAlpha(uint8 alpha)
 	if (nullptr == mData)
 		return;
 
-	uint8* dst = (uint8*)mData + 3;
+	uint8* dst = (uint8*)mData + ABGR32_BYTE_A;
 	uint8* end = dst + getPixelCount() * 4;
 	for (; dst < end; dst += 4)
 	{
@@ -299,8 +299,14 @@ uint8* Bitmap::convert(ColorFormat format, int& size, uint32* palette)
 		{
 			size *= 3;
 			output = new uint8[size];
+			const uint8* src = (const uint8*)mData;
 			for (int i = 0; i < pixels; ++i)
-				memcpy(&output[i*3], &mData[i], 3);
+			{
+				const uint8* pixel = src + i * 4;
+				output[i*3]     = pixel[ABGR32_BYTE_R];
+				output[i*3 + 1] = pixel[ABGR32_BYTE_G];
+				output[i*3 + 2] = pixel[ABGR32_BYTE_B];
+			}
 			return output;
 		}
 
@@ -599,18 +605,21 @@ void Bitmap::gaussianBlur(const Bitmap& source, float sigma)
 			int min_j = (z >= size)     ? -size : -z;
 			int max_j = (z < maxz-size) ? +size : maxz-z-1;
 			for (int j = min_j; j <= max_j; ++j)
-				factors_alpha[size+j] = factors[size+j] * (float)(src[j*swid+3]) / 255.0f;
-			for (int c = 0; c < 4; ++c)
+				factors_alpha[size+j] = factors[size+j] * (float)(src[j*swid + ABGR32_BYTE_A]) / 255.0f;
+
+			static const int CHANNELS[4] = { ABGR32_BYTE_R, ABGR32_BYTE_G, ABGR32_BYTE_B, ABGR32_BYTE_A };
+			for (int channelIndex = 0; channelIndex < 4; ++channelIndex)
 			{
+				const int c = CHANNELS[channelIndex];
 				float value = 0.0f;
 				float sum = 0.0f;
-				const float* factor = (c < 3) ? &factors_alpha[size] : &factors[size];
+				const float* factor = (c == ABGR32_BYTE_A) ? &factors[size] : &factors_alpha[size];
 				for (int j = min_j; j <= max_j; ++j)
 				{
 					value += factor[j] * (float)src[j*swid+c];
 					sum += factor[j];
 				}
-				dst[c] = (uint8)(value / sum + 0.5f);
+				dst[c] = (sum > 0.0f) ? (uint8)(value / sum + 0.5f) : 0;
 			}
 			src += 4;
 			dst += 4;

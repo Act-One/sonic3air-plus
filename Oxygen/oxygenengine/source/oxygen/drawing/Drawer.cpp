@@ -68,6 +68,15 @@ Drawer::Type Drawer::getType() const
 
 void Drawer::destroyDrawer()
 {
+#if defined(PLATFORM_WIIU)
+	if (nullptr != FTX::System && FTX::System->isWiiUProcUIExitRequested())
+	{
+		RMX_LOG_INFO("Drawer: leaving active drawer and textures for ProcUI process teardown");
+		mActiveDrawer = nullptr;
+		return;
+	}
+#endif
+
 	// Invalidate drawer textures
 	for (DrawerTexture* texture : mDrawerTextures)
 	{

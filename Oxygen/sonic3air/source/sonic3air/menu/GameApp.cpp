@@ -209,6 +209,7 @@ void GameApp::render()
 
 void GameApp::onStartGame()
 {
+	mGameMenuManager->forceRemoveAll();
 	mCurrentState = State::INGAME;
 	mRemoveChild = mMenuBackground;
 	mGameView->setFadedIn();

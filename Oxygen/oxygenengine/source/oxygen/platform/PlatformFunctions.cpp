@@ -19,11 +19,18 @@
 #elif defined(PLATFORM_UWP)
 	#include <winrt/Windows.ApplicationModel.h>
 	#include <winrt/Windows.Storage.h>
-#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MAC) || defined(PLATFORM_ANDROID) || defined(PLATFORM_WIIU) || defined(PLATFORM_SWITCH) || defined(PLATFORM_IOS) || defined(PLATFORM_VITA)
+#elif defined(PLATFORM_LINUX) || defined(PLATFORM_MAC) || defined(PLATFORM_ANDROID) || defined(PLATFORM_WII) || defined(PLATFORM_WIIU) || defined(PLATFORM_SWITCH) || defined(PLATFORM_IOS) || defined(PLATFORM_VITA)
 	#include <stdlib.h>
 	#include <unistd.h>
 	#include <sys/types.h>
 	#include <pwd.h>
+#endif
+#if defined(PLATFORM_WII)
+	#include <fat.h>
+	#include <ogc/system.h>
+	#include <sdcard/wiisd_io.h>
+	#include <errno.h>
+	#include <cstdio>
 #endif
 #ifdef PLATFORM_WEB
 	#include <emscripten.h>
@@ -340,6 +347,11 @@ void PlatformFunctions::changeWorkingDirectory(std::wstring_view executableCallP
 		const std::wstring path = std::wstring(executableCallPath.substr(0, slashPos + 1));
 		rmx::FileSystem::setCurrentDirectory(path);
 	}
+#elif defined(PLATFORM_WII)
+	(void)executableCallPath;
+	SYS_Report("[S3AIR Wii] chdir(sd:/apps/sonic3air) begin\n");
+	const int result = chdir("sd:/apps/sonic3air");
+	SYS_Report("[S3AIR Wii] chdir(sd:/apps/sonic3air) result=%d errno=%d\n", result, errno);
 #elif defined(PLATFORM_WIIU)
 	(void)executableCallPath;
 	rmx::FileSystem::setCurrentDirectory(L"/vol/external01/wiiu/apps/sonic3air/");
@@ -351,6 +363,22 @@ void PlatformFunctions::onEngineStartup()
 #if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
 	// Handle DPI scaling by Windows
 	SetProcessDPIAware();
+#elif defined(PLATFORM_WII)
+	static bool sFatInitialized = false;
+	if (!sFatInitialized)
+	{
+		SYS_Report("[S3AIR Wii] fatInitDefault begin\n");
+		std::printf("[S3AIR Wii] fatInitDefault begin\n");
+		std::fflush(stdout);
+		sFatInitialized = fatInitDefault();
+		SYS_Report("[S3AIR Wii] fatInitDefault result=%d\n", sFatInitialized ? 1 : 0);
+		std::printf("[S3AIR Wii] fatInitDefault result=%d\n", sFatInitialized ? 1 : 0);
+		std::fflush(stdout);
+		if (!sFatInitialized)
+		{
+			RMX_LOG_WARNING("Wii SD mount failed; sd:/ paths will not be available");
+		}
+	}
 #endif
 }
 
@@ -398,6 +426,8 @@ std::wstring PlatformFunctions::getAppDataPath()
 	}
 #elif defined(PLATFORM_MAC) || defined(PLATFORM_IOS)
 	return mExAppDataPath;
+#elif defined(PLATFORM_WII)
+	return L"sd:/apps/sonic3air";
 #elif defined(PLATFORM_WIIU)
 	return L"/vol/external01/wiiu/apps/sonic3air";
 #endif

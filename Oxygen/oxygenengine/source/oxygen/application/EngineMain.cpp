@@ -23,6 +23,9 @@
 #include "oxygen/drawing/opengl/OpenGLDrawer.h"
 #include "oxygen/drawing/software/SoftwareDrawer.h"
 // shit, there's alot of rendering options here to manage
+#if defined(PLATFORM_WII)
+#include "oxygen/drawing/gx/GXDrawer.h"
+#endif
 #if defined(PLATFORM_WIIU)
 #include "oxygen/drawing/gx2/GX2Drawer.h"
 #endif
@@ -56,6 +59,14 @@
 
 #include <filesystem>
 
+#if defined(PLATFORM_WII)
+	#include <ogc/system.h>
+	#include <cstdio>
+	#define S3AIR_WII_ENGINE_REPORT(message) do { SYS_Report("[S3AIR Wii] %s\n", message); std::printf("[S3AIR Wii] %s\n", message); std::fflush(stdout); } while (false)
+#else
+	#define S3AIR_WII_ENGINE_REPORT(message) do {} while (false)
+#endif
+
 
 #if (defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)) || defined(PLATFORM_LINUX)
 	#define LOAD_APP_ICON_PNG
@@ -77,7 +88,12 @@ namespace
 		}
 	}
 
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII)
+	void setVideoConfigToTVDrawableSize(rmx::VideoConfig& videoConfig)
+	{
+		videoConfig.mWindowRect.set(0, 0, 640, 480);
+	}
+#elif defined(PLATFORM_WIIU)
 	void setVideoConfigToTVDrawableSize(rmx::VideoConfig& videoConfig)
 	{
 		videoConfig.mWindowRect.set(0, 0, 1280, 720);
@@ -143,6 +159,7 @@ EngineMain::~EngineMain()
 
 void EngineMain::execute()
 {
+	S3AIR_WII_ENGINE_REPORT("EngineMain execute begin");
 #if defined(PLATFORM_WIIU)
 	RMX_LOG_INFO("EngineMain execute: begin");
 #endif
@@ -152,6 +169,16 @@ void EngineMain::execute()
 		// Enter the application run loop
 		run();
 	}
+
+#if defined(PLATFORM_WIIU)
+	if (nullptr != FTX::System && FTX::System->isWiiUProcUIExitRequested())
+	{
+		RMX_LOG_INFO("EngineMain execute: ProcUI fast exit begin");
+		FTX::System->exit();
+		RMX_LOG_INFO("EngineMain execute: ProcUI fast exit complete");
+		return;
+	}
+#endif
 
 	// Done, now shut everything down
 	shutdown();
@@ -306,6 +333,7 @@ Vec2i EngineMain::getDisplaySize(int displayIndex) const
 
 bool EngineMain::startupEngine()
 {
+	S3AIR_WII_ENGINE_REPORT("startupEngine begin");
 #if defined(PLATFORM_ANDROID)
 	{
 		// Create file provider for APK content access (and do it right here already)
@@ -316,9 +344,11 @@ bool EngineMain::startupEngine()
 #endif
 
 	PlatformFunctions::onEngineStartup();
+	S3AIR_WII_ENGINE_REPORT("platform functions startup complete");
 
 	if (!mDelegate.onEnginePreStartup())
 		return false;
+	S3AIR_WII_ENGINE_REPORT("delegate pre-startup complete");
 
 	const EngineDelegateInterface::AppMetaData& appMetaData = mDelegate.getAppMetaData();
 	Configuration& config = Configuration::instance();
@@ -331,11 +361,15 @@ bool EngineMain::startupEngine()
 	SDL_DisableScreenSaver();
 
 	// Determine various directory and file paths in config
+	S3AIR_WII_ENGINE_REPORT("init directories begin");
 	initDirectories();
+	S3AIR_WII_ENGINE_REPORT("init directories complete");
 
 	// Startup logging
 	{
+		S3AIR_WII_ENGINE_REPORT("logging startup begin");
 		oxygen::Logging::startup(config.mAppDataPath + L"logfile.txt");
+		S3AIR_WII_ENGINE_REPORT("logging startup complete");
 		RMX_LOG_INFO("--- STARTUP ---");
 		RMX_LOG_INFO("Logging started");
 		RMX_LOG_INFO("Application version: " << appMetaData.mBuildVersionString);
@@ -344,56 +378,77 @@ bool EngineMain::startupEngine()
 	}
 
 	// Load configuration and settings
+	S3AIR_WII_ENGINE_REPORT("config/settings begin");
 	if (!initConfigAndSettings())
 		return false;
+	S3AIR_WII_ENGINE_REPORT("config/settings complete");
 
 	// Setup file system
 	RMX_LOG_INFO("File system setup");
+	S3AIR_WII_ENGINE_REPORT("filesystem setup begin");
 	if (!initFileSystem())
 		return false;
+	S3AIR_WII_ENGINE_REPORT("filesystem setup complete");
 
 	// System
 	RMX_LOG_INFO("System initialization...");
+	S3AIR_WII_ENGINE_REPORT("system initialization begin");
 	if (!FTX::System->initialize())
 	{
 		RMX_ERROR("System initialization failed", );
 		return false;
 	}
+	S3AIR_WII_ENGINE_REPORT("system initialization complete");
 
 	// Input
 	RMX_LOG_INFO("Input initialization...");
+	S3AIR_WII_ENGINE_REPORT("input startup begin");
 	InputManager::instance().startup();
+	S3AIR_WII_ENGINE_REPORT("input startup complete");
 
 	// Video
 	RMX_LOG_INFO("Video initialization...");
+	S3AIR_WII_ENGINE_REPORT("create window begin");
 	if (!createWindow())
 	{
 		RMX_ERROR("Unable to create window" << (config.mFailSafeMode ? " in fail-safe mode" : "") << " with error: " << SDL_GetError(), );
 		return false;
 	}
+	S3AIR_WII_ENGINE_REPORT("create window complete");
 
 	// On UWP, some controller backends only become visible once the app window exists and SDL has pumped window events.
+#if !defined(PLATFORM_WII)
 	SDL_PumpEvents();
 	InputManager::instance().rescanRealDevices(true);
+#endif
 
 	RMX_LOG_INFO("Startup of VideoOut");
+	S3AIR_WII_ENGINE_REPORT("video out startup begin");
 	mInternal.mVideoOut.startup();
+	S3AIR_WII_ENGINE_REPORT("video out startup complete");
 
 	// Audio
 	RMX_LOG_INFO("Audio initialization...");
+	S3AIR_WII_ENGINE_REPORT("audio init begin");
 	FTX::Audio->initialize(config.mAudio.mSampleRate, 2, 1024);
+	S3AIR_WII_ENGINE_REPORT("audio init complete");
 
 	RMX_LOG_INFO("Startup of AudioOut");
+	S3AIR_WII_ENGINE_REPORT("audio out startup begin");
 	mAudioOut = &EngineMain::getDelegate().createAudioOut();
 	mAudioOut->startup();
+	S3AIR_WII_ENGINE_REPORT("audio out startup complete");
 
 	// Networking
 	RMX_LOG_INFO("Networking initialization...");
+	S3AIR_WII_ENGINE_REPORT("network startup begin");
 	const bool useIPv6 = false;
 	mInternal.mEngineServerClient.setupClient(useIPv6);
+	S3AIR_WII_ENGINE_REPORT("network startup complete");
 
 	// Done
 	RMX_LOG_INFO("Engine startup successful");
+	S3AIR_WII_ENGINE_REPORT("startupEngine complete");
 	return true;
 }
 
@@ -517,6 +572,8 @@ void EngineMain::initDirectories()
 		// TODO: Use internal storage path as a fallback?
 		WString storagePath = String(SDL_AndroidGetExternalStoragePath()).toWString();
 		config.mAppDataPath = *(storagePath + L'/');
+	#elif defined(PLATFORM_WII)
+		config.mAppDataPath = PlatformFunctions::getAppDataPath() + L'/';
 	#elif defined(PLATFORM_VITA)
 		// Vita
 		config.mAppDataPath = L"ux0:data/sonic3air/savedata/";
@@ -653,6 +710,13 @@ bool EngineMain::initConfigAndSettings()
 		config.mRenderMethod = Configuration::RenderMethod::GX2_FULL;
 		config.mAutoDetectRenderMethod = false;
 	}
+#elif defined(PLATFORM_WII)
+	if (!config.mFailSafeMode && config.mRenderMethod != Configuration::RenderMethod::GX_FULL)
+	{
+		RMX_LOG_INFO("Wii: forcing native GX renderer over saved '" << Configuration::getRenderMethodConfigString(config.mRenderMethod) << "' setting");
+		config.mRenderMethod = Configuration::RenderMethod::GX_FULL;
+		config.mAutoDetectRenderMethod = false;
+	}
 #endif
 
 #if defined(PLATFORM_ANDROID) || defined(PLATFORM_IOS) || defined(PLATFORM_VITA) || defined(PLATFORM_UWP)
@@ -741,6 +805,7 @@ bool EngineMain::initFileSystem()
 	// Make source scripts visible when running from a source checkout, even if the current working
 	// directory is not the project root. This keeps desktop developer builds from falling back to a
 	// stale compiled scripts.bin just because the scripts/ tree is not mounted yet.
+#if !defined(S3AIR_WII_LOW_MEMORY_PROFILE)
 	{
 		const std::wstring mainScriptPath = config.mScriptsDir + config.mMainScriptName;
 		if (!FTX::FileSystem->exists(mainScriptPath) && std::filesystem::exists(std::filesystem::path(mainScriptPath)))
@@ -750,6 +815,7 @@ bool EngineMain::initFileSystem()
 			FTX::FileSystem->addMountPoint(*provider, L"scripts/", config.mScriptsDir, 0x10);
 		}
 	}
+#endif
 
 	// Create mod data folder (the default mod directory)
 	FTX::FileSystem->createDirectory(config.mGameAppDataPath + L"mods");
@@ -862,6 +928,11 @@ bool EngineMain::createWindow()
 #else
 	const bool useGX2 = false;
 #endif
+#if defined(PLATFORM_WII)
+	const bool useGX = Configuration::isGXRenderMethod(config.mRenderMethod);
+#else
+	const bool useGX = false;
+#endif
 #if defined(PLATFORM_WINDOWS)
 	const bool useDirect3D11 = (config.mRenderMethod == Configuration::RenderMethod::D3D11_FULL);
 #else
@@ -876,7 +947,7 @@ bool EngineMain::createWindow()
 	// Setup video config
 	rmx::VideoConfig videoConfig(config.mWindowMode != Configuration::WindowMode::WINDOWED, config.mWindowSize.x, config.mWindowSize.y, appMetaData.mTitle.c_str());
 	videoConfig.mRenderer = useOpenGL ? rmx::VideoConfig::Renderer::OPENGL : rmx::VideoConfig::Renderer::SOFTWARE;
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 	// Native GX2 presents directly to the TV surface without an SDL GL drawable.
 	setVideoConfigToTVDrawableSize(videoConfig);
 #endif
@@ -949,10 +1020,10 @@ bool EngineMain::createWindow()
 		const int displayIndex = config.mDisplayIndex;
 
 		uint32 flags = 0;
-	#if !defined(PLATFORM_WIIU)
+	#if !defined(PLATFORM_WII) && !defined(PLATFORM_WIIU)
 		if (useOpenGL)
 			flags |= SDL_WINDOW_OPENGL;
-	#else
+	#elif defined(PLATFORM_WIIU)
 		flags |= SDL_WINDOW_WIIU_TV_ONLY | SDL_WINDOW_WIIU_PREVENT_SWAP;
 	#endif
 #if defined(OXYGEN_ENABLE_VULKAN_RENDERER)
@@ -995,11 +1066,20 @@ bool EngineMain::createWindow()
 			}
 		}
 
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 		setVideoConfigToTVDrawableSize(videoConfig);
 #endif
 
 		RMX_LOG_INFO("Creating window...");
+#if defined(PLATFORM_WII)
+		if (useGX)
+		{
+			RMX_LOG_INFO("Using native GX presentation without an SDL video window");
+			mSDLWindow = nullptr;
+			setVideoConfigToTVDrawableSize(videoConfig);
+		}
+		else
+#endif
 #if defined(PLATFORM_WIIU)
 		if (useGX2)
 		{
@@ -1069,8 +1149,17 @@ bool EngineMain::createWindow()
 	else
 #endif
 	{
+#if defined(PLATFORM_WII)
+		if (useGX)
+		{
+			if (!mDrawer.createDrawer<GXDrawer>())
+			{
+				RMX_ERROR("GX drawer setup failed; Wii builds do not support software fallback", return false);
+			}
+		}
+#endif
 #if defined(PLATFORM_WIIU)
-		if (useGX2)
+		if (nullptr == mDrawer.getActiveDrawer() && useGX2)
 		{
 			if (!mDrawer.createDrawer<GX2Drawer>())
 			{
@@ -1104,7 +1193,11 @@ bool EngineMain::createWindow()
 #endif
 		if (nullptr == mDrawer.getActiveDrawer())
 		{
+#if defined(PLATFORM_WII)
+			RMX_ERROR("No native GX drawer was created; Wii builds do not support software fallback", return false);
+#else
 			mDrawer.createDrawer<SoftwareDrawer>();
+#endif
 		}
 	}
 

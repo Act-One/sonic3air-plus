@@ -20,6 +20,9 @@ class D3D11Renderer;
 class VulkanRenderer;
 #endif
 class OpenGLRenderer;
+#if defined(PLATFORM_WII)
+class GXRenderer;
+#endif
 #if defined(PLATFORM_WIIU)
 class GX2Renderer;
 #endif
@@ -48,7 +51,7 @@ public:
 	uint32 getScreenHeight() const;
 	Vec2i getScreenSize() const;
 	Recti getScreenRect() const;
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 	Vec2i getScanoutSize() const;
 	Recti getScanoutRect() const;
 #endif
@@ -66,7 +69,7 @@ public:
 	void setInterFramePosition(float position);
 
 	bool updateGameScreen();
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 	bool updateGameScreenOnCurrentTarget(const Recti& targetRect);
 	bool canDrawGameScreenOnCurrentTarget() const;
 	bool drawGameScreenOnCurrentTarget(const Recti& targetRect);
@@ -95,7 +98,7 @@ private:
 
 	bool updateGameScreenInternal(bool renderToCurrentTarget);
 	void renderGameScreen();
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 	void renderGameScreenToCurrentTarget(const Recti& targetRect);
 #endif
 	void recoverFromRenderStateException(const char* stage);
@@ -128,6 +131,9 @@ private:
 #ifdef RMX_WITH_OPENGL_SUPPORT
 	OpenGLRenderer* mOpenGLRenderer = nullptr;
 #endif
+#if defined(PLATFORM_WII)
+	GXRenderer* mGXRenderer = nullptr;
+#endif
 #if defined(PLATFORM_WIIU)
 	GX2Renderer* mGX2Renderer = nullptr;
 #endif
@@ -137,7 +143,7 @@ private:
 	RenderResources& mRenderResources;
 
 	Vec2i mGameResolution;
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 	Recti mCurrentTargetRect;
 #endif
 	FrameState mFrameState = FrameState::OUTSIDE_FRAME;

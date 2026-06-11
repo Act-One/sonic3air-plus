@@ -26,6 +26,9 @@
 #if defined(PLATFORM_WIIU) && !defined(S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL)
 #define S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL 3
 #endif
+#if defined(PLATFORM_WII) && !defined(S3AIR_WII_FORCED_SCRIPT_OPT_LEVEL)
+#define S3AIR_WII_FORCED_SCRIPT_OPT_LEVEL 3
+#endif
 
 
 struct ModuleAppendedInfo : public lemon::Module::AppendedInfo
@@ -49,6 +52,7 @@ struct LemonScriptProgram::Internal
 	Hook mPreUpdateHook;
 	Hook mPostUpdateHook;
 	LinearLookupTable<Hook, 0x400000, 6, 1024> mAddressHooks;
+	BinaryLoadDebug mLastBinaryLoadDebug;
 
 	inline Internal() :
 		mLemonCoreModule("LemonCore"),
@@ -116,6 +120,11 @@ lemon::Program& LemonScriptProgram::getInternalLemonProgram()
 bool LemonScriptProgram::hasValidProgram() const
 {
 	return !mInternal.mProgram.getModules().empty();
+}
+
+const LemonScriptProgram::BinaryLoadDebug& LemonScriptProgram::getLastBinaryLoadDebug() const
+{
+	return mInternal.mLastBinaryLoadDebug;
 }
 
 LemonScriptProgram::LoadScriptsResult LemonScriptProgram::loadScripts(std::wstring_view baseScriptFilename, const LoadOptions& loadOptions)
@@ -190,6 +199,8 @@ LemonScriptProgram::LoadScriptsResult LemonScriptProgram::loadScripts(std::wstri
 			RMX_LOG_INFO("LemonScript: Wii U forced optimization level " << scriptOptimizationLevel << " functions=" << mInternal.mProgram.getFunctions().size() << " scripts=" << mInternal.mProgram.getScriptFunctions().size());
 			sLoggedWiiUOptimizationLevel = true;
 		}
+	#elif defined(PLATFORM_WII)
+		scriptOptimizationLevel = clamp(S3AIR_WII_FORCED_SCRIPT_OPT_LEVEL, 0, 3);
 	#endif
 		mInternal.mProgram.setOptimizationLevel(scriptOptimizationLevel);
 	}
@@ -317,6 +328,10 @@ LemonScriptProgram::LoadingResult LemonScriptProgram::loadAllScriptModules(const
 		// Load scripts
 		bool scriptsLoaded = false;
 
+#if defined(S3AIR_WII_LOW_MEMORY_PROFILE)
+// Wii doesn't have enough ram to have this luxury, so don't compile on Wii at all.
+		scriptsLoaded = loadBaseScriptFromBinary(globalsLookup, L"data/scripts.bin", coreModuleDependencyHash, loadOptions, false);
+#else
 		if (EngineMain::getDelegate().useDeveloperFeatures())
 		{
 		#ifdef DEBUG
@@ -364,6 +379,7 @@ LemonScriptProgram::LoadingResult LemonScriptProgram::loadAllScriptModules(const
 				scriptsLoaded = loadBaseScriptFromSource(globalsLookup, baseScriptFilename, coreModuleDependencyHash, loadOptions, loadingResult);
 			}
 		}
+#endif
 
 		if (scriptsLoaded)
 		{
@@ -482,10 +498,27 @@ bool LemonScriptProgram::loadBaseScriptFromBinary(lemon::GlobalsLookup& globalsL
 	if (!loaded)
 		return false;
 
+	BinaryLoadDebug& debug = mInternal.mLastBinaryLoadDebug;
+	debug = BinaryLoadDebug();
+	debug.mAttempted = true;
+	debug.mFileLoaded = true;
+	debug.mBytes = (uint32)buffer.size();
+	debug.mExpectedDependencyHash = coreModuleDependencyHash;
+	debug.mExpectedAppVersion = loadOptions.mAppVersion;
+	if (buffer.size() >= 14 && buffer[0] == 'L' && buffer[1] == 'M' && buffer[2] == 'D' && buffer[3] == '|')
+	{
+		debug.mHeaderValid = true;
+		debug.mVersion = (uint16)(buffer[4] | (buffer[5] << 8));
+		debug.mReadDependencyHash = (uint32)buffer[6] | ((uint32)buffer[7] << 8) | ((uint32)buffer[8] << 16) | ((uint32)buffer[9] << 24);
+		debug.mReadAppVersion = (uint32)buffer[10] | ((uint32)buffer[11] << 8) | ((uint32)buffer[12] << 16) | ((uint32)buffer[13] << 24);
+	}
+
 	RMX_LOG_INFO("Loading scripts from binary: " << WString(loadedFilename).toStdString() << " bytes=" << buffer.size());
 
 	VectorBinarySerializer serializer(true, buffer);
 	loaded = mInternal.mScriptModule.serialize(serializer, globalsLookup, coreModuleDependencyHash, loadOptions.mAppVersion);
+	debug.mSerializeSucceeded = loaded;
+	debug.mSerializerError = serializer.hasError();
 	if (!loaded || serializer.hasError())
 	{
 		RMX_LOG_WARNING("Failed to load compiled scripts from '" << WString(loadedFilename).toStdString() << "', falling back");

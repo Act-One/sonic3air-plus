@@ -8,6 +8,8 @@
 
 #include "rmxbase.h"
 
+#include <new>
+
 
 namespace rmx
 {
@@ -36,15 +38,20 @@ namespace rmx
 	#endif
 		if (bytes > mRemainingSize)
 		{
-			RMX_CHECK(bytes <= mPageSize, "Too large memory allocation of " << bytes << " bytes", return nullptr);
+			const size_t pageSize = std::max(bytes, mPageSize);
 
 			// Add a new page
 			Page& page = vectorAdd(mPages);
-			page.mData = new uint8[mPageSize];
-			page.mSize = mPageSize;
+			page.mData = new (std::nothrow) uint8[pageSize];
+			if (nullptr == page.mData)
+			{
+				mPages.pop_back();
+				RMX_CHECK(false, "Failed to allocate one-time memory pool page of " << pageSize << " bytes", return nullptr);
+			}
+			page.mSize = pageSize;
 
 			mNextAllocationPointer = page.mData;
-			mRemainingSize = mPageSize;
+			mRemainingSize = pageSize;
 		}
 
 		uint8* ptr = mNextAllocationPointer;

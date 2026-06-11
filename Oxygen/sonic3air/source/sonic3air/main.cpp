@@ -14,6 +14,53 @@
 
 #include "oxygen/platform/PlatformFunctions.h"
 
+#if defined(PLATFORM_WII)
+#include <gccore.h>
+#include <ogc/system.h>
+#include <cstdio>
+
+namespace
+{
+	void initWiiBootConsole()
+	{
+		static bool sInitialized = false;
+		if (sInitialized)
+			return;
+
+		VIDEO_Init();
+		GXRModeObj* renderMode = VIDEO_GetPreferredMode(nullptr);
+		if (nullptr == renderMode)
+			return;
+
+		void* framebuffer = MEM_K0_TO_K1(SYS_AllocateFramebuffer(renderMode));
+		if (nullptr == framebuffer)
+			return;
+
+		CON_Init(framebuffer, 20, 20, renderMode->fbWidth - 40, renderMode->xfbHeight - 40, renderMode->fbWidth * VI_DISPLAY_PIX_SZ);
+		VIDEO_Configure(renderMode);
+		VIDEO_SetNextFramebuffer(framebuffer);
+		VIDEO_SetBlack(false);
+		VIDEO_Flush();
+		VIDEO_WaitVSync();
+		if (renderMode->viTVMode & VI_NON_INTERLACE)
+			VIDEO_WaitVSync();
+		sInitialized = true;
+	}
+
+	__attribute__((constructor(101))) void earlyWiiBootConsoleConstructor()
+	{
+		initWiiBootConsole();
+		SYS_Report("[S3AIR Wii] early constructor\n");
+		std::printf("[S3AIR Wii] early constructor\n");
+		std::fflush(stdout);
+	}
+}
+
+#define S3AIR_WII_BOOT_REPORT(message) do { SYS_Report("[S3AIR Wii] %s\n", message); std::printf("[S3AIR Wii] %s\n", message); std::fflush(stdout); } while (false)
+#else
+#define S3AIR_WII_BOOT_REPORT(message) do {} while (false)
+#endif
+
 
 // [Added for Switch platform] HJW: I know it's sloppy to put this here... it'll get moved afterwards
 // Building with my env (msys2,gcc) requires this stub for some reason
@@ -46,8 +93,19 @@ extern "C"
 
 int main(int argc, char** argv)
 {
+#if defined(PLATFORM_WII)
+	initWiiBootConsole();
+#endif
+	S3AIR_WII_BOOT_REPORT("main enter");
+#if defined(PLATFORM_WII)
+	S3AIR_WII_BOOT_REPORT("platform fs startup begin");
+	PlatformFunctions::onEngineStartup();
+	S3AIR_WII_BOOT_REPORT("platform fs startup complete");
+#endif
 	EngineMain::earlySetup();
+	S3AIR_WII_BOOT_REPORT("early setup complete");
 	PlatformSpecifics::platformStartup();
+	S3AIR_WII_BOOT_REPORT("platform startup complete");
 
 	GameArgumentsReader arguments;
 
@@ -56,6 +114,7 @@ int main(int argc, char** argv)
 #else
 	// Read command line arguments
 	arguments.read(argc, argv);
+	S3AIR_WII_BOOT_REPORT("arguments read");
 
 	// For certain arguments, just try to forward them to an already running instance of S3AIR
 	if (!arguments.mUrl.empty())
@@ -66,6 +125,7 @@ int main(int argc, char** argv)
 
 	// Make sure we're in the correct working directory
 	PlatformFunctions::changeWorkingDirectory(arguments.mExecutableCallPath);
+	S3AIR_WII_BOOT_REPORT("working directory selected");
 #endif
 
 #if defined(PLATFORM_WINDOWS) && !defined(PLATFORM_UWP)
@@ -89,9 +149,15 @@ int main(int argc, char** argv)
 
 	try
 	{
+		S3AIR_WII_BOOT_REPORT("construct engine");
 		// Create engine delegate and engine main instance
+#if defined(PLATFORM_WIIU)
+		EngineDelegate* myDelegate = new EngineDelegate();
+		EngineMain* myMain = new EngineMain(*myDelegate, arguments);
+#else
 		EngineDelegate myDelegate;
 		EngineMain myMain(myDelegate, arguments);
+#endif
 
 		// Evaluate some more arguments
 		Configuration& config = Configuration::instance();
@@ -108,10 +174,21 @@ int main(int argc, char** argv)
 		}
 
 		// Now run the game
-		myMain.execute();
+		S3AIR_WII_BOOT_REPORT("execute engine");
 #if defined(PLATFORM_WIIU)
+		myMain->execute();
 		RMX_LOG_INFO("main: EngineMain execute returned");
+		if (nullptr != FTX::System && FTX::System->isWiiUProcUIExitRequested())
+		{
+			RMX_LOG_INFO("main: returning 0");
+			_Exit(0);
+		}
+		delete myMain;
+		delete myDelegate;
+#else
+		myMain.execute();
 #endif
+		S3AIR_WII_BOOT_REPORT("engine returned");
 	}
 	catch (const std::exception& e)
 	{

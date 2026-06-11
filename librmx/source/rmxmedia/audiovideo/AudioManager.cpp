@@ -8,6 +8,12 @@
 
 #include "rmxmedia.h"
 
+#if defined(PLATFORM_WII)
+	#include <gccore.h>
+	#include <ogc/audio.h>
+	#include <malloc.h>
+#endif
+
 #if defined(PLATFORM_WIIU)
 #ifndef AUDIO_S16MSB
 #define AUDIO_S16MSB 0x9010
@@ -20,6 +26,9 @@
 
 namespace rmx
 {
+#if defined(PLATFORM_WII)
+	AudioManager* AudioManager::sWiiAudioManager = nullptr;
+#endif
 
 	AudioManager::AudioManager() :
 		mRootMixer(*new AudioMixer(0))	// Root mixer always uses ID 0
@@ -46,6 +55,13 @@ namespace rmx
 		// Reset instances
 		mInstances.clear();
 		mRootMixer.clearAudioInstances();
+
+#if defined(PLATFORM_WII)
+		(void)sample_freq;
+		(void)channels;
+		initializeWiiAudio(audioBufferSamples);
+		return;
+#endif
 
 		RMX_CHECK(SDL_InitSubSystem(SDL_INIT_AUDIO) == 0, "SDL_InitSubSystem(SDL_INIT_AUDIO) failed with error: '" << SDL_GetError() << "'", );
 		const char* audioDriver = SDL_GetCurrentAudioDriver();
@@ -112,12 +128,172 @@ namespace rmx
 
 	void AudioManager::exit()
 	{
+#if defined(PLATFORM_WII)
+		shutdownWiiAudio();
+		return;
+#endif
 		if (mAudioDeviceID != 0)
 		{
 			SDL_CloseAudioDevice(mAudioDeviceID);
 			mAudioDeviceID = 0;
 		}
 	}
+
+#if defined(PLATFORM_WII)
+	void AudioManager::initializeWiiAudio(int audioBufferSamples)
+	{
+		shutdownWiiAudio();
+
+		const int outputSamples = clamp(audioBufferSamples, 256, 2048);
+		const int outputChannels = 2;
+
+		mFormat.freq = 48000;
+		mFormat.format = AUDIO_S16SYS;
+		mFormat.channels = (uint8)outputChannels;
+		mFormat.samples = (uint16)outputSamples;
+		mFormat.callback = nullptr;
+		mFormat.userdata = nullptr;
+
+		mWiiAudioBufferBytes = (uint32)(outputSamples * outputChannels * (int)sizeof(short));
+		mWiiAudioBufferBytes = (mWiiAudioBufferBytes + 31) & ~31;
+
+		for (int i = 0; i < WII_AUDIO_BUFFER_COUNT; ++i)
+		{
+			mWiiAudioBuffers[i] = memalign(32, mWiiAudioBufferBytes);
+			RMX_CHECK(nullptr != mWiiAudioBuffers[i], "Failed to allocate Wii audio DMA buffer", shutdownWiiAudio(); return);
+			memset(mWiiAudioBuffers[i], 0, mWiiAudioBufferBytes);
+			DCFlushRange(mWiiAudioBuffers[i], mWiiAudioBufferBytes);
+			mWiiAudioBufferStates[i] = (uint8)WiiAudioBufferState::EMPTY;
+		}
+
+		mWiiAudioSilenceBuffer = memalign(32, mWiiAudioBufferBytes);
+		RMX_CHECK(nullptr != mWiiAudioSilenceBuffer, "Failed to allocate Wii audio silence buffer", shutdownWiiAudio(); return);
+		memset(mWiiAudioSilenceBuffer, 0, mWiiAudioBufferBytes);
+		DCFlushRange(mWiiAudioSilenceBuffer, mWiiAudioBufferBytes);
+
+		AUDIO_Init(nullptr);
+		AUDIO_SetDSPSampleRate(AI_SAMPLERATE_48KHZ);
+		sWiiAudioManager = this;
+		AUDIO_RegisterDMACallback(&AudioManager::wiiAudioDmaCallbackStatic);
+
+		mPlayedSamples = 0;
+		mWiiAudioSearchIndex = 0;
+		mWiiAudioLastQueuedBuffer = -1;
+		mWiiAudioInitialized = true;
+		mWiiAudioPaused = true;
+		mWiiAudioRunning = false;
+
+		RMX_LOG_INFO("AudioManager: initialized raw Wii audio backend at 48000 Hz, stereo, "
+			<< outputSamples << " samples/buffer");
+		playAudio(true);
+	}
+
+	void AudioManager::shutdownWiiAudio()
+	{
+		if (mWiiAudioInitialized || mWiiAudioRunning)
+		{
+			AUDIO_StopDMA();
+			AUDIO_RegisterDMACallback(nullptr);
+		}
+
+		if (sWiiAudioManager == this)
+			sWiiAudioManager = nullptr;
+
+		for (int i = 0; i < WII_AUDIO_BUFFER_COUNT; ++i)
+		{
+			if (nullptr != mWiiAudioBuffers[i])
+			{
+				free(mWiiAudioBuffers[i]);
+				mWiiAudioBuffers[i] = nullptr;
+			}
+			mWiiAudioBufferStates[i] = (uint8)WiiAudioBufferState::EMPTY;
+		}
+
+		if (nullptr != mWiiAudioSilenceBuffer)
+		{
+			free(mWiiAudioSilenceBuffer);
+			mWiiAudioSilenceBuffer = nullptr;
+		}
+
+		mWiiAudioBufferBytes = 0;
+		mWiiAudioSearchIndex = 0;
+		mWiiAudioLastQueuedBuffer = -1;
+		mWiiAudioInitialized = false;
+		mWiiAudioRunning = false;
+		mWiiAudioPaused = true;
+	}
+
+	void AudioManager::fillWiiAudioBuffers()
+	{
+		if (!mWiiAudioInitialized || mWiiAudioPaused)
+			return;
+
+		for (int i = 0; i < WII_AUDIO_BUFFER_COUNT; ++i)
+		{
+			if (mWiiAudioBufferStates[i] != (uint8)WiiAudioBufferState::EMPTY)
+				continue;
+
+			mWiiAudioBufferStates[i] = (uint8)WiiAudioBufferState::FILLING;
+			mixAudio(static_cast<uint8*>(mWiiAudioBuffers[i]), (int)mWiiAudioBufferBytes);
+			DCFlushRange(mWiiAudioBuffers[i], mWiiAudioBufferBytes);
+			mWiiAudioBufferStates[i] = (uint8)WiiAudioBufferState::READY;
+		}
+	}
+
+	void AudioManager::silenceWiiAudioBuffers()
+	{
+		if (!mWiiAudioInitialized)
+			return;
+
+		for (int i = 0; i < WII_AUDIO_BUFFER_COUNT; ++i)
+		{
+			if (mWiiAudioBufferStates[i] == (uint8)WiiAudioBufferState::QUEUED)
+				continue;
+
+			mWiiAudioBufferStates[i] = (uint8)WiiAudioBufferState::FILLING;
+			memset(mWiiAudioBuffers[i], 0, mWiiAudioBufferBytes);
+			DCFlushRange(mWiiAudioBuffers[i], mWiiAudioBufferBytes);
+			mWiiAudioBufferStates[i] = (uint8)WiiAudioBufferState::READY;
+		}
+	}
+
+	void AudioManager::wiiAudioDmaCallbackStatic()
+	{
+		if (nullptr != sWiiAudioManager)
+			sWiiAudioManager->wiiAudioDmaCallback();
+	}
+
+	void AudioManager::wiiAudioDmaCallback()
+	{
+		if (!mWiiAudioInitialized || nullptr == mWiiAudioSilenceBuffer || mWiiAudioBufferBytes == 0)
+			return;
+
+		if (mWiiAudioLastQueuedBuffer >= 0)
+		{
+			mWiiAudioBufferStates[mWiiAudioLastQueuedBuffer] = (uint8)WiiAudioBufferState::EMPTY;
+			mWiiAudioLastQueuedBuffer = -1;
+		}
+
+		void* nextBuffer = mWiiAudioSilenceBuffer;
+		if (!mWiiAudioPaused)
+		{
+			for (int i = 0; i < WII_AUDIO_BUFFER_COUNT; ++i)
+			{
+				const int index = (mWiiAudioSearchIndex + i) % WII_AUDIO_BUFFER_COUNT;
+				if (mWiiAudioBufferStates[index] == (uint8)WiiAudioBufferState::READY)
+				{
+					mWiiAudioBufferStates[index] = (uint8)WiiAudioBufferState::QUEUED;
+					mWiiAudioSearchIndex = (index + 1) % WII_AUDIO_BUFFER_COUNT;
+					mWiiAudioLastQueuedBuffer = index;
+					nextBuffer = mWiiAudioBuffers[index];
+					break;
+				}
+			}
+		}
+
+		AUDIO_InitDMA((u32)nextBuffer, mWiiAudioBufferBytes);
+	}
+#endif
 
 	void AudioManager::clear()
 	{
@@ -132,11 +308,42 @@ namespace rmx
 
 			mInstances.clear();
 			++mChangeCounter;
+
+		#if defined(PLATFORM_WII)
+			silenceWiiAudioBuffers();
+		#endif
 		}
 	}
 
 	void AudioManager::playAudio(bool onoff)
 	{
+#if defined(PLATFORM_WII)
+		if (!mWiiAudioInitialized)
+			return;
+
+		if (!onoff)
+		{
+			AUDIO_StopDMA();
+			mWiiAudioRunning = false;
+			mWiiAudioPaused = true;
+			if (mWiiAudioLastQueuedBuffer >= 0)
+			{
+				mWiiAudioBufferStates[mWiiAudioLastQueuedBuffer] = (uint8)WiiAudioBufferState::EMPTY;
+				mWiiAudioLastQueuedBuffer = -1;
+			}
+			return;
+		}
+
+		mWiiAudioPaused = false;
+		fillWiiAudioBuffers();
+		if (!mWiiAudioRunning)
+		{
+			wiiAudioDmaCallback();
+			AUDIO_StartDMA();
+			mWiiAudioRunning = true;
+		}
+		return;
+#endif
 		if (mAudioDeviceID == 0)
 			return;
 		SDL_PauseAudioDevice(mAudioDeviceID, onoff ? 0 : 1);
@@ -144,6 +351,9 @@ namespace rmx
 
 	bool AudioManager::getAudioState()
 	{
+#if defined(PLATFORM_WII)
+		return (mWiiAudioInitialized && mWiiAudioRunning && !mWiiAudioPaused);
+#endif
 		return (mAudioDeviceID != 0 && SDL_GetAudioDeviceStatus(mAudioDeviceID) == SDL_AUDIO_PLAYING);
 	}
 
@@ -221,6 +431,10 @@ namespace rmx
 
 			unlockAudio();
 		}
+
+	#if defined(PLATFORM_WII)
+		fillWiiAudioBuffers();
+	#endif
 	}
 
 	void AudioManager::setGlobalVolume(float volume)

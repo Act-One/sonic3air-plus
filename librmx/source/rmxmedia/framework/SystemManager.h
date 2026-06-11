@@ -62,15 +62,16 @@ namespace rmx
 		bool  isWiiUProcUIInitialized() const	{ return mProcUIInitialized; }
 		bool  isWiiUProcUIExitRequested() const	{ return mProcUIExitRequested; }
 		uint32 getWiiUProcUIForegroundGeneration() const  { return mProcUIForegroundGeneration; }
-		void  setWiiUProcUIForegroundReleaseHandler(WiiUProcUIForegroundReleaseHandler handler)  { mProcUIForegroundReleaseHandler = handler; }
-		void  notifyWiiUProcUIReleaseFromCallback();
-		void  notifyWiiUProcUIExitFromCallback();
+		bool  setWiiUProcUIForegroundReleaseHandler(WiiUProcUIForegroundReleaseHandler handler)
+		{
+			if (mProcUIForegroundReleaseHandler == handler)
+				return false;
+			mProcUIForegroundReleaseHandler = handler;
+			return true;
+		}
 #endif
 
 	private:
-#if defined(PLATFORM_WIIU)
-		void releaseWiiUProcUIForeground(const char* reason);
-#endif
 		void run();
 		void checkSDLEvents();
 		void reshape(int width, int height);
@@ -92,7 +93,6 @@ namespace rmx
 		bool   mProcUIInitialized = false;
 		bool   mProcUIRenderAllowed = true;
 		bool   mProcUIExitRequested = false;
-		bool   mProcUIReleaseRequested = false;
 		bool   mProcUIReleaseAcknowledged = false;
 		uint32 mProcUIForegroundGeneration = 0;
 		WiiUProcUIForegroundReleaseHandler mProcUIForegroundReleaseHandler = nullptr;

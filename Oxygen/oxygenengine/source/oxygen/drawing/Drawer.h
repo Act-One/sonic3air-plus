@@ -31,6 +31,7 @@ public:
 		OPENGL,
 		DIRECT3D11,
 		VULKAN,
+		GX,
 		GX2
 	};
 

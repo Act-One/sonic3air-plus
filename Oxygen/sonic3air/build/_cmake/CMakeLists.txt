@@ -13,12 +13,22 @@ if (CMAKE_SYSTEM_NAME STREQUAL "CafeOS" OR WIIU OR CAFEOS)
 else()
 	set(PLATFORM_WIIU_BUILD OFF)
 endif()
+if (CMAKE_SYSTEM_NAME STREQUAL "NintendoWii" OR WII OR RVL OR NINTENDO_WII)
+	set(PLATFORM_WII_BUILD ON)
+else()
+	set(PLATFORM_WII_BUILD OFF)
+endif()
+if (PLATFORM_WIIU_BUILD OR PLATFORM_WII_BUILD)
+	set(S3AIR_NATIVE_CONSOLE_BUILD ON)
+else()
+	set(S3AIR_NATIVE_CONSOLE_BUILD OFF)
+endif()
 
 set(S3AIR_DEFAULT_BUILD_OXYGEN_ENGINEAPP ON)
 set(S3AIR_DEFAULT_BUILD_SDL_STATIC ON)
 set(S3AIR_DEFAULT_USE_DISCORD ON)
 set(S3AIR_DEFAULT_USE_IMGUI ON)
-if (PLATFORM_WIIU_BUILD)
+if (S3AIR_NATIVE_CONSOLE_BUILD)
 	set(S3AIR_DEFAULT_BUILD_OXYGEN_ENGINEAPP OFF)
 	set(S3AIR_DEFAULT_BUILD_SDL_STATIC OFF)
 	set(S3AIR_DEFAULT_USE_DISCORD OFF)
@@ -57,6 +67,7 @@ message(STATUS "USE_GLES = ${USE_GLES}")
 message(STATUS "USE_DISCORD = ${USE_DISCORD}")
 message(STATUS "USE_IMGUI = ${USE_IMGUI}")
 message(STATUS "PLATFORM_WIIU_BUILD = ${PLATFORM_WIIU_BUILD}")
+message(STATUS "PLATFORM_WII_BUILD = ${PLATFORM_WII_BUILD}")
 
 
 
@@ -126,6 +137,7 @@ option(S3AIR_WIIU_BUILD_GX2VK "Build gx2vk alongside native GX2 for Wii U render
 option(S3AIR_WIIU_ENABLE_GX2VK_RENDERER "Enable Sonic 3 A.I.R.'s Vulkan renderer on Wii U through gx2vk" OFF)
 set(S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL "3" CACHE STRING "Forced LemonScript optimization level for Wii U builds")
 option(S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT "Disable Wii U LemonScript nativized provider for crash isolation" OFF)
+set(S3AIR_WII_FORCED_SCRIPT_OPT_LEVEL "3" CACHE STRING "Forced LemonScript optimization level for Wii builds")
 if (PLATFORM_WIIU_BUILD AND (S3AIR_WIIU_BUILD_GX2GL_COMPAT OR S3AIR_WIIU_BUILD_GX2VK OR S3AIR_WIIU_ENABLE_GX2VK_RENDERER))
 	message(FATAL_ERROR "Wii U build is native GX2 only; gx2gl/gx2vk are off.")
 endif()
@@ -144,6 +156,19 @@ endif()
 if (PLATFORM_WIIU_BUILD)
 	message(STATUS "S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL = ${S3AIR_WIIU_FORCED_SCRIPT_OPT_LEVEL}")
 	message(STATUS "S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT = ${S3AIR_WIIU_DISABLE_NATIVIZED_LEMONSCRIPT}")
+endif()
+
+option(S3AIR_WII_LOW_MEMORY_PROFILE "Use Wii-oriented low-memory runtime defaults" ON)
+if (PLATFORM_WII_BUILD)
+	if (S3AIR_WII_LOW_MEMORY_PROFILE)
+		add_compile_definitions(S3AIR_WII_LOW_MEMORY_PROFILE)
+	endif()
+	add_compile_definitions(SDL_MAIN_HANDLED)
+	add_compile_definitions(S3AIR_WII_FORCED_SCRIPT_OPT_LEVEL=${S3AIR_WII_FORCED_SCRIPT_OPT_LEVEL})
+	add_compile_definitions(S3AIR_WII_NATIVIZED_LEMONSCRIPT)
+	add_compile_options("$<$<CONFIG:Release>:-O3>")
+	message(STATUS "S3AIR_WII_LOW_MEMORY_PROFILE = ${S3AIR_WII_LOW_MEMORY_PROFILE}")
+	message(STATUS "S3AIR_WII_FORCED_SCRIPT_OPT_LEVEL = ${S3AIR_WII_FORCED_SCRIPT_OPT_LEVEL}")
 endif()
 
 #add_definitions(-DDEBUG)
@@ -184,7 +209,7 @@ endif()
 
 
 find_package(Threads REQUIRED)
-if (NOT PLATFORM_WIIU_BUILD)
+if (NOT S3AIR_NATIVE_CONSOLE_BUILD)
 	find_package(OpenGL REQUIRED)
 endif()
 
@@ -201,6 +226,22 @@ if (PLATFORM_WIIU_BUILD)
 		"${S3AIR_DEVKITPRO_ROOT}/portlibs/wiiu/lib"
 		"${S3AIR_DEVKITPRO_ROOT}/portlibs/ppc/lib")
 	target_link_libraries(wiiu_sdl2 INTERFACE SDL2 m wut)
+elseif (PLATFORM_WII_BUILD)
+	add_library(wii_sdl2 INTERFACE)
+	set(S3AIR_DEVKITPRO_ROOT "/opt/devkitpro" CACHE PATH "devkitPro root as seen by the Wii cross compiler")
+	target_include_directories(wii_sdl2 INTERFACE
+		"${S3AIR_DEVKITPRO_ROOT}/portlibs/wii/include"
+		"${S3AIR_DEVKITPRO_ROOT}/portlibs/wii/include/SDL2"
+		"${S3AIR_DEVKITPRO_ROOT}/portlibs/ppc/include"
+		"${S3AIR_DEVKITPRO_ROOT}/libogc/include")
+	target_link_directories(wii_sdl2 INTERFACE
+		"${S3AIR_DEVKITPRO_ROOT}/portlibs/wii/lib"
+		"${S3AIR_DEVKITPRO_ROOT}/portlibs/ppc/lib"
+		"${S3AIR_DEVKITPRO_ROOT}/libogc/lib/wii")
+	# Do not use the SDL2 pkg-config link line here: it pulls OpenGX in for
+	# the video backend. The Wii renderer is intended to own output through
+	# raw libogc GX instead.
+	target_link_libraries(wii_sdl2 INTERFACE SDL2 m fat wiiuse bte wiikeyboard aesnd ogc)
 elseif (BUILD_SDL_STATIC)
 	set(SDL_STATIC ON)
 	set(SDL_SHARED OFF)
@@ -214,7 +255,7 @@ else()
 	endif()
 endif()
 
-if (NOT PLATFORM_WIIU_BUILD)
+if (NOT S3AIR_NATIVE_CONSOLE_BUILD)
 	add_subdirectory(${WORKSPACE_DIR}/framework/external/sdl/SDL2 SDL)
 endif()
 
@@ -234,7 +275,7 @@ if (USE_IMGUI)
 	include_directories(${WORKSPACE_DIR}/framework/external/imgui/imgui)
 endif()
 include_directories(${WORKSPACE_DIR}/librmx/source)
-if (NOT PLATFORM_WIIU_BUILD)
+if (NOT S3AIR_NATIVE_CONSOLE_BUILD)
 	include_directories(${WORKSPACE_DIR}/librmx/source/rmxmedia/_glew)
 endif()
 include_directories(${WORKSPACE_DIR}/Oxygen/lemonscript/source)
@@ -247,8 +288,32 @@ include_directories(${WORKSPACE_DIR}/Oxygen/sonic3air/source/external)
 # TODO: I tried creating config_types.h by calling "./configure" by a add_custom_command,
 #       but that did not work; instead the solution is to simply add the generated file to versioning
 
-file(GLOB OGGVORBIS_SOURCES ${WORKSPACE_DIR}/framework/external/ogg-vorbis/libogg/src/*.c
-							${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/*.c)
+set(OGGVORBIS_SOURCES
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libogg/src/bitwise.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libogg/src/framing.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/analysis.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/bitrate.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/block.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/codebook.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/envelope.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/floor0.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/floor1.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/info.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/lookup.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/lpc.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/lsp.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/mapping0.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/mdct.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/psy.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/registry.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/res0.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/sharedbook.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/smallft.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/synthesis.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/vorbisenc.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/vorbisfile.c
+	${WORKSPACE_DIR}/framework/external/ogg-vorbis/libvorbis/lib/window.c
+)
 
 add_library(oggvorbis ${OGGVORBIS_SOURCES})
 
@@ -264,7 +329,7 @@ add_library(minizip ${MINIZIP_SOURCES})
 
 target_link_libraries(minizip zlibstatic)
 
-if (PLATFORM_WIIU_BUILD)
+if (S3AIR_NATIVE_CONSOLE_BUILD)
 	target_compile_definitions(minizip PRIVATE USE_FILE32API)
 endif()
 
@@ -306,11 +371,13 @@ file(GLOB_RECURSE RMXBASE_SOURCES ${WORKSPACE_DIR}/librmx/source/rmxbase/*.cpp)
 
 add_library(rmxbase ${RMXBASE_SOURCES})
 
-if (NOT PLATFORM_WIIU_BUILD AND NOT CMAKE_VERSION VERSION_LESS "3.16.0")
+if (NOT S3AIR_NATIVE_CONSOLE_BUILD AND NOT CMAKE_VERSION VERSION_LESS "3.16.0")
 	target_precompile_headers(rmxbase PRIVATE ${WORKSPACE_DIR}/librmx/source/rmxbase.h)
 endif()
 
-target_link_libraries(rmxbase stdc++fs)
+if (NOT PLATFORM_WII_BUILD)
+	target_link_libraries(rmxbase stdc++fs)
+endif()
 target_link_libraries(rmxbase zlibstatic)
 
 
@@ -319,13 +386,13 @@ target_link_libraries(rmxbase zlibstatic)
 
 file(GLOB_RECURSE RMXMEDIA_SOURCES ${WORKSPACE_DIR}/librmx/source/rmxmedia/*.cpp
 								   ${WORKSPACE_DIR}/librmx/source/rmxmedia/_glew/*.c)
-if (PLATFORM_WIIU_BUILD)
+if (S3AIR_NATIVE_CONSOLE_BUILD)
 	list(FILTER RMXMEDIA_SOURCES EXCLUDE REGEX ".*/_glew/.*")
 	list(FILTER RMXMEDIA_SOURCES EXCLUDE REGEX ".*/opengl/.*")
 	list(FILTER RMXMEDIA_SOURCES EXCLUDE REGEX ".*/vulkan/.*")
 	foreach(src IN LISTS RMXMEDIA_SOURCES)
 		if (src MATCHES ".*/(_glew|opengl|vulkan)/.*")
-			message(FATAL_ERROR "Wii U rmxmedia picked up GL/Vulkan source: ${src}")
+			message(FATAL_ERROR "Native console rmxmedia picked up GL/Vulkan source: ${src}")
 		endif()
 	endforeach()
 endif()
@@ -335,6 +402,8 @@ add_library(rmxmedia ${RMXMEDIA_SOURCES})
 target_link_libraries(rmxmedia rmxbase)
 if (PLATFORM_WIIU_BUILD)
 	target_link_libraries(rmxmedia wiiu_sdl2)
+elseif (PLATFORM_WII_BUILD)
+	target_link_libraries(rmxmedia wii_sdl2)
 elseif (BUILD_SDL_STATIC)
 	target_link_libraries(rmxmedia SDL2-static)
 	target_link_libraries(rmxmedia ${SDL2_STATIC_LIBRARIES})
@@ -343,7 +412,7 @@ elseif (BUILD_SDL_STATIC)
 else()
 	target_link_libraries(rmxmedia SDL2)
 endif()
-if (PLATFORM_WIIU_BUILD)
+if (S3AIR_NATIVE_CONSOLE_BUILD)
 elseif (USE_GLES)
 	target_link_libraries(rmxmedia GLESv2)
 else()
@@ -369,7 +438,7 @@ file(GLOB_RECURSE LEMONSCRIPT_SOURCES ${WORKSPACE_DIR}/Oxygen/lemonscript/source
 
 add_library(lemonscript ${LEMONSCRIPT_SOURCES})
 
-if (NOT PLATFORM_WIIU_BUILD AND NOT CMAKE_VERSION VERSION_LESS "3.16.0")
+if (NOT S3AIR_NATIVE_CONSOLE_BUILD AND NOT CMAKE_VERSION VERSION_LESS "3.16.0")
 	target_precompile_headers(lemonscript PRIVATE ${WORKSPACE_DIR}/Oxygen/lemonscript/source/lemon/pch.h)
 endif()
 
@@ -383,7 +452,7 @@ file(GLOB_RECURSE OXYGEN_NETCORE_SOURCES ${WORKSPACE_DIR}/Oxygen/oxygenengine/so
 
 add_library(oxygen_netcore ${OXYGEN_NETCORE_SOURCES})
 
-if (NOT PLATFORM_WIIU_BUILD AND NOT CMAKE_VERSION VERSION_LESS "3.16.0")
+if (NOT S3AIR_NATIVE_CONSOLE_BUILD AND NOT CMAKE_VERSION VERSION_LESS "3.16.0")
 	target_precompile_headers(oxygen_netcore PRIVATE ${WORKSPACE_DIR}/Oxygen/oxygenengine/source/oxygen_netcore/pch.h)
 endif()
 
@@ -397,11 +466,27 @@ file(GLOB_RECURSE OXYGEN_SOURCES ${WORKSPACE_DIR}/Oxygen/oxygenengine/source/oxy
 if (PLATFORM_WIIU_BUILD)
 	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/drawing/opengl/.*")
 	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/drawing/vulkan/.*")
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/drawing/d3d11/.*")
 	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/rendering/opengl/.*")
 	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/rendering/vulkan/.*")
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/rendering/d3d11/.*")
 	foreach(src IN LISTS OXYGEN_SOURCES)
-		if (src MATCHES ".*/(opengl|vulkan)/.*")
-			message(FATAL_ERROR "Wii U oxygen picked up GL/Vulkan source: ${src}")
+		if (src MATCHES ".*/(opengl|vulkan|d3d11)/.*")
+			message(FATAL_ERROR "Wii U oxygen picked up desktop renderer source: ${src}")
+		endif()
+	endforeach()
+elseif (PLATFORM_WII_BUILD)
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/drawing/opengl/.*")
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/drawing/vulkan/.*")
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/drawing/d3d11/.*")
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/drawing/gx2/.*")
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/rendering/opengl/.*")
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/rendering/vulkan/.*")
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/rendering/d3d11/.*")
+	list(FILTER OXYGEN_SOURCES EXCLUDE REGEX ".*/rendering/gx2/.*")
+	foreach(src IN LISTS OXYGEN_SOURCES)
+		if (src MATCHES ".*/(opengl|vulkan|d3d11|gx2)/.*")
+			message(FATAL_ERROR "Wii oxygen picked up non-raw-GX renderer source: ${src}")
 		endif()
 	endforeach()
 endif()
@@ -453,7 +538,7 @@ if (BUILD_OXYGEN_ENGINEAPP)
 		set_target_properties(OxygenApp PROPERTIES OUTPUT_NAME "oxygenapp_linux")
 	endif ()
 
-	if (NOT PLATFORM_WIIU_BUILD AND NOT CMAKE_VERSION VERSION_LESS "3.16.0")
+	if (NOT S3AIR_NATIVE_CONSOLE_BUILD AND NOT CMAKE_VERSION VERSION_LESS "3.16.0")
 		target_precompile_headers(OxygenApp PRIVATE ${WORKSPACE_DIR}/Oxygen/oxygenengine/source/engineapp/pch.h)
 	endif()
 
@@ -475,7 +560,7 @@ if (BUILD_OXYGEN_SERVER)
 	add_executable(OxygenServer ${OXYGENSERVER_SOURCES})
 	set_target_properties(OxygenServer PROPERTIES OUTPUT_NAME "oxygenserver")
 
-	if (NOT PLATFORM_WIIU_BUILD AND NOT CMAKE_VERSION VERSION_LESS "3.16.0")
+	if (NOT S3AIR_NATIVE_CONSOLE_BUILD AND NOT CMAKE_VERSION VERSION_LESS "3.16.0")
 		target_precompile_headers(OxygenServer PRIVATE ${WORKSPACE_DIR}/Oxygen/oxygenserver/source/oxygenserver/pch.h)
 	endif()
 
@@ -515,7 +600,7 @@ if (UNIX AND NOT APPLE)
 	set_target_properties(Sonic3AIR PROPERTIES OUTPUT_NAME "sonic3air_linux")
 endif()
 
-if (NOT PLATFORM_WIIU_BUILD AND NOT CMAKE_VERSION VERSION_LESS "3.16.0")
+if (NOT S3AIR_NATIVE_CONSOLE_BUILD AND NOT CMAKE_VERSION VERSION_LESS "3.16.0")
 	target_precompile_headers(Sonic3AIR PRIVATE ${WORKSPACE_DIR}/Oxygen/sonic3air/source/sonic3air/pch.h)
 endif()
 
@@ -556,6 +641,24 @@ if (PLATFORM_WIIU_BUILD)
 		get_target_property(libs ${tgt} LINK_LIBRARIES)
 		if (libs MATCHES "gx2gl|gx2vk|OpenGL|GLES|Vulkan")
 			message(FATAL_ERROR "Wii U ${tgt} is linked to a GL/Vulkan wrapper: ${libs}")
+		endif()
+	endforeach()
+endif()
+if (PLATFORM_WII_BUILD)
+	set_target_properties(Sonic3AIR PROPERTIES OUTPUT_NAME "sonic3air")
+	ogc_create_dol(Sonic3AIR)
+	set(S3AIR_WII_SD_APP_DIR "${CMAKE_CURRENT_BINARY_DIR}/sd/apps/sonic3air" CACHE PATH "Wii Homebrew Channel app directory")
+	add_custom_command(TARGET Sonic3AIR POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${S3AIR_WII_SD_APP_DIR}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${S3AIR_WII_SD_APP_DIR}/data"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/sonic3air.dol" "${S3AIR_WII_SD_APP_DIR}/boot.dol"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WORKSPACE_DIR}/Oxygen/sonic3air/saves/scripts.bin" "${S3AIR_WII_SD_APP_DIR}/data/scripts.bin"
+		COMMENT "Staging Wii Homebrew Channel boot.dol"
+	)
+	foreach(tgt rmxmedia oxygen Sonic3AIR)
+		get_target_property(libs ${tgt} LINK_LIBRARIES)
+		if (libs MATCHES "opengx|OpenGL|GLES|Vulkan|D3D")
+			message(FATAL_ERROR "Wii ${tgt} is linked to a non-raw-GX renderer path: ${libs}")
 		endif()
 	endforeach()
 endif()

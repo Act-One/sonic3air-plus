@@ -244,7 +244,9 @@ namespace
 
 Configuration::RenderMethod Configuration::getHighestSupportedRenderMethod()
 {
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII)
+	return RenderMethod::GX_FULL;
+#elif defined(PLATFORM_WIIU)
 	return RenderMethod::GX2_FULL;
 #elif defined(PLATFORM_UWP)
 	return RenderMethod::D3D11_SOFT;
@@ -264,14 +266,14 @@ bool Configuration::isSupportedRenderMethod(RenderMethod renderMethod)
 			return true;
 
 		case RenderMethod::OPENGL_SOFT:
-#if defined(PLATFORM_UWP) || defined(PLATFORM_WIIU)
+#if defined(PLATFORM_UWP) || defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 			return false;
 #else
 			return true;
 #endif
 
 		case RenderMethod::OPENGL_FULL:
-#if defined(PLATFORM_WEB) || (defined(PLATFORM_MAC) && defined(__arm64__)) || defined(PLATFORM_VITA) || defined(PLATFORM_UWP) || defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WEB) || (defined(PLATFORM_MAC) && defined(__arm64__)) || defined(PLATFORM_VITA) || defined(PLATFORM_UWP) || defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 			return false;
 #else
 			return true;
@@ -312,6 +314,13 @@ bool Configuration::isSupportedRenderMethod(RenderMethod renderMethod)
 			return false;
 #endif
 
+		case RenderMethod::GX_FULL:
+#if defined(PLATFORM_WII)
+			return true;
+#else
+			return false;
+#endif
+
 		default:
 			return false;
 	}
@@ -330,6 +339,11 @@ bool Configuration::isDirect3D11RenderMethod(RenderMethod renderMethod)
 bool Configuration::isVulkanRenderMethod(RenderMethod renderMethod)
 {
 	return (renderMethod == RenderMethod::VULKAN_SOFT || renderMethod == RenderMethod::VULKAN_FULL);
+}
+
+bool Configuration::isGXRenderMethod(RenderMethod renderMethod)
+{
+	return (renderMethod == RenderMethod::GX_FULL);
 }
 
 bool Configuration::isGX2RenderMethod(RenderMethod renderMethod)
@@ -391,6 +405,7 @@ const char* Configuration::getRenderMethodConfigString(RenderMethod renderMethod
 		case RenderMethod::D3D11_FULL:	return "d3d11-full";
 		case RenderMethod::VULKAN_SOFT:	return "vulkan-soft";
 		case RenderMethod::VULKAN_FULL:	return "vulkan-full";
+		case RenderMethod::GX_FULL:		return "gx-full";
 		// GX2 doesn't get gx2-soft because the only feasible option is gx2-full
 		// also we still use software for SOME stuff
 		case RenderMethod::GX2_FULL:	return "gx2-full";
@@ -412,6 +427,10 @@ Configuration::Configuration()
 
 #if defined(PLATFORM_WIIU)
 	mAudio.mUseAudioThreading = true;
+#endif
+
+#if defined(PLATFORM_WII)
+	mAudio.mUseAudioThreading = false;
 #endif
 
 #if defined(PLATFORM_ANDROID) || defined(PLATFORM_WEB)

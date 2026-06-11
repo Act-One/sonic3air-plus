@@ -39,6 +39,29 @@ namespace lemon
 			return accessScriptScalarSlot(const_cast<uint8*>(storage), baseType);
 		}
 
+		FORCE_INLINE const RuntimeOpcode* resolveNextRuntimeOpcode(const RuntimeOpcode* opcode, const ControlFlow::State& state)
+		{
+		#if defined(PLATFORM_WII)
+			const RuntimeOpcode* next = opcode->mNext;
+			if (nullptr != state.mRuntimeFunction)
+			{
+				const RuntimeOpcodeBuffer& buffer = state.mRuntimeFunction->mRuntimeOpcodeBuffer;
+				const uint8* start = buffer.getStart();
+				const uint8* end = buffer.getEnd();
+				const uint8* nextBytes = reinterpret_cast<const uint8*>(next);
+				if (nullptr != start && start < end && (nextBytes < start || nextBytes >= end))
+				{
+					const uint8* fallback = reinterpret_cast<const uint8*>(opcode) + opcode->mSize;
+					if (opcode->mSize > 0 && fallback >= start && fallback < end)
+						return reinterpret_cast<const RuntimeOpcode*>(fallback);
+				}
+			}
+			return next;
+		#else
+			return opcode->mNext;
+		#endif
+		}
+
 		int64 readScriptScalarValue(const DataTypeDefinition& dataType, const uint8* storage)
 		{
 			if (nullptr == storage)
@@ -797,23 +820,23 @@ namespace lemon
 					if (context.mOpcode->mSuccessiveHandledOpcodes >= 4)
 					{
 						(*context.mOpcode->mExecFunc)(context);
-						context.mOpcode = context.mOpcode->mNext;
+						context.mOpcode = resolveNextRuntimeOpcode(context.mOpcode, state);
 
 						(*context.mOpcode->mExecFunc)(context);
-						context.mOpcode = context.mOpcode->mNext;
+						context.mOpcode = resolveNextRuntimeOpcode(context.mOpcode, state);
 
 						(*context.mOpcode->mExecFunc)(context);
-						context.mOpcode = context.mOpcode->mNext;
+						context.mOpcode = resolveNextRuntimeOpcode(context.mOpcode, state);
 
 						(*context.mOpcode->mExecFunc)(context);
-						context.mOpcode = context.mOpcode->mNext;
+						context.mOpcode = resolveNextRuntimeOpcode(context.mOpcode, state);
 
 						result.mStepsExecuted += 4;
 					}
 					else
 					{
 						(*context.mOpcode->mExecFunc)(context);
-						context.mOpcode = context.mOpcode->mNext;
+						context.mOpcode = resolveNextRuntimeOpcode(context.mOpcode, state);
 
 						++result.mStepsExecuted;
 					}
@@ -826,7 +849,7 @@ namespace lemon
 						--controlFlow->mValueStackPtr;
 						if (*controlFlow->mValueStackPtr != 0)
 						{
-							context.mOpcode = context.mOpcode->mNext;
+							context.mOpcode = resolveNextRuntimeOpcode(context.mOpcode, state);
 							++result.mStepsExecuted;
 							break;
 						}
@@ -864,7 +887,7 @@ namespace lemon
 						{
 							// Otherwise decrease it and go on with the next opcode
 							--controlFlow->mValueStackPtr[-1];
-							context.mOpcode = context.mOpcode->mNext;
+							context.mOpcode = resolveNextRuntimeOpcode(context.mOpcode, state);
 							++result.mStepsExecuted;
 						}
 						break;
@@ -872,7 +895,7 @@ namespace lemon
 
 					case Opcode::Type::CALL:
 					{
-						state.mProgramCounter = (uint8*)context.mOpcode->mNext;
+						state.mProgramCounter = (uint8*)resolveNextRuntimeOpcode(context.mOpcode, state);
 						const bool callTargetIsResolvedPointer = context.mOpcode->mFlags.isSet(RuntimeOpcode::Flag::CALL_TARGET_RUNTIME_FUNC) || context.mOpcode->mFlags.isSet(RuntimeOpcode::Flag::CALL_TARGET_RESOLVED);
 						const uint64 callTarget = callTargetIsResolvedPointer ? 0 : context.mOpcode->getParameter<uint64>();
 						++result.mStepsExecuted;

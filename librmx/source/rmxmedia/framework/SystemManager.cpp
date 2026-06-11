@@ -29,7 +29,6 @@
 	#include <coreinit/time.h>
 	#include <gx2/event.h>
 	#include <proc_ui/procui.h>
-	#include <sysapp/launch.h>
 	#include <whb/proc.h>
 
 #endif
@@ -55,39 +54,34 @@ namespace rmx
 			ProcUIDrawDoneRelease();
 		}
 
-		bool procUIShutdownReady()
-		{
-			return ProcUIIsRunning() && ProcUIInShutdown();
-		}
-
 		void stopWHBProcForExit(const char* reason)
 		{
-			static bool sLaunchMenuRequested = false;
-			if (!sLaunchMenuRequested)
+			static bool sWHBProcStopped = false;
+			if (!sWHBProcStopped)
 			{
-				RMX_LOG_INFO("SystemManager: requesting HOME menu after ProcUI exit");
-				SYSLaunchMenu();
-				sLaunchMenuRequested = true;
+				RMX_LOG_INFO("SystemManager: stopping WHBProc run flag for " << reason);
+				WHBProcStopRunning();
+				sWHBProcStopped = true;
+				RMX_LOG_INFO("SystemManager: WHBProc run flag stopped for " << reason);
 			}
-			RMX_LOG_INFO("SystemManager: stopping WHBProc run flag for " << reason);
-			WHBProcStopRunning();
-			RMX_LOG_INFO("SystemManager: WHBProc run flag stopped for " << reason);
 		}
 
-		uint32 procUIReleaseCallback(void* param)
+		void releaseForegroundResourcesForExit(bool& outReleaseAcknowledged, SystemManager::WiiUProcUIForegroundReleaseHandler foregroundReleaseHandler)
 		{
-			SystemManager* system = reinterpret_cast<SystemManager*>(param);
-			if (nullptr != system)
-				system->notifyWiiUProcUIReleaseFromCallback();
-			return 0;
-		}
+			if (outReleaseAcknowledged)
+				return;
 
-		uint32 procUIExitCallback(void* param)
-		{
-			SystemManager* system = reinterpret_cast<SystemManager*>(param);
-			if (nullptr != system)
-				system->notifyWiiUProcUIExitFromCallback();
-			return 0;
+			if (nullptr != foregroundReleaseHandler)
+			{
+				RMX_LOG_INFO("SystemManager: releasing app foreground resources for ProcUI exit");
+				foregroundReleaseHandler();
+				RMX_LOG_INFO("SystemManager: app foreground resources released for ProcUI exit");
+			}
+			else
+			{
+				RMX_LOG_WARNING("SystemManager: ProcUI exit has no app release handler");
+			}
+			outReleaseAcknowledged = true;
 		}
 
 		ProcUIFrameState processProcUIState(bool& outRenderAllowed, bool& outReleaseAcknowledged, SystemManager::WiiUProcUIForegroundReleaseHandler foregroundReleaseHandler)
@@ -106,18 +100,21 @@ namespace rmx
 				case PROCUI_STATUS_RELEASE_FOREGROUND:
 					RMX_LOG_INFO("SystemManager: ProcUI requested foreground release");
 					outRenderAllowed = false;
-					if (nullptr != foregroundReleaseHandler)
+					if (!outReleaseAcknowledged)
 					{
-						RMX_LOG_INFO("SystemManager: releasing app foreground resources");
-						foregroundReleaseHandler();
-						RMX_LOG_INFO("SystemManager: app foreground resources released");
+						if (nullptr != foregroundReleaseHandler)
+						{
+							RMX_LOG_INFO("SystemManager: releasing app foreground resources");
+							foregroundReleaseHandler();
+							RMX_LOG_INFO("SystemManager: app foreground resources released");
+						}
+						else
+						{
+							RMX_LOG_WARNING("SystemManager: ProcUI foreground release has no app release handler");
+						}
+						releaseProcUIDrawDone("release foreground");
+						outReleaseAcknowledged = true;
 					}
-					else
-					{
-						RMX_LOG_WARNING("SystemManager: ProcUI foreground release has no app release handler");
-					}
-					releaseProcUIDrawDone("release foreground");
-					outReleaseAcknowledged = true;
 					return ProcUIFrameState::BACKGROUND;
 
 				case PROCUI_STATUS_IN_BACKGROUND:
@@ -128,7 +125,7 @@ namespace rmx
 				case PROCUI_STATUS_EXITING:
 					RMX_LOG_INFO("SystemManager: ProcUI requested exit");
 					outRenderAllowed = false;
-					outReleaseAcknowledged = true;
+					releaseForegroundResourcesForExit(outReleaseAcknowledged, foregroundReleaseHandler);
 					return ProcUIFrameState::EXITING;
 			}
 
@@ -174,10 +171,7 @@ namespace rmx
 			mProcUIInitialized = true;
 			mProcUIRenderAllowed = true;
 			mProcUIExitRequested = false;
-			mProcUIReleaseRequested = false;
 			mProcUIReleaseAcknowledged = false;
-			ProcUIRegisterCallback(PROCUI_CALLBACK_RELEASE, procUIReleaseCallback, this, 100);
-			ProcUIRegisterCallback(PROCUI_CALLBACK_EXIT, procUIExitCallback, this, 100);
 		}
 		OSEnableForegroundExit();
 #endif
@@ -188,6 +182,26 @@ namespace rmx
 
 	void SystemManager::exit()
 	{
+#if defined(PLATFORM_WIIU)
+		const bool procUIExit = mProcUIExitRequested || (ProcUIIsRunning() && ProcUIInShutdown());
+		if (procUIExit)
+		{
+			mProcUIRenderAllowed = false;
+			RMX_LOG_INFO("SystemManager: SDL_Quit begin");
+			SDL_Quit();
+			RMX_LOG_INFO("SystemManager: SDL_Quit complete");
+			if (mProcUIInitialized)
+			{
+				RMX_LOG_INFO("SystemManager: ProcUIShutdown begin");
+				ProcUIShutdown();
+				RMX_LOG_INFO("SystemManager: ProcUIShutdown complete");
+				mProcUIInitialized = false;
+				mProcUIReleaseAcknowledged = false;
+			}
+			return;
+		}
+#endif
+
 		// Quit SDL
 		RMX_LOG_INFO("SystemManager: SDL_Quit begin");
 		SDL_Quit();
@@ -197,79 +211,26 @@ namespace rmx
 		mProcUIRenderAllowed = false;
 		if (mProcUIInitialized)
 		{
-			ProcUIClearCallbacks();
 			RMX_LOG_INFO("SystemManager: stopping WHBProc run flag");
 			WHBProcStopRunning();
 			RMX_LOG_INFO("SystemManager: WHBProcShutdown begin");
 			WHBProcShutdown();
+			RMX_LOG_INFO("SystemManager: WHBProcShutdown complete");
 			mProcUIInitialized = false;
 			mProcUIExitRequested = false;
-			mProcUIReleaseRequested = false;
 			mProcUIReleaseAcknowledged = false;
 		}
 #endif
 	}
-
-#if defined(PLATFORM_WIIU)
-	void SystemManager::releaseWiiUProcUIForeground(const char* reason)
-	{
-		if (mProcUIReleaseAcknowledged)
-			return;
-
-		mProcUIRenderAllowed = false;
-		RMX_LOG_INFO("SystemManager: releasing ProcUI foreground (" << reason << ")");
-		if (nullptr != mProcUIForegroundReleaseHandler)
-		{
-			RMX_LOG_INFO("SystemManager: releasing app foreground resources");
-			mProcUIForegroundReleaseHandler();
-			RMX_LOG_INFO("SystemManager: app foreground resources released");
-		}
-		else
-		{
-			RMX_LOG_WARNING("SystemManager: ProcUI foreground release has no app release handler");
-		}
-		releaseProcUIDrawDone(reason);
-		mProcUIReleaseAcknowledged = true;
-		mProcUIReleaseRequested = false;
-	}
-
-	void SystemManager::notifyWiiUProcUIReleaseFromCallback()
-	{
-		if (mProcUIReleaseAcknowledged)
-		{
-			static uint32 sIgnoredReleaseCallbackLogCount = 0;
-			if (sIgnoredReleaseCallbackLogCount < 8)
-			{
-				RMX_LOG_INFO("SystemManager: ignoring stale ProcUI release callback after draw-done acknowledgement");
-				++sIgnoredReleaseCallbackLogCount;
-			}
-			return;
-		}
-		if (mProcUIRenderAllowed)
-		{
-			RMX_LOG_INFO("SystemManager: ProcUI release callback blocked rendering");
-		}
-		mProcUIRenderAllowed = false;
-		mProcUIReleaseRequested = true;
-	}
-
-	void SystemManager::notifyWiiUProcUIExitFromCallback()
-	{
-		if (!mProcUIExitRequested)
-		{
-			RMX_LOG_INFO("SystemManager: ProcUI exit callback requested shutdown");
-		}
-		mProcUIRenderAllowed = false;
-		mProcUIExitRequested = true;
-		mProcUIReleaseRequested = false;
-	}
-#endif
 
 	void SystemManager::checkSDLEvents()
 	{
 		// Handle events
 		mInputContext.backupState();
 
+#if defined(PLATFORM_WII)
+		mInputContext.refreshChangeFlags();
+#else
 		// Process SDL event queue
 		SDL_Event evnt;
 		while (SDL_PollEvent(&evnt))
@@ -313,6 +274,7 @@ namespace rmx
 
 		// Track changes since previous update
 		mInputContext.refreshChangeFlags();
+#endif
 	}
 
 	void SystemManager::reshape(int width, int height)
@@ -423,40 +385,21 @@ namespace rmx
 		const ProcUIFrameState procUIFrameState = processProcUIState(mProcUIRenderAllowed, mProcUIReleaseAcknowledged, mProcUIForegroundReleaseHandler);
 		if (procUIFrameState == ProcUIFrameState::EXITING)
 		{
-			mProcUIReleaseRequested = false;
 			mProcUIExitRequested = true;
 		}
 		if (mProcUIExitRequested)
 		{
-			mProcUIReleaseRequested = false;
 			mProcUIRenderAllowed = false;
-			if (procUIShutdownReady())
-			{
-				mProcUIReleaseAcknowledged = true;
-				stopWHBProcForExit("deferred exit");
-				quit();
-			}
-			else
-			{
-				static uint32 sDeferredExitWaitLogCount = 0;
-				if (sDeferredExitWaitLogCount < 8)
-				{
-					RMX_LOG_INFO("SystemManager: exit callback pending real ProcUI shutdown");
-					++sDeferredExitWaitLogCount;
-				}
-				OSSleepTicks(OSMillisecondsToTicks(16));
-			}
+			stopWHBProcForExit("deferred exit");
+			quit();
 			return;
 		}
 		if (procUIFrameState == ProcUIFrameState::BACKGROUND)
 		{
-			if (mProcUIReleaseRequested && !mProcUIReleaseAcknowledged)
-				releaseWiiUProcUIForeground("background callback");
 			return;
 		}
 		if (!wasProcUIRenderAllowed && mProcUIRenderAllowed)
 		{
-			mProcUIReleaseRequested = false;
 			mProcUIReleaseAcknowledged = false;
 			++mProcUIForegroundGeneration;
 			RMX_LOG_INFO("SystemManager: ProcUI foreground acquired generation=" << mProcUIForegroundGeneration);
@@ -468,9 +411,8 @@ namespace rmx
 		checkSDLEvents();
 
 #if defined(PLATFORM_WIIU)
-		if (mProcUIReleaseRequested || !ProcUIInForeground())
+		if (!mProcUIRenderAllowed || !ProcUIInForeground())
 		{
-			releaseWiiUProcUIForeground(mProcUIReleaseRequested ? "mid-frame callback" : "mid-frame foreground lost");
 			mRoot.endFrame();
 			return;
 		}
@@ -481,20 +423,14 @@ namespace rmx
 #if defined(PLATFORM_WIIU)
 		if (mProcUIExitRequested)
 		{
-			mProcUIReleaseRequested = false;
 			mProcUIRenderAllowed = false;
-			if (procUIShutdownReady())
-			{
-				mProcUIReleaseAcknowledged = true;
-				stopWHBProcForExit("post-update exit");
-				quit();
-			}
+			stopWHBProcForExit("post-update exit");
+			quit();
 			mRoot.endFrame();
 			return;
 		}
-		if (mProcUIReleaseRequested || !ProcUIInForeground())
+		if (!mProcUIRenderAllowed || !ProcUIInForeground())
 		{
-			releaseWiiUProcUIForeground(mProcUIReleaseRequested ? "post-update callback" : "post-update foreground lost");
 			mRoot.endFrame();
 			return;
 		}

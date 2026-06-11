@@ -59,7 +59,13 @@ void ConfigurationImpl::preLoadInitialization()
 {
 	SharedDatabase::initialize();
 
+#if defined(S3AIR_WII_LOW_MEMORY_PROFILE)
+	mCompiledScriptSavePath.clear();
+	mForceCompileScripts = false;
+	mScriptOptimizationLevel = 3;
+#else
 	mCompiledScriptSavePath = L"saves/scripts.bin";
+#endif
 }
 
 bool ConfigurationImpl::loadConfigurationInternal(JsonSerializer& serializer)

@@ -320,6 +320,10 @@ void MenuBackground::startTransition(Target target)
 	if (target == mTarget)
 		return;
 
+#if defined(PLATFORM_WIIU)
+	RMX_LOG_INFO("MenuBackground: startTransition " << (int)mTarget << " -> " << (int)target);
+#endif
+
 	// Set defaults, to be overwritten below
 	mLightLayer.mTargetPosition = 1.0f;
 	mBlueLayer.mTargetPosition = 1.5f;		// Far to the right

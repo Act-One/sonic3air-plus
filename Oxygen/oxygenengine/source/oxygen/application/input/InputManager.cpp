@@ -16,9 +16,133 @@
 #include "oxygen/rendering/utils/RenderUtils.h"
 #include "oxygen/simulation/LogDisplay.h"
 
+#if defined(PLATFORM_WII)
+#include <gccore.h>
+#include <ogc/pad.h>
+#include <wiiuse/wpad.h>
+#endif
+
 
 namespace
 {
+#if defined(PLATFORM_WII)
+	enum WiiNativeButton : uint32
+	{
+		WII_NATIVE_UP = 0,
+		WII_NATIVE_DOWN,
+		WII_NATIVE_LEFT,
+		WII_NATIVE_RIGHT,
+		WII_NATIVE_A,
+		WII_NATIVE_B,
+		WII_NATIVE_X,
+		WII_NATIVE_Y,
+		WII_NATIVE_START,
+		WII_NATIVE_BACK,
+		WII_NATIVE_L,
+		WII_NATIVE_R,
+		WII_NATIVE_COUNT
+	};
+
+	void applyWiiNativeControlState(InputManager::ControllerScheme& controller, uint32 pressed)
+	{
+		controller.Up.mState    |= (pressed & (1u << WII_NATIVE_UP)) != 0;
+		controller.Down.mState  |= (pressed & (1u << WII_NATIVE_DOWN)) != 0;
+		controller.Left.mState  |= (pressed & (1u << WII_NATIVE_LEFT)) != 0;
+		controller.Right.mState |= (pressed & (1u << WII_NATIVE_RIGHT)) != 0;
+		controller.A.mState     |= (pressed & (1u << WII_NATIVE_A)) != 0;
+		controller.B.mState     |= (pressed & (1u << WII_NATIVE_B)) != 0;
+		controller.X.mState     |= (pressed & (1u << WII_NATIVE_X)) != 0;
+		controller.Y.mState     |= (pressed & (1u << WII_NATIVE_Y)) != 0;
+		controller.Start.mState |= (pressed & (1u << WII_NATIVE_START)) != 0;
+		controller.Back.mState  |= (pressed & (1u << WII_NATIVE_BACK)) != 0;
+		controller.L.mState     |= (pressed & (1u << WII_NATIVE_L)) != 0;
+		controller.R.mState     |= (pressed & (1u << WII_NATIVE_R)) != 0;
+	}
+
+	uint32 readWiiRemoteButtons(int index)
+	{
+		const u32 held = WPAD_ButtonsHeld(index);
+		uint32 pressed = 0;
+
+		// Sideways Wii Remote: D-pad is rotated with the IR end on the left.
+		if (held & WPAD_BUTTON_RIGHT)	pressed |= (1u << WII_NATIVE_UP);
+		if (held & WPAD_BUTTON_LEFT)		pressed |= (1u << WII_NATIVE_DOWN);
+		if (held & WPAD_BUTTON_UP)		pressed |= (1u << WII_NATIVE_LEFT);
+		if (held & WPAD_BUTTON_DOWN)		pressed |= (1u << WII_NATIVE_RIGHT);
+
+		if (held & (WPAD_BUTTON_2 | WPAD_BUTTON_A))	pressed |= (1u << WII_NATIVE_A);
+		if (held & (WPAD_BUTTON_1 | WPAD_BUTTON_B))	pressed |= (1u << WII_NATIVE_B);
+		if (held & WPAD_BUTTON_B)					pressed |= (1u << WII_NATIVE_X);
+		if (held & WPAD_BUTTON_A)					pressed |= (1u << WII_NATIVE_Y);
+		if (held & WPAD_BUTTON_PLUS)				pressed |= (1u << WII_NATIVE_START);
+		if (held & (WPAD_BUTTON_MINUS | WPAD_BUTTON_HOME)) pressed |= (1u << WII_NATIVE_BACK);
+		return pressed;
+	}
+
+	uint32 readWiiClassicButtons(int index)
+	{
+		const u32 held = WPAD_ButtonsHeld(index);
+		uint32 pressed = 0;
+		if (held & WPAD_CLASSIC_BUTTON_UP)		pressed |= (1u << WII_NATIVE_UP);
+		if (held & WPAD_CLASSIC_BUTTON_DOWN)		pressed |= (1u << WII_NATIVE_DOWN);
+		if (held & WPAD_CLASSIC_BUTTON_LEFT)		pressed |= (1u << WII_NATIVE_LEFT);
+		if (held & WPAD_CLASSIC_BUTTON_RIGHT)	pressed |= (1u << WII_NATIVE_RIGHT);
+		if (held & WPAD_CLASSIC_BUTTON_A)		pressed |= (1u << WII_NATIVE_A);
+		if (held & WPAD_CLASSIC_BUTTON_B)		pressed |= (1u << WII_NATIVE_B);
+		if (held & WPAD_CLASSIC_BUTTON_X)		pressed |= (1u << WII_NATIVE_X);
+		if (held & WPAD_CLASSIC_BUTTON_Y)		pressed |= (1u << WII_NATIVE_Y);
+		if (held & WPAD_CLASSIC_BUTTON_PLUS)		pressed |= (1u << WII_NATIVE_START);
+		if (held & (WPAD_CLASSIC_BUTTON_MINUS | WPAD_CLASSIC_BUTTON_HOME)) pressed |= (1u << WII_NATIVE_BACK);
+		if (held & (WPAD_CLASSIC_BUTTON_FULL_L | WPAD_CLASSIC_BUTTON_ZL)) pressed |= (1u << WII_NATIVE_L);
+		if (held & (WPAD_CLASSIC_BUTTON_FULL_R | WPAD_CLASSIC_BUTTON_ZR)) pressed |= (1u << WII_NATIVE_R);
+
+		expansion_t expansion = {};
+		WPAD_Expansion(index, &expansion);
+		if (expansion.type == EXP_CLASSIC)
+		{
+			const joystick_t& stick = expansion.classic.ljs;
+			if (stick.mag > 0.35f)
+			{
+				if (stick.ang >= 315.0f || stick.ang < 45.0f)	pressed |= (1u << WII_NATIVE_UP);
+				else if (stick.ang < 135.0f)					pressed |= (1u << WII_NATIVE_RIGHT);
+				else if (stick.ang < 225.0f)					pressed |= (1u << WII_NATIVE_DOWN);
+				else											pressed |= (1u << WII_NATIVE_LEFT);
+			}
+		}
+		return pressed;
+	}
+
+	uint32 readGameCubeButtons(int index)
+	{
+		const u16 held = PAD_ButtonsHeld(index);
+		uint32 pressed = 0;
+		if (held & PAD_BUTTON_UP)	pressed |= (1u << WII_NATIVE_UP);
+		if (held & PAD_BUTTON_DOWN)	pressed |= (1u << WII_NATIVE_DOWN);
+		if (held & PAD_BUTTON_LEFT)	pressed |= (1u << WII_NATIVE_LEFT);
+		if (held & PAD_BUTTON_RIGHT)	pressed |= (1u << WII_NATIVE_RIGHT);
+		if (held & PAD_BUTTON_A)		pressed |= (1u << WII_NATIVE_A);
+		if (held & PAD_BUTTON_B)		pressed |= (1u << WII_NATIVE_B);
+		if (held & PAD_BUTTON_X)		pressed |= (1u << WII_NATIVE_X);
+		if (held & PAD_BUTTON_Y)		pressed |= (1u << WII_NATIVE_Y);
+		if (held & PAD_BUTTON_START)	pressed |= (1u << WII_NATIVE_START);
+		if (PAD_TriggerL(index) > 0x40) pressed |= (1u << WII_NATIVE_L);
+		if (PAD_TriggerR(index) > 0x40) pressed |= (1u << WII_NATIVE_R);
+
+		const s8 stickX = PAD_StickX(index);
+		const s8 stickY = PAD_StickY(index);
+		if (stickY > 32)		pressed |= (1u << WII_NATIVE_UP);
+		if (stickY < -32)	pressed |= (1u << WII_NATIVE_DOWN);
+		if (stickX < -32)	pressed |= (1u << WII_NATIVE_LEFT);
+		if (stickX > 32)		pressed |= (1u << WII_NATIVE_RIGHT);
+		return pressed;
+	}
+
+	uint32 readWiiNativeButtons(int index)
+	{
+		return readWiiRemoteButtons(index) | readWiiClassicButtons(index) | readGameCubeButtons(index);
+	}
+#endif
+
 	const char* getJoystickName(SDL_Joystick* joystick)
 	{
 		if (nullptr == joystick)
@@ -410,6 +534,13 @@ InputManager::InputManager()
 
 void InputManager::startup()
 {
+#if defined(PLATFORM_WII)
+	PAD_Init();
+	WPAD_Init();
+	WPAD_SetDataFormat(WPAD_CHAN_ALL, WPAD_FMT_BTNS_ACC);
+	mLastInputType = InputType::GAMEPAD;
+	return;
+#else
 	// Initialize controller handling as early as possible so gamepads are ready for first-frame navigation.
 	RMX_CHECK(SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) == 0, "SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) failed with error: '" << SDL_GetError() << "'", );
 	SDL_JoystickEventState(SDL_ENABLE);
@@ -423,6 +554,7 @@ void InputManager::startup()
 		mLastInputType = InputType::GAMEPAD;
 	}
 #endif
+#endif
 }
 
 void InputManager::enableTouchInput(bool enable)
@@ -432,7 +564,12 @@ void InputManager::enableTouchInput(bool enable)
 
 void InputManager::updateInput(float timeElapsed)
 {
+#if defined(PLATFORM_WII)
+	WPAD_ScanPads();
+	PAD_ScanPads();
+#else
 	SDL_GameControllerUpdate();
+#endif
 
 #if 0
 	if (!mGamepads.empty())
@@ -455,6 +592,7 @@ void InputManager::updateInput(float timeElapsed)
 
 	// Update touches
 	mActiveTouches.clear();
+#if !defined(PLATFORM_WII)
 	if (!FTX::System->wasEventConsumed())
 	{
 		if (mTouchInputEnabled)
@@ -487,9 +625,22 @@ void InputManager::updateInput(float timeElapsed)
 			mAnythingPressed = true;
 		}
 	}
+#endif
 
 	// Update controls
 	{
+#if defined(PLATFORM_WII)
+		uint32 wiiNativeButtons[NUM_PLAYERS] = {};
+		for (int playerIndex = 0; playerIndex < (int)NUM_PLAYERS; ++playerIndex)
+		{
+			wiiNativeButtons[playerIndex] = readWiiNativeButtons(playerIndex);
+			if (wiiNativeButtons[playerIndex] != 0)
+			{
+				mLastInputType = InputType::GAMEPAD;
+			}
+		}
+#endif
+
 		// Update all controls internally (i.e. the part not processed by input feeders)
 		for (Control* control : mAllControls)
 		{
@@ -502,6 +653,13 @@ void InputManager::updateInput(float timeElapsed)
 		{
 			inputFeeder->updateControls();
 		}
+
+#if defined(PLATFORM_WII)
+		for (int playerIndex = 0; playerIndex < (int)NUM_PLAYERS; ++playerIndex)
+		{
+			applyWiiNativeControlState(mPlayers[playerIndex].mController, wiiNativeButtons[playerIndex]);
+		}
+#endif
 
 		// Finalize controls
 		for (Control* control : mAllControls)

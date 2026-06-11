@@ -25,6 +25,7 @@
 #include "oxygen/resources/ResourcesCache.h"
 #include "oxygen/simulation/CodeExec.h"
 #include "oxygen/simulation/EmulatorInterface.h"
+#include "oxygen/simulation/LemonScriptProgram.h"
 #include "oxygen/simulation/LogDisplay.h"
 #include "oxygen/simulation/Simulation.h"
 
@@ -585,7 +586,7 @@ void GameView::render()
 	VideoOut& videoOut = VideoOut::instance();
 	const Recti gameScreenRect = VideoOut::instance().getScreenRect();
 	mGameViewport.setResolution(gameScreenRect.getSize());
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 	const bool renderDirectToWindow = true;
 #else
 	const bool renderDirectToWindow = false;
@@ -656,6 +657,7 @@ void GameView::render()
 				<< " gameScreenRect=" << sLoggedDirectGameScreenRect.x << "," << sLoggedDirectGameScreenRect.y << " " << sLoggedDirectGameScreenRect.width << "x" << sLoggedDirectGameScreenRect.height
 				<< " gameViewportRect=" << sLoggedDirectViewportRect.x << "," << sLoggedDirectViewportRect.y << " " << sLoggedDirectViewportRect.width << "x" << sLoggedDirectViewportRect.height);
 		}
+		drawer.setWindowRenderTarget(FTX::screenRect());
 		if (!renderGameScreenDirectToWindow)
 		{
 			drawer.setWindowRenderTarget(gameScreenRect);
@@ -674,12 +676,8 @@ void GameView::render()
 	// Simple mirror mode implementation: Just mirror the whole screen
 	if (renderGameScreenDirectToWindow)
 	{
-#if defined(PLATFORM_WIIU)
-		const bool updatedGameScreen = videoOut.updateGameScreenOnCurrentTarget(gameScreenRect);
-		if (!updatedGameScreen && !videoOut.canDrawGameScreenOnCurrentTarget())
-		{
-			return;
-		}
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
+		videoOut.updateGameScreenOnCurrentTarget(gameScreenRect);
 		drawer.setWindowRenderTarget(gameScreenRect);
 		videoOut.drawGameScreenOnCurrentTarget(gameScreenRect);
 #endif
@@ -698,7 +696,7 @@ void GameView::render()
 	}
 
 	// Enable alpha for the UI
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 	if (renderDirectToWindow)
 	{
 		drawer.setWindowRenderTarget(gameScreenRect);
@@ -813,6 +811,84 @@ void GameView::render()
 			drawer.printText(font, Vec2i(gameScreenRect.width - 3, 2), String(0, "%d FPS", roundToInt((float)(1.0 / averageTime))), 3);
 		}
 	}
+
+#if defined(PLATFORM_WII)
+	{
+		uint32 planes = 0;
+		uint32 sprites = 0;
+		uint32 texturedRects = 0;
+		uint32 rects = 0;
+		uint32 viewports = 0;
+		for (const Geometry* geometry : videoOut.getGeometries())
+		{
+			if (nullptr == geometry)
+				continue;
+			switch (geometry->getType())
+			{
+				case Geometry::Type::PLANE:		  ++planes;		  break;
+				case Geometry::Type::SPRITE:		  ++sprites;		  break;
+				case Geometry::Type::TEXTURED_RECT: ++texturedRects; break;
+				case Geometry::Type::RECT:		  ++rects;		  break;
+				case Geometry::Type::VIEWPORT:	  ++viewports;	  break;
+				default: break;
+			}
+		}
+
+		drawer.setBlendMode(BlendMode::ALPHA);
+		drawer.drawRect(Recti(0, 0, gameScreenRect.width, 50), Color(0.0f, 0.0f, 0.0f, 0.75f));
+		Font& font = SharedFonts::smallFont.getFontSafe();
+		drawer.printText(font, Vec2i(2, 2),
+			String(0, "GX active=%d geo=%u plane=%u spr=%u tex=%u rect=%u vp=%u",
+				videoOut.getRenderParts().getActiveDisplay() ? 1 : 0,
+				(uint32)videoOut.getGeometries().size(), planes, sprites, texturedRects, rects, viewports),
+			1, Color(0.35f, 1.0f, 0.35f));
+
+		const PlaneManager& planeManager = videoOut.getRenderParts().getPlaneManager();
+		const PaletteManager& paletteManager = videoOut.getRenderParts().getPaletteManager();
+		const Vec2i playfieldSize = planeManager.getPlayfieldSizeInPatterns();
+		const uint16 planeB0 = planeManager.getPatternAtIndex(PlaneManager::PLANE_B, 0);
+		const uint16 planeA0 = planeManager.getPatternAtIndex(PlaneManager::PLANE_A, 0);
+		const uint16 planeW0 = planeManager.getPatternAtIndex(PlaneManager::PLANE_W, 0);
+		String details;
+		details << "PF=" << playfieldSize.x << "x" << playfieldSize.y
+			<< " B0=" << rmx::hexString(planeB0, 4)
+			<< " A0=" << rmx::hexString(planeA0, 4)
+			<< " W0=" << rmx::hexString(planeW0, 4)
+			<< " C1=" << rmx::hexString(paletteManager.getMainPalette(0).getEntry(1), 8)
+			<< " C15=" << rmx::hexString(paletteManager.getMainPalette(0).getEntry(15), 8)
+			<< " BG=" << rmx::hexString(paletteManager.getBackdropColor().getABGR32(), 8);
+		drawer.printText(font, Vec2i(2, 14), details, 1, Color(0.35f, 1.0f, 0.35f));
+
+		Simulation& simulation = Application::instance().getSimulation();
+		CodeExec& codeExec = simulation.getCodeExec();
+		drawer.printText(font, Vec2i(2, 26),
+			String(0, "SIM run=%d spd=%0.2f frame=%u code=%d stack=%u possible=%d prog=%d",
+				simulation.isRunning() ? 1 : 0,
+				simulation.getSpeed(),
+				simulation.getFrameNumber(),
+				(int)codeExec.getExecutionState(),
+				(uint32)codeExec.getLemonScriptRuntime().getCallStackSize(),
+				codeExec.isCodeExecutionPossible() ? 1 : 0,
+				codeExec.getLemonScriptProgram().hasValidProgram() ? 1 : 0),
+			1, Color(0.35f, 1.0f, 0.35f));
+
+		const LemonScriptProgram::BinaryLoadDebug& scriptDebug = codeExec.getLemonScriptProgram().getLastBinaryLoadDebug();
+		drawer.printText(font, Vec2i(2, 38),
+			String(0, "BIN try=%d file=%d head=%d ok=%d err=%d bytes=%u ver=%u dep=%s/%s app=%s/%s",
+				scriptDebug.mAttempted ? 1 : 0,
+				scriptDebug.mFileLoaded ? 1 : 0,
+				scriptDebug.mHeaderValid ? 1 : 0,
+				scriptDebug.mSerializeSucceeded ? 1 : 0,
+				scriptDebug.mSerializerError ? 1 : 0,
+				scriptDebug.mBytes,
+				(uint32)scriptDebug.mVersion,
+				*rmx::hexString(scriptDebug.mReadDependencyHash, 8),
+				*rmx::hexString(scriptDebug.mExpectedDependencyHash, 8),
+				*rmx::hexString(scriptDebug.mReadAppVersion, 8),
+				*rmx::hexString(scriptDebug.mExpectedAppVersion, 8)),
+			1, Color(0.35f, 1.0f, 0.35f));
+	}
+#endif
 
 	if (!renderDirectToWindow)
 	{

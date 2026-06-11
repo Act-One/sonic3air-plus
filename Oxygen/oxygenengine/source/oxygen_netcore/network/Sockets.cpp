@@ -9,6 +9,230 @@
 #include "oxygen_netcore/pch.h"
 #include "oxygen_netcore/network/Sockets.h"
 
+#if defined(PLATFORM_WII)
+
+void Sockets::startupSockets()
+{
+	mIsInitialized = true;
+}
+
+void Sockets::shutdownSockets()
+{
+	mIsInitialized = false;
+}
+
+bool Sockets::resolveToIP(const std::string& hostName, std::string& outIP, bool useIPv6)
+{
+	(void)hostName;
+	(void)useIPv6;
+	outIP.clear();
+	return false;
+}
+
+bool SocketAddress::operator==(const SocketAddress& other) const
+{
+	assureIpPort();
+	other.assureIpPort();
+	return (mIP == other.mIP && mPort == other.mPort);
+}
+
+std::string SocketAddress::toLoggedString() const
+{
+	assureIpPort();
+	if (mPreventIPLogging)
+	{
+		return "[IP]:" + std::to_string(mPort);
+	}
+	return mIP + ':' + std::to_string(mPort);
+}
+
+uint64 SocketAddress::getHash() const
+{
+	assureIpPort();
+	const std::string key = mIP + ':' + std::to_string(mPort);
+	return rmx::getMurmur2_64(reinterpret_cast<const uint8*>(key.c_str()), key.length());
+}
+
+void SocketAddress::assureSockAddr() const
+{
+	if (!mHasSockAddr)
+	{
+		memset(mSockAddr, 0, sizeof(mSockAddr));
+		mHasSockAddr = true;
+	}
+}
+
+void SocketAddress::assureIpPort() const
+{
+	if (!mHasIpPort)
+	{
+		mIP.clear();
+		mPort = 0;
+		mHasIpPort = true;
+	}
+}
+
+struct TCPSocket::Internal
+{
+	SocketAddress mRemoteAddress;
+};
+
+TCPSocket::TCPSocket()
+{
+}
+
+TCPSocket::~TCPSocket()
+{
+	delete mInternal;
+	mInternal = nullptr;
+}
+
+bool TCPSocket::isValid() const
+{
+	return false;
+}
+
+void TCPSocket::close()
+{
+	delete mInternal;
+	mInternal = nullptr;
+}
+
+const SocketAddress& TCPSocket::getRemoteAddress()
+{
+	static SocketAddress EMPTY;
+	return (nullptr != mInternal) ? mInternal->mRemoteAddress : EMPTY;
+}
+
+void TCPSocket::swapWith(TCPSocket& other)
+{
+	std::swap(mInternal, other.mInternal);
+}
+
+bool TCPSocket::setupServer(uint16 serverPort, Sockets::ProtocolFamily protocolFamily)
+{
+	(void)serverPort;
+	(void)protocolFamily;
+	return false;
+}
+
+bool TCPSocket::acceptConnection(TCPSocket& outSocket)
+{
+	(void)outSocket;
+	return false;
+}
+
+bool TCPSocket::connectTo(const std::string& serverAddress, uint16 serverPort, Sockets::ProtocolFamily protocolFamily)
+{
+	(void)serverAddress;
+	(void)serverPort;
+	(void)protocolFamily;
+	return false;
+}
+
+bool TCPSocket::sendData(const uint8* data, size_t length)
+{
+	(void)data;
+	(void)length;
+	return false;
+}
+
+bool TCPSocket::sendData(const std::vector<uint8>& data)
+{
+	(void)data;
+	return false;
+}
+
+bool TCPSocket::receiveBlocking(ReceiveResult& outReceiveResult)
+{
+	outReceiveResult.mBuffer.clear();
+	return false;
+}
+
+bool TCPSocket::receiveNonBlocking(ReceiveResult& outReceiveResult)
+{
+	outReceiveResult.mBuffer.clear();
+	return false;
+}
+
+bool TCPSocket::receiveInternal(ReceiveResult& outReceiveResult)
+{
+	outReceiveResult.mBuffer.clear();
+	return false;
+}
+
+struct UDPSocket::Internal
+{
+};
+
+UDPSocket::~UDPSocket()
+{
+	delete mInternal;
+	mInternal = nullptr;
+}
+
+bool UDPSocket::isValid() const
+{
+	return false;
+}
+
+void UDPSocket::close()
+{
+	delete mInternal;
+	mInternal = nullptr;
+}
+
+bool UDPSocket::bindToPort(uint16 port, Sockets::ProtocolFamily protocolFamily)
+{
+	(void)port;
+	(void)protocolFamily;
+	return false;
+}
+
+bool UDPSocket::bindToAnyPort(Sockets::ProtocolFamily protocolFamily)
+{
+	(void)protocolFamily;
+	return false;
+}
+
+bool UDPSocket::sendData(const uint8* data, size_t length, const SocketAddress& destinationAddress)
+{
+	(void)data;
+	(void)length;
+	(void)destinationAddress;
+	return false;
+}
+
+bool UDPSocket::sendData(const std::vector<uint8>& data, const SocketAddress& destinationAddress)
+{
+	(void)data;
+	(void)destinationAddress;
+	return false;
+}
+
+bool UDPSocket::receiveBlocking(ReceiveResult& outReceiveResult)
+{
+	outReceiveResult.mBuffer.clear();
+	outReceiveResult.mSenderAddress.clear();
+	return false;
+}
+
+bool UDPSocket::receiveNonBlocking(ReceiveResult& outReceiveResult)
+{
+	outReceiveResult.mBuffer.clear();
+	outReceiveResult.mSenderAddress.clear();
+	return false;
+}
+
+bool UDPSocket::receiveInternal(ReceiveResult& outReceiveResult)
+{
+	outReceiveResult.mBuffer.clear();
+	outReceiveResult.mSenderAddress.clear();
+	return false;
+}
+
+#else
+
 #ifdef _WIN32
 	#define WIN32_LEAN_AND_MEAN
 	#include <winsock2.h>
@@ -79,7 +303,6 @@ namespace
 	#endif
 	}
 }
-
 
 void Sockets::startupSockets()
 {
@@ -894,3 +1117,5 @@ bool UDPSocket::receiveInternal(ReceiveResult& outReceiveResult)
 		return true;
 	}
 }
+
+#endif

@@ -217,9 +217,9 @@ namespace
 		gActiveProcUIDrawer = drawer;
 		if (nullptr != FTX::System)
 		{
-			FTX::System->setWiiUProcUIForegroundReleaseHandler(&GX2Drawer::releaseForegroundForProcUI);
+			const bool changed = FTX::System->setWiiUProcUIForegroundReleaseHandler(&GX2Drawer::releaseForegroundForProcUI);
 			static uint32 sRegistrationLogCount = 0;
-			if (sRegistrationLogCount < 8)
+			if (changed && sRegistrationLogCount < 8)
 			{
 				RMX_LOG_INFO("GX2Drawer: ProcUI foreground release handler registered (" << reason << ")");
 				++sRegistrationLogCount;
@@ -2064,7 +2064,14 @@ public:
 	{
 		RMX_LOG_INFO("GX2Drawer: shutdown begin");
 		const bool appProcUIActive = nullptr != FTX::System && FTX::System->isWiiUProcUIInitialized();
+		const bool appProcUIExiting = nullptr != FTX::System && FTX::System->isWiiUProcUIExitRequested();
 		const bool appOwnsForeground = !appProcUIActive || !ProcUIIsRunning() || ProcUIInForeground();
+		if (appProcUIExiting)
+		{
+			RMX_LOG_INFO("GX2Drawer: leaving GX2 resources for ProcUI process teardown");
+			gSkipGX2TextureDestroy = true;
+			return;
+		}
 		if constexpr (SKIP_GX2_TEARDOWN_ON_EXIT)
 		{
 			RMX_LOG_INFO("GX2Drawer: leaving GX2 resources for process teardown");
@@ -2088,7 +2095,7 @@ public:
 			RMX_LOG_INFO("GX2Drawer: dropping active frame state during background teardown");
 			finishFrame();
 		}
-		if (mCommandBuffer && appOwnsForeground)
+		if (mCommandBuffer && appOwnsForeground && !appProcUIActive)
 		{
 			RMX_LOG_INFO("GX2Drawer: disabling scanout during shutdown");
 			GX2SetTVEnable(FALSE);
@@ -3557,8 +3564,8 @@ public:
 			{
 				GX2SetAlphaTest(TRUE, GX2_COMPARE_FUNC_GREATER, 0.0f);
 				GX2SetColorControl(GX2_LOGIC_OP_COPY, GX2_BLEND_MASK_ALL_TARGETS, FALSE, TRUE);
-				GX2SetBlendControl(GX2_RENDER_TARGET_0, GX2_BLEND_MODE_SRC_ALPHA, GX2_BLEND_MODE_INV_SRC_ALPHA, GX2_BLEND_COMBINE_MODE_ADD, TRUE,
-					GX2_BLEND_MODE_SRC_ALPHA, GX2_BLEND_MODE_INV_SRC_ALPHA, GX2_BLEND_COMBINE_MODE_ADD);
+				GX2SetBlendControl(GX2_RENDER_TARGET_0, GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ZERO, GX2_BLEND_COMBINE_MODE_ADD, GX2_DISABLE,
+					GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_ZERO, GX2_BLEND_COMBINE_MODE_ADD);
 				break;
 			}
 			case BlendMode::ALPHA:
@@ -4513,19 +4520,6 @@ public:
 	{
 		if (nullptr == dc.mResources || !PlaneManager::isRenderablePlaneIndex(dc.mPlaneIndex))
 			return false;
-		if (dc.mPriorityFlag && !dc.mResources->hasPriorityPlanePatterns(dc.mPlaneIndex))
-		{
-			static uint32 sLoggedMissingPriorityPlaneCount = 0;
-			if (sLoggedMissingPriorityPlaneCount < 2)
-			{
-				++sLoggedMissingPriorityPlaneCount;
-				RMX_LOG_INFO("GX2Drawer: skipping empty priority plane"
-					<< " plane=" << dc.mPlaneIndex
-					<< " rect=" << dc.mActiveRect.x << "," << dc.mActiveRect.y << " " << dc.mActiveRect.width << "x" << dc.mActiveRect.height
-					<< " scroll=" << (int)dc.mScrollOffsets);
-			}
-			return false;
-		}
 
 		RenderParts& renderParts = dc.mResources->getRenderParts();
 		const int splitY = renderParts.getPaletteManager().mSplitPositionY;
@@ -5769,6 +5763,17 @@ GX2Drawer::GX2Drawer() :
 GX2Drawer::~GX2Drawer()
 {
 #if defined(PLATFORM_WIIU)
+	const bool procUIExit = nullptr != FTX::System && FTX::System->isWiiUProcUIExitRequested();
+	if (procUIExit)
+	{
+		RMX_LOG_INFO("GX2Drawer: leaving drawer object internals for ProcUI process teardown");
+		if (gActiveProcUIDrawer == this)
+		{
+			gActiveProcUIDrawer = nullptr;
+		}
+		gSkipGX2TextureDestroy = true;
+		return;
+	}
 	if (gActiveProcUIDrawer == this)
 	{
 		if (nullptr != FTX::System)
@@ -6170,7 +6175,8 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 	}
 	if constexpr (ENABLE_GX2_MENU_COMMAND_TRACE)
 	{
-		if (!mInternal.mMenuCommandTraceDone && mInternal.mPresentCount > 180 && drawCommands.size() >= 16)
+		static uint32 sMenuCommandTraceCount = 0;
+		if (sMenuCommandTraceCount < 6 && mInternal.mPresentCount > 180 && drawCommands.size() >= 16)
 		{
 			bool hasMenuText = false;
 			for (DrawCommand* command : drawCommands)
@@ -6183,7 +6189,7 @@ void GX2Drawer::performRendering(const DrawCollection& drawCollection)
 			}
 			if (hasMenuText)
 			{
-				mInternal.mMenuCommandTraceDone = true;
+				++sMenuCommandTraceCount;
 				RMX_LOG_INFO("GX2Drawer menu trace: commands=" << drawCommands.size()
 					<< " presentCount=" << mInternal.mPresentCount);
 				int commandIndex = 0;

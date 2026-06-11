@@ -114,6 +114,26 @@ namespace rmx
 		static void mixAudioStatic(void* _userdata, uint8* outputStream, int outputBytes);
 		void mixAudio(uint8* outputStream, int outputBytes);
 
+	#if defined(PLATFORM_WII)
+		static const constexpr int WII_AUDIO_BUFFER_COUNT = 4;
+		enum class WiiAudioBufferState : uint8
+		{
+			EMPTY = 0,
+			FILLING,
+			READY,
+			QUEUED
+		};
+
+		void initializeWiiAudio(int audioBufferSamples);
+		void shutdownWiiAudio();
+		void fillWiiAudioBuffers();
+		void silenceWiiAudioBuffers();
+		static void wiiAudioDmaCallbackStatic();
+		void wiiAudioDmaCallback();
+
+		static AudioManager* sWiiAudioManager;
+	#endif
+
 	private:
 		SDL_AudioDeviceID mAudioDeviceID = 0;		// Audio device opened by SDL
 		SDL_AudioSpec mFormat;						// Audio format
@@ -129,6 +149,18 @@ namespace rmx
 		// Mixers
 		std::map<int, AudioMixer*> mAudioMixers;
 		AudioMixer& mRootMixer;				// Root audio mixer
+
+	#if defined(PLATFORM_WII)
+		void* mWiiAudioBuffers[WII_AUDIO_BUFFER_COUNT] = {};
+		void* mWiiAudioSilenceBuffer = nullptr;
+		uint32 mWiiAudioBufferBytes = 0;
+		volatile uint8 mWiiAudioBufferStates[WII_AUDIO_BUFFER_COUNT] = {};
+		volatile int mWiiAudioSearchIndex = 0;
+		volatile int mWiiAudioLastQueuedBuffer = -1;
+		bool mWiiAudioInitialized = false;
+		bool mWiiAudioRunning = false;
+		bool mWiiAudioPaused = true;
+	#endif
 	};
 
 

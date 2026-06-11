@@ -28,6 +28,7 @@ public:
 		D3D11_FULL	= 0x31,
 		VULKAN_SOFT	= 0x40,
 		VULKAN_FULL	= 0x41,
+		GX_FULL		= 0x50,
 		GX2_FULL	= 0x51
 	};
 
@@ -142,6 +143,7 @@ public:
 	static bool isOpenGLRenderMethod(RenderMethod renderMethod);
 	static bool isDirect3D11RenderMethod(RenderMethod renderMethod);
 	static bool isVulkanRenderMethod(RenderMethod renderMethod);
+	static bool isGXRenderMethod(RenderMethod renderMethod);
 	static bool isGX2RenderMethod(RenderMethod renderMethod);
 	static bool renderMethodSupportsNativeVSync(RenderMethod renderMethod);
 	static bool useVSync(FrameSyncType frameSyncType);

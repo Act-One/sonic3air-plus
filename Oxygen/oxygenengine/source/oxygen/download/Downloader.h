@@ -55,7 +55,7 @@ private:
 	State mState = State::NONE;
 	std::wstring mOutputFilename;
 	FileHandle mOutputFile;
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WIIU) || defined(PLATFORM_WII)
 	uint64 mBytesDownloaded = 0;
 	bool mThreadRunning = false;
 #else

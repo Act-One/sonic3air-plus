@@ -21,6 +21,9 @@
 #endif
 #include "oxygen/rendering/RenderResources.h"
 #include "oxygen/rendering/opengl/OpenGLRenderer.h"
+#if defined(PLATFORM_WII)
+#include "oxygen/rendering/gx/GXRenderer.h"
+#endif
 #if defined(PLATFORM_WIIU)
 #include "oxygen/rendering/gx2/GX2Renderer.h"
 #endif
@@ -56,16 +59,27 @@ VideoOut::~VideoOut()
 #ifdef RMX_WITH_OPENGL_SUPPORT
 	delete mOpenGLRenderer;
 #endif
+#if defined(PLATFORM_WII)
+	delete mGXRenderer;
+#endif
 }
 
 namespace
 {
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 	constexpr bool ENABLE_WIIU_VIDEOOUT_TIMING_LOGS = false;
+#if defined(PLATFORM_WII)
+	constexpr int WII_SAFE_GAME_WIDTH = 400;
+	constexpr int WII_SAFE_GAME_HEIGHT = 224;
+	constexpr int WII_SCANOUT_WIDTH = 400;
+	constexpr int WII_SCANOUT_HEIGHT = 224;
+#endif
+#if defined(PLATFORM_WIIU)
 	constexpr int WIIU_SAFE_GAME_WIDTH = 400;
 	constexpr int WIIU_SAFE_GAME_HEIGHT = 224;
 	constexpr int WIIU_SCANOUT_WIDTH = 427;
 	constexpr int WIIU_SCANOUT_HEIGHT = 240;
+#endif
 
 	double getElapsedMilliseconds(uint64 start, uint64 end)
 	{
@@ -75,8 +89,12 @@ namespace
 
 	Vec2i sanitizeGameResolution(const Vec2i& screenSize)
 	{
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII)
+		const Vec2i scanoutSize(WII_SCANOUT_WIDTH, WII_SCANOUT_HEIGHT);
+#elif defined(PLATFORM_WIIU)
 		const Vec2i scanoutSize(WIIU_SCANOUT_WIDTH, WIIU_SCANOUT_HEIGHT);
+#endif
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 		if (screenSize == scanoutSize)
 			return screenSize;
 
@@ -116,7 +134,9 @@ uint32 VideoOut::getScreenHeight() const
 
 Vec2i VideoOut::getScreenSize() const
 {
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII)
+	return Vec2i(WII_SAFE_GAME_WIDTH, WII_SAFE_GAME_HEIGHT);
+#elif defined(PLATFORM_WIIU)
 	return Vec2i(WIIU_SAFE_GAME_WIDTH, WIIU_SAFE_GAME_HEIGHT);
 #else
 	return sanitizeGameResolution(mGameResolution);
@@ -129,7 +149,7 @@ Recti VideoOut::getScreenRect() const
 	return Recti(0, 0, screenSize.x, screenSize.y);
 }
 
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 Vec2i VideoOut::getScanoutSize() const
 {
 	return sanitizeGameResolution(mGameResolution);
@@ -214,9 +234,26 @@ void VideoOut::destroyRenderer()
 	SAFE_DELETE(mOpenGLRenderer);
 	RMX_LOG_INFO("VideoOut: destroyRenderer opengl complete");
 #endif
+#if defined(PLATFORM_WII)
+	RMX_LOG_INFO("VideoOut: destroyRenderer gx begin");
+	SAFE_DELETE(mGXRenderer);
+	RMX_LOG_INFO("VideoOut: destroyRenderer gx complete");
+#endif
 #if defined(PLATFORM_WIIU)
 	RMX_LOG_INFO("VideoOut: destroyRenderer gx2 begin");
-	SAFE_DELETE(mGX2Renderer);
+	if (nullptr != mGX2Renderer && nullptr != FTX::System && FTX::System->isWiiUProcUIExitRequested())
+	{
+		RMX_LOG_INFO("VideoOut: leaving gx2 renderer allocated for ProcUI process teardown");
+		if (mActiveRenderer == mGX2Renderer)
+		{
+			mActiveRenderer = nullptr;
+		}
+		mGX2Renderer = nullptr;
+	}
+	else
+	{
+		SAFE_DELETE(mGX2Renderer);
+	}
 	RMX_LOG_INFO("VideoOut: destroyRenderer gx2 complete");
 #endif
 	mActiveRenderer = nullptr;
@@ -226,6 +263,21 @@ void VideoOut::destroyRenderer()
 void VideoOut::setActiveRenderer(Configuration::RenderMethod renderMethod, bool reset)
 {
 	Renderer* selectedRenderer = nullptr;
+
+#if defined(PLATFORM_WII)
+	if (renderMethod == Configuration::RenderMethod::GX_FULL)
+	{
+		if (nullptr == mGXRenderer)
+		{
+			RMX_LOG_INFO("VideoOut: Creating GX renderer");
+			mGXRenderer = new GXRenderer(*mRenderParts, mGameScreenTexture);
+
+			RMX_LOG_INFO("VideoOut: GX renderer initialization");
+			mGXRenderer->initialize();
+		}
+		selectedRenderer = mGXRenderer;
+	}
+#endif
 
 #if defined(PLATFORM_WIIU)
 	if (renderMethod == Configuration::RenderMethod::GX2_FULL)
@@ -419,7 +471,7 @@ bool VideoOut::updateGameScreen()
 	return updateGameScreenInternal(false);
 }
 
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 bool VideoOut::updateGameScreenOnCurrentTarget(const Recti& targetRect)
 {
 	mCurrentTargetRect = targetRect;
@@ -430,15 +482,26 @@ bool VideoOut::updateGameScreenOnCurrentTarget(const Recti& targetRect)
 
 bool VideoOut::canDrawGameScreenOnCurrentTarget() const
 {
+#if defined(PLATFORM_WII)
+	return mActiveRenderer == mGXRenderer && nullptr != mGXRenderer && mGXRenderer->canDrawPresentedGameScreenToCurrentTarget();
+#else
 	return mActiveRenderer == mGX2Renderer && nullptr != mGX2Renderer && mGX2Renderer->canDrawPresentedGameScreenToCurrentTarget();
+#endif
 }
 
 bool VideoOut::drawGameScreenOnCurrentTarget(const Recti& targetRect)
 {
+#if defined(PLATFORM_WII)
+	if (mActiveRenderer == mGXRenderer && nullptr != mGXRenderer)
+	{
+		return mGXRenderer->drawPresentedGameScreenToCurrentTarget(targetRect);
+	}
+#else
 	if (mActiveRenderer == mGX2Renderer && nullptr != mGX2Renderer)
 	{
 		return mGX2Renderer->drawPresentedGameScreenToCurrentTarget(targetRect);
 	}
+#endif
 	return false;
 }
 #endif
@@ -449,9 +512,14 @@ bool VideoOut::updateGameScreenInternal(bool renderToCurrentTarget)
 
 	// Only render something if a frame simulation was completed in the meantime
 	const bool hasNewSimulationFrame = (mFrameState == FrameState::FRAME_READY);
-	if (!hasNewSimulationFrame && !mFrameInterpolation.mCurrentlyInterpolating && !mDebugDrawRenderingRequested && !mRequireGameScreenUpdate)
+#if defined(PLATFORM_WII)
+	const bool redrawCurrentTargetOnly = renderToCurrentTarget && (mActiveRenderer == mGXRenderer);
+#else
+	const bool redrawCurrentTargetOnly = false;
+#endif
+	const bool shouldRedrawPreviousFrame = redrawCurrentTargetOnly && !hasNewSimulationFrame && !mFrameInterpolation.mCurrentlyInterpolating && !mDebugDrawRenderingRequested && !mRequireGameScreenUpdate;
+	if (!hasNewSimulationFrame && !mFrameInterpolation.mCurrentlyInterpolating && !mDebugDrawRenderingRequested && !mRequireGameScreenUpdate && !shouldRedrawPreviousFrame)
 	{
-		(void)renderToCurrentTarget;
 		// No update
 		return false;
 	}
@@ -460,7 +528,7 @@ bool VideoOut::updateGameScreenInternal(bool renderToCurrentTarget)
 	mRequireGameScreenUpdate = false;
 
 	RefreshParameters refreshParameters;
-	refreshParameters.mSkipThisFrame = false;
+	refreshParameters.mSkipThisFrame = shouldRedrawPreviousFrame;
 	refreshParameters.mHasNewSimulationFrame = hasNewSimulationFrame;
 	refreshParameters.mUsingFrameInterpolation = mFrameInterpolation.mCurrentlyInterpolating;
 	refreshParameters.mInterFramePosition = mFrameInterpolation.mInterFramePosition;
@@ -497,7 +565,7 @@ bool VideoOut::updateGameScreenInternal(bool renderToCurrentTarget)
 #else
 	if (renderToCurrentTarget)
 	{
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 		renderGameScreenToCurrentTarget(mCurrentTargetRect);
 #else
 		renderGameScreen();
@@ -812,7 +880,7 @@ void VideoOut::renderGameScreen()
 	// Render them
 	mActiveRenderer->renderGameScreen(mGeometries);
 }
-#if defined(PLATFORM_WIIU)
+#if defined(PLATFORM_WII) || defined(PLATFORM_WIIU)
 void VideoOut::renderGameScreenToCurrentTarget(const Recti& targetRect)
 {
 #if defined(PLATFORM_WIIU)
@@ -827,11 +895,20 @@ void VideoOut::renderGameScreenToCurrentTarget(const Recti& targetRect)
 	const uint64 t1 = ENABLE_WIIU_VIDEOOUT_TIMING_LOGS ? SDL_GetPerformanceCounter() : 0;
 #endif
 
+#if defined(PLATFORM_WII)
+	if (mActiveRenderer == mGXRenderer && nullptr != mGXRenderer)
+	{
+		mGXRenderer->renderGameScreenToCurrentTarget(mGeometries, targetRect);
+	}
+	else
+#endif
+#if defined(PLATFORM_WIIU)
 	if (mActiveRenderer == mGX2Renderer && nullptr != mGX2Renderer)
 	{
 		mGX2Renderer->renderGameScreenToCurrentTarget(mGeometries, targetRect);
 	}
 	else
+#endif
 	{
 		mActiveRenderer->renderGameScreen(mGeometries);
 	}

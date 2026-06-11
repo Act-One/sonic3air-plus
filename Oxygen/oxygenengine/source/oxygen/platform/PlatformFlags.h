@@ -23,7 +23,7 @@
 #elif defined(PLATFORM_ANDROID) || defined(PLATFORM_IOS) || defined(PLATFORM_WEB)
 	#define PLATFORM_IS_MOBILE
 
-#elif defined(PLATFORM_WIIU) || defined(PLATFORM_SWITCH) || defined(PLATFORM_VITA)
+#elif defined(PLATFORM_WII) || defined(PLATFORM_WIIU) || defined(PLATFORM_SWITCH) || defined(PLATFORM_VITA)
 	#define PLATFORM_IS_CONSOLE
 #endif
 

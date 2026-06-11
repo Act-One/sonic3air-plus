@@ -49,6 +49,21 @@ public:
 		uint32 mAppVersion = 0;
 	};
 
+	struct BinaryLoadDebug
+	{
+		bool mAttempted = false;
+		bool mFileLoaded = false;
+		bool mHeaderValid = false;
+		bool mSerializeSucceeded = false;
+		bool mSerializerError = false;
+		uint32 mBytes = 0;
+		uint16 mVersion = 0;
+		uint32 mReadDependencyHash = 0;
+		uint32 mExpectedDependencyHash = 0;
+		uint32 mReadAppVersion = 0;
+		uint32 mExpectedAppVersion = 0;
+	};
+
 	enum class LoadScriptsResult
 	{
 		NO_CHANGE,
@@ -90,6 +105,7 @@ public:
 
 	bool hasValidProgram() const;
 	LoadScriptsResult loadScripts(std::wstring_view baseScriptFilename, const LoadOptions& loadOptions);
+	const BinaryLoadDebug& getLastBinaryLoadDebug() const;
 
 	const Hook* checkForUpdateHook(bool post);
 	const Hook* checkForAddressHook(uint32 address);
