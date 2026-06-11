@@ -25,15 +25,11 @@
 
 namespace
 {
-	constexpr bool ENABLE_GX2_RENDERER_DIAGNOSTIC_DUMPS = false;
 	constexpr bool ENABLE_GX2_RENDERER_FRAME_LOGS = false;
 	constexpr bool ENABLE_GX2_RENDERER_SPRITE_TRACE = false;
-	constexpr bool ENABLE_GX2_RENDERER_COMPATIBILITY_LOGS = false;
-	constexpr bool FORCE_SOFTWARE_GAME_RENDERER = false;
 	constexpr bool FORCE_NATIVE_WINDOW_GAME_OFFSCREEN = true;
 	constexpr bool USE_INDEXED_PALETTE_SPRITE_SHADER = true;
 	constexpr bool USE_ATLAS_VDP_SPRITE_SHADER = true;
-	constexpr bool ENABLE_GX2_FALLBACK_BITMAP_LOGS = false;
 	constexpr bool ENABLE_NATIVE_PRIORITY_DEPTH = true;
 #if defined(PLATFORM_WIIU)
 	constexpr int WIIU_SAFE_GAME_WIDTH = 400;
@@ -95,127 +91,6 @@ namespace
 		}
 		return false;
 	}
-// use software rendering here, GX2 rendering doesn't yet support this and it's used in some non-gameplay scenes
-// add GX2 support for it eventually. for now this is a pretty nasty hack
-	bool isDefaultPlaneRenderQueue(uint16 renderQueue)
-	{
-		switch (renderQueue)
-		{
-			case 0x1000:
-			case 0x2000:
-			case 0x2200:
-			case 0x3000:
-			case 0x4000:
-			case 0x4200:
-				return true;
-
-			default:
-				return false;
-		}
-	}
-
-	bool spriteNeedsSoftwareParityFallback(const SpriteGeometry& geometry)
-	{
-		const renderitems::SpriteInfo& spriteInfo = geometry.mSpriteInfo;
-		switch (spriteInfo.getType())
-		{
-			case RenderItem::Type::COMPONENT_SPRITE:
-			{
-				const renderitems::ComponentSpriteInfo& componentSprite = static_cast<const renderitems::ComponentSpriteInfo&>(spriteInfo);
-				return !componentSprite.mTransformation.isIdentity();
-			}
-
-			case RenderItem::Type::PALETTE_SPRITE:
-			{
-				const renderitems::PaletteSpriteInfo& paletteSprite = static_cast<const renderitems::PaletteSpriteInfo&>(spriteInfo);
-				return !paletteSprite.mTransformation.isIdentity();
-			}
-
-			default:
-				return false;
-		}
-	}
-
-	void dumpBitmapPpmOnce(const char* path, const Bitmap& bitmap)
-	{
-		static std::unordered_set<std::string> dumpedPaths;
-		if (bitmap.empty() || !dumpedPaths.insert(path).second)
-			return;
-
-		FILE* file = fopen(path, "wb");
-		if (nullptr == file)
-			return;
-
-		fprintf(file, "P6\n%d %d\n255\n", bitmap.getWidth(), bitmap.getHeight());
-		for (int y = 0; y < bitmap.getHeight(); ++y)
-		{
-			const uint8* src = reinterpret_cast<const uint8*>(bitmap.getPixelPointer(0, y));
-			for (int x = 0; x < bitmap.getWidth(); ++x)
-			{
-				const uint8 rgb[3] =
-				{
-					src[x * 4 + ABGR32_BYTE_R],
-					src[x * 4 + ABGR32_BYTE_G],
-					src[x * 4 + ABGR32_BYTE_B]
-				};
-				fwrite(rgb, 1, sizeof(rgb), file);
-			}
-		}
-		fclose(file);
-		RMX_LOG_INFO("GX2Renderer: dumped diagnostic bitmap " << path << " size=" << bitmap.getWidth() << "x" << bitmap.getHeight());
-	}
-
-	struct BitmapSample
-	{
-		uint32 nonBlackSamples = 0;
-		uint32 alphaSamples = 0;
-		uint32 sampleXor = 0;
-		uint32 center = 0;
-	};
-
-	BitmapSample sampleBitmapRegion(const Bitmap& bitmap, const Recti& requestedRect)
-	{
-		BitmapSample sample;
-		if (bitmap.empty())
-			return sample;
-
-		const int width = bitmap.getWidth();
-		const int height = bitmap.getHeight();
-		const int x0 = clamp(requestedRect.x, 0, width);
-		const int y0 = clamp(requestedRect.y, 0, height);
-		const int x1 = clamp(requestedRect.x + requestedRect.width, 0, width);
-		const int y1 = clamp(requestedRect.y + requestedRect.height, 0, height);
-		const int regionWidth = x1 - x0;
-		const int regionHeight = y1 - y0;
-		if (regionWidth <= 0 || regionHeight <= 0)
-			return sample;
-
-		sample.center = *bitmap.getPixelPointer(x0 + regionWidth / 2, y0 + regionHeight / 2);
-		for (int yIndex = 0; yIndex < 8; ++yIndex)
-		{
-			const int y = y0 + ((regionHeight <= 1) ? 0 : (int)(((uint64)yIndex * (uint64)(regionHeight - 1)) / 7u));
-			for (int xIndex = 0; xIndex < 8; ++xIndex)
-			{
-				const int x = x0 + ((regionWidth <= 1) ? 0 : (int)(((uint64)xIndex * (uint64)(regionWidth - 1)) / 7u));
-				const uint32 pixel = *bitmap.getPixelPointer(x, y);
-				if ((pixel & 0x00ffffffu) != 0)
-					++sample.nonBlackSamples;
-				if ((pixel & 0xff000000u) != 0)
-					++sample.alphaSamples;
-				sample.sampleXor ^= pixel;
-			}
-		}
-		return sample;
-	}
-
-	BitmapSample sampleBitmap(const Bitmap& bitmap)
-	{
-		if (bitmap.empty())
-			return BitmapSample();
-
-		return sampleBitmapRegion(bitmap, Recti(0, 0, bitmap.getWidth(), bitmap.getHeight()));
-	}
-
 #if defined(PLATFORM_WIIU)
 	Recti getWiiUSafeSourceRect(const DrawerTexture& texture)
 	{
@@ -342,43 +217,11 @@ namespace
 		}
 	}
 
-	const char* geometryTypeName(Geometry::Type type)
-	{
-		switch (type)
-		{
-			case Geometry::Type::UNDEFINED:		return "undefined";
-			case Geometry::Type::PLANE:			return "plane";
-			case Geometry::Type::SPRITE:		return "sprite";
-			case Geometry::Type::RECT:			return "rect";
-			case Geometry::Type::TEXTURED_RECT:	return "textured_rect";
-			case Geometry::Type::VIEWPORT:		return "viewport";
-			case Geometry::Type::EFFECT_BLUR:	return "effect_blur";
-			default:							return "unknown";
-		}
-	}
-
-	const char* renderItemTypeName(RenderItem::Type type)
-	{
-		switch (type)
-		{
-			case RenderItem::Type::VDP_SPRITE:		return "vdp_sprite";
-			case RenderItem::Type::PALETTE_SPRITE:	return "palette_sprite";
-			case RenderItem::Type::COMPONENT_SPRITE:return "component_sprite";
-			case RenderItem::Type::SPRITE_MASK:		return "sprite_mask";
-			case RenderItem::Type::RECTANGLE:		return "rectangle";
-			case RenderItem::Type::TEXT:			return "text";
-			case RenderItem::Type::VIEWPORT:		return "viewport";
-			case RenderItem::Type::INVALID:			return "invalid";
-			default:								return "unknown";
-		}
-	}
-
 }
 
 
 GX2Renderer::GX2Renderer(RenderParts& renderParts, DrawerTexture& outputTexture) :
 	Renderer(RENDERER_TYPE_ID, renderParts, outputTexture),
-	mSoftwareRenderer(renderParts, outputTexture),
 	mRenderResources(renderParts)
 {
 }
@@ -388,22 +231,11 @@ void GX2Renderer::initialize()
 	mGameResolution = Configuration::instance().mGameScreen;
 	mRenderResources.initialize();
 	invalidateNativeRenderTarget();
-	if constexpr (FORCE_SOFTWARE_GAME_RENDERER)
-	{
-		RMX_LOG_WARNING("GX2Renderer: forced software game renderer output");
-	}
-	else
-	{
-		RMX_LOG_INFO("GX2Renderer: native GX2 game renderer enabled; software game bouncebacks disabled");
-	}
+	RMX_LOG_INFO("GX2Renderer: native GX2 game renderer enabled");
 }
 
 void GX2Renderer::reset()
 {
-	if (mSoftwareRendererInitialized)
-	{
-		mSoftwareRenderer.reset();
-	}
 	invalidateNativeRenderTarget();
 	mRenderResources.clearAllCaches();
 }
@@ -414,24 +246,13 @@ void GX2Renderer::setGameResolution(const Vec2i& gameResolution)
 		return;
 
 	mGameResolution = gameResolution;
-	if (mSoftwareRendererInitialized)
-	{
-		mSoftwareRenderer.setGameResolution(gameResolution);
-	}
 	invalidateNativeRenderTarget();
 	mRenderResources.clearAllCaches();
 }
 
 void GX2Renderer::clearGameScreen()
 {
-	if constexpr (FORCE_SOFTWARE_GAME_RENDERER)
-	{
-		renderHybridGameScreen({});
-	}
-	else
-	{
-		renderNativeGameScreen({});
-	}
+	renderNativeGameScreen({});
 }
 
 void GX2Renderer::renderGameScreen(const std::vector<Geometry*>& geometries)
@@ -475,48 +296,7 @@ void GX2Renderer::renderGameScreen(const std::vector<Geometry*>& geometries)
 	}
 	++sRenderFrame;
 
-	if constexpr (FORCE_SOFTWARE_GAME_RENDERER)
-	{
-		renderHybridGameScreen(geometries);
-		return;
-	}
-
-	if constexpr (ENABLE_GX2_RENDERER_COMPATIBILITY_LOGS)
-	{
-		if (shouldUseSoftwareGameRendering(geometries))
-		{
-			static uint32 sParityFallbackLogCount = 0;
-			if (sParityFallbackLogCount < 8)
-			{
-				RMX_LOG_INFO("GX2Renderer: formerly-software parity frame is using native GX2");
-				++sParityFallbackLogCount;
-			}
-		}
-	}
-
 	mRenderResources.refresh();
-	if constexpr (ENABLE_GX2_RENDERER_COMPATIBILITY_LOGS)
-	{
-		if (!supportsNativeRendering(geometries))
-		{
-			static uint32 sFallbackLogCount = 0;
-			if (sFallbackLogCount < 8)
-			{
-				for (const Geometry* geometry : geometries)
-				{
-					if (nullptr != geometry && !supportsNativeGeometry(*geometry))
-					{
-						RMX_LOG_INFO("GX2Renderer: native offscreen path will skip unsupported geometry=" << geometryTypeName(geometry->getType())
-							<< ((geometry->getType() == Geometry::Type::SPRITE) ? " sprite=" : "")
-							<< ((geometry->getType() == Geometry::Type::SPRITE) ? renderItemTypeName(geometry->as<SpriteGeometry>().mSpriteInfo.getType()) : ""));
-						++sFallbackLogCount;
-						break;
-					}
-				}
-			}
-		}
-	}
-
 	renderNativeGameScreen(geometries);
 }
 
@@ -533,58 +313,6 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 	Drawer& drawer = EngineMain::instance().getDrawer();
 	const Recti viewport = targetRect.empty() ? Recti(0, 0, mGameResolution.x, mGameResolution.y) : targetRect;
 	mCurrentTargetAlreadyHasNativeFrame = false;
-	if constexpr (FORCE_SOFTWARE_GAME_RENDERER)
-	{
-		std::vector<Geometry*> softwareGeometries;
-		prepareHybridOverlayGeometries(geometries, softwareGeometries);
-		renderHybridGameScreen(softwareGeometries);
-		DrawerTexture& presentTexture = updateGameScreenPresentTexture();
-		if (!mNativeOverlayGeometries.empty())
-		{
-			mRenderResources.refresh();
-		}
-		drawer.setWindowRenderTarget(viewport);
-		resetNativeQueuedState();
-		setNativeBlendMode(drawer, BlendMode::OPAQUE);
-		drawer.setSamplingMode(SamplingMode::POINT);
-		drawer.setWrapMode(TextureWrapMode::CLAMP);
-		drawer.drawRect(viewport, presentTexture);
-		if (!mNativeOverlayGeometries.empty())
-		{
-			bool scissorActive = false;
-			if (mNativeOverlayUsesInitialViewport)
-			{
-				drawer.pushScissor(mNativeOverlayInitialViewport);
-				scissorActive = true;
-			}
-			for (const Geometry* geometry : mNativeOverlayGeometries)
-			{
-				if (nullptr != geometry)
-				{
-					drawNativeGeometry(*geometry, scissorActive);
-				}
-			}
-			if (scissorActive)
-			{
-				drawer.popScissor();
-			}
-		}
-		mCurrentTargetAlreadyHasNativeFrame = true;
-		return;
-	}
-
-	if constexpr (ENABLE_GX2_RENDERER_COMPATIBILITY_LOGS)
-	{
-		if (shouldUseSoftwareGameRendering(geometries))
-		{
-			static uint32 sDirectParityFallbackLogCount = 0;
-			if (sDirectParityFallbackLogCount < 8)
-			{
-				RMX_LOG_INFO("GX2Renderer: formerly-software direct frame is using native GX2");
-				++sDirectParityFallbackLogCount;
-			}
-		}
-	}
 
 	mRenderResources.refresh();
 
@@ -663,28 +391,6 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 	}
 #endif
 
-	if constexpr (ENABLE_GX2_RENDERER_COMPATIBILITY_LOGS)
-	{
-		if (!supportsNativeRendering(geometries))
-		{
-			static uint32 sDirectFallbackLogCount = 0;
-			if (sDirectFallbackLogCount < 8)
-			{
-				for (const Geometry* geometry : geometries)
-				{
-					if (nullptr != geometry && !supportsNativeGeometry(*geometry))
-					{
-						RMX_LOG_INFO("GX2Renderer: native direct path will skip unsupported geometry=" << geometryTypeName(geometry->getType())
-							<< ((geometry->getType() == Geometry::Type::SPRITE) ? " sprite=" : "")
-							<< ((geometry->getType() == Geometry::Type::SPRITE) ? renderItemTypeName(geometry->as<SpriteGeometry>().mSpriteInfo.getType()) : ""));
-						++sDirectFallbackLogCount;
-						break;
-					}
-				}
-			}
-		}
-	}
-
 	if (requiresOffscreenNativeRendering(geometries))
 	{
 		static bool sLoggedOffscreenWindowPath = false;
@@ -708,8 +414,6 @@ void GX2Renderer::renderGameScreenToCurrentTarget(const std::vector<Geometry*>& 
 		return;
 	}
 
-	mNativeOverlayGeometries.clear();
-	mNativeOverlayUsesInitialViewport = false;
 	invalidateNativeRenderTarget();
 	drawer.setWindowRenderTarget(viewport);
 	resetNativeQueuedState();
@@ -794,33 +498,11 @@ bool GX2Renderer::drawPresentedGameScreenToCurrentTarget(const Recti& targetRect
 	drawer.drawRect(viewport, *texture);
 #endif
 
-	if (!mNativeOverlayGeometries.empty())
-	{
-		bool scissorActive = false;
-		if (mNativeOverlayUsesInitialViewport)
-		{
-			drawer.pushScissor(mNativeOverlayInitialViewport);
-			scissorActive = true;
-		}
-
-		for (const Geometry* geometry : mNativeOverlayGeometries)
-		{
-			if (nullptr != geometry)
-			{
-				drawNativeGeometry(*geometry, scissorActive);
-			}
-		}
-		if (scissorActive)
-		{
-			drawer.popScissor();
-		}
-	}
 	return true;
 }
 
 void GX2Renderer::renderDebugDraw(int debugDrawMode, const Recti& rect)
 {
-#if defined(PLATFORM_WIIU)
 	(void)debugDrawMode;
 	(void)rect;
 	static bool sLoggedDebugDrawDisabled = false;
@@ -829,82 +511,6 @@ void GX2Renderer::renderDebugDraw(int debugDrawMode, const Recti& rect)
 		sLoggedDebugDrawDisabled = true;
 		RMX_LOG_INFO("GX2Renderer: debug draw skipped on pure native GX2");
 	}
-#else
-	ensureSoftwareRendererInitialized();
-	mSoftwareRenderer.renderDebugDraw(debugDrawMode, rect);
-	invalidateNativeRenderTarget();
-#endif
-}
-
-void GX2Renderer::ensureSoftwareRendererInitialized()
-{
-	if (mSoftwareRendererInitialized)
-		return;
-
-	mSoftwareRenderer.initialize();
-	if (mGameResolution.x > 0 && mGameResolution.y > 0)
-	{
-		mSoftwareRenderer.setGameResolution(mGameResolution);
-	}
-	mSoftwareRendererInitialized = true;
-}
-
-bool GX2Renderer::shouldUseSoftwareGameRendering(const std::vector<Geometry*>& geometries) const
-{
-	bool wouldHaveUsedSoftware = false;
-	for (const Geometry* geometry : geometries)
-	{
-		if (nullptr == geometry)
-			continue;
-
-		switch (geometry->getType())
-		{
-			case Geometry::Type::PLANE:
-			{
-				const PlaneGeometry& plane = geometry->as<PlaneGeometry>();
-				if (!isDefaultPlaneRenderQueue(plane.mRenderQueue))
-					wouldHaveUsedSoftware = true;
-				break;
-			}
-
-			case Geometry::Type::SPRITE:
-			{
-				if (spriteNeedsSoftwareParityFallback(geometry->as<SpriteGeometry>()))
-					wouldHaveUsedSoftware = true;
-				break;
-			}
-
-			case Geometry::Type::VIEWPORT:
-			case Geometry::Type::EFFECT_BLUR:
-				wouldHaveUsedSoftware = true;
-				break;
-
-			default:
-				break;
-		}
-	}
-#if defined(PLATFORM_WIIU)
-	if (wouldHaveUsedSoftware)
-	{
-		static uint32 sNativeBouncebackLogCount = 0;
-		if (sNativeBouncebackLogCount < 8)
-		{
-			RMX_LOG_INFO("GX2Renderer: native GX2 is handling a former software bounceback frame");
-			++sNativeBouncebackLogCount;
-		}
-	}
-#endif
-	return false;
-}
-
-bool GX2Renderer::supportsNativeRendering(const std::vector<Geometry*>& geometries) const
-{
-	for (const Geometry* geometry : geometries)
-	{
-		if (nullptr != geometry && !supportsNativeGeometry(*geometry))
-			return false;
-	}
-	return true;
 }
 
 bool GX2Renderer::supportsNativeGeometry(const Geometry& geometry) const
@@ -985,13 +591,10 @@ bool GX2Renderer::requiresOffscreenNativeRendering(const std::vector<Geometry*>&
 void GX2Renderer::renderNativeGameScreen(const std::vector<Geometry*>& geometries)
 {
 	resetNativeBlurProcessingState();
-	mNativeOverlayGeometries.clear();
-	mNativeOverlayUsesInitialViewport = false;
 	mCurrentTargetAlreadyHasNativeFrame = false;
 	Drawer& drawer = EngineMain::instance().getDrawer();
 	if (!mNativeRenderTargetReady || mGameScreenTexture.getSize() != mGameResolution)
 	{
-		// Software fallback updates the same DrawerTexture as a bitmap-backed texture. Recreate it as a GX2 render target before native drawing.
 		mGameScreenTexture.invalidate();
 		mGameScreenTexture.ensureValidity();
 		mGameScreenTexture.setContentKnownOpaque(true);
@@ -1033,131 +636,6 @@ void GX2Renderer::renderNativeGameScreen(const std::vector<Geometry*>& geometrie
 	}
 	drawer.performRendering();
 	resetNativeQueuedState();
-}
-
-void GX2Renderer::renderHybridGameScreen(const std::vector<Geometry*>& geometries)
-{
-#if defined(PLATFORM_WIIU)
-	static uint32 sNativeHybridRedirectLogCount = 0;
-	if (sNativeHybridRedirectLogCount < 4)
-	{
-		RMX_LOG_INFO("GX2Renderer: hybrid software path redirected to native GX2");
-		++sNativeHybridRedirectLogCount;
-	}
-	renderNativeGameScreen(geometries);
-#else
-	ensureSoftwareRendererInitialized();
-	mSoftwareRenderer.renderGameScreen(geometries);
-	if constexpr (ENABLE_GX2_FALLBACK_BITMAP_LOGS)
-	{
-		static uint32 sSoftwareBitmapLogCount = 0;
-		static uint32 sSoftwareBitmapBlackLogCount = 0;
-		static uint32 sSoftwareBitmapFrame = 0;
-		++sSoftwareBitmapFrame;
-		if (!geometries.empty())
-		{
-			const Bitmap& gameBitmap = mGameScreenTexture.getBitmap();
-			const int bitmapWidth = gameBitmap.getWidth();
-			const int bitmapHeight = gameBitmap.getHeight();
-			const BitmapSample sample = sampleBitmap(gameBitmap);
-			const BitmapSample leftSample = sampleBitmapRegion(gameBitmap, Recti(0, 0, std::min(bitmapWidth, 160), bitmapHeight));
-			const BitmapSample middleSample = sampleBitmapRegion(gameBitmap, Recti(std::min(bitmapWidth, 160), 0, std::max(0, std::min(bitmapWidth, 240) - std::min(bitmapWidth, 160)), bitmapHeight));
-			const BitmapSample rightSample = sampleBitmapRegion(gameBitmap, Recti(std::min(bitmapWidth, 240), 0, std::max(0, bitmapWidth - std::min(bitmapWidth, 240)), bitmapHeight));
-			const bool shouldLog = (sample.nonBlackSamples > 0 && sSoftwareBitmapLogCount < 12)
-				|| (sample.nonBlackSamples == 0 && sSoftwareBitmapBlackLogCount < 3);
-			if (shouldLog)
-			{
-				RMX_LOG_INFO("GX2Renderer: software game bitmap sample"
-					<< " frame=" << sSoftwareBitmapFrame
-					<< " index=" << sSoftwareBitmapLogCount
-					<< " blackIndex=" << sSoftwareBitmapBlackLogCount
-					<< " geometries=" << geometries.size()
-					<< " size=" << mGameScreenTexture.getWidth() << "x" << mGameScreenTexture.getHeight()
-					<< " nonBlack=" << sample.nonBlackSamples
-					<< " alpha=" << sample.alphaSamples
-					<< " xor=" << rmx::hexString(sample.sampleXor, 8)
-					<< " center=" << rmx::hexString(sample.center, 8)
-					<< " left=" << leftSample.nonBlackSamples << "/" << leftSample.alphaSamples << "/" << rmx::hexString(leftSample.center, 8)
-					<< " middle=" << middleSample.nonBlackSamples << "/" << middleSample.alphaSamples << "/" << rmx::hexString(middleSample.center, 8)
-					<< " right=" << rightSample.nonBlackSamples << "/" << rightSample.alphaSamples << "/" << rmx::hexString(rightSample.center, 8));
-			}
-			if (sample.nonBlackSamples > 0)
-			{
-				++sSoftwareBitmapLogCount;
-			}
-			else if (sSoftwareBitmapBlackLogCount < 3)
-			{
-				++sSoftwareBitmapBlackLogCount;
-			}
-		}
-	}
-	if constexpr (ENABLE_GX2_RENDERER_DIAGNOSTIC_DUMPS)
-	{
-		static uint32 sHybridFrame = 0;
-		++sHybridFrame;
-		if (sHybridFrame == 300 || sHybridFrame == 900 || sHybridFrame == 1500)
-		{
-			char path[160];
-			snprintf(path, sizeof(path), "/vol/external01/wiiu/apps/sonic3air/savedata/gx2_software_frame_%u.ppm", sHybridFrame);
-			dumpBitmapPpmOnce(path, mGameScreenTexture.getBitmap());
-		}
-	}
-	invalidateNativeRenderTarget();
-#endif
-}
-
-DrawerTexture& GX2Renderer::updateGameScreenPresentTexture()
-{
-	mGameScreenPresentTextureIndex = 1 - mGameScreenPresentTextureIndex;
-	DrawerTexture& texture = mGameScreenPresentTextures[mGameScreenPresentTextureIndex];
-	Bitmap& renderedBitmap = mGameScreenTexture.accessBitmap();
-	Bitmap& presentBitmap = texture.accessBitmap();
-	if (presentBitmap.nonEmpty() && presentBitmap.getSize() == renderedBitmap.getSize())
-	{
-		presentBitmap.swap(renderedBitmap);
-	}
-	else
-	{
-		presentBitmap = renderedBitmap;
-	}
-	texture.bitmapUpdated();
-
-#if defined(PLATFORM_WIIU)
-	if constexpr (ENABLE_GX2_FALLBACK_BITMAP_LOGS)
-	{
-		static uint32 sPresentTextureLogCount = 0;
-		static uint32 sPresentTextureBlackLogCount = 0;
-		static uint32 sPresentTextureFrame = 0;
-		++sPresentTextureFrame;
-		const Bitmap& uploadedBitmap = texture.getBitmap();
-		const int bitmapWidth = uploadedBitmap.getWidth();
-		const int bitmapHeight = uploadedBitmap.getHeight();
-		const BitmapSample sample = sampleBitmap(uploadedBitmap);
-		const BitmapSample leftSample = sampleBitmapRegion(uploadedBitmap, Recti(0, 0, std::min(bitmapWidth, 160), bitmapHeight));
-		const BitmapSample middleSample = sampleBitmapRegion(uploadedBitmap, Recti(std::min(bitmapWidth, 160), 0, std::max(0, std::min(bitmapWidth, 240) - std::min(bitmapWidth, 160)), bitmapHeight));
-		const BitmapSample rightSample = sampleBitmapRegion(uploadedBitmap, Recti(std::min(bitmapWidth, 240), 0, std::max(0, bitmapWidth - std::min(bitmapWidth, 240)), bitmapHeight));
-		const bool shouldLog = (sample.nonBlackSamples > 0 && sPresentTextureLogCount < 10)
-			|| (sample.nonBlackSamples == 0 && sPresentTextureBlackLogCount < 3);
-		if (shouldLog)
-		{
-			RMX_LOG_INFO("GX2Renderer: uploaded game present texture frame=" << sPresentTextureFrame
-				<< " index=" << mGameScreenPresentTextureIndex
-				<< " size=" << texture.getWidth() << "x" << texture.getHeight()
-				<< " nonBlack=" << sample.nonBlackSamples
-				<< " alpha=" << sample.alphaSamples
-				<< " xor=" << rmx::hexString(sample.sampleXor, 8)
-				<< " center=" << rmx::hexString(sample.center, 8)
-				<< " left=" << leftSample.nonBlackSamples << "/" << leftSample.alphaSamples << "/" << rmx::hexString(leftSample.center, 8)
-				<< " middle=" << middleSample.nonBlackSamples << "/" << middleSample.alphaSamples << "/" << rmx::hexString(middleSample.center, 8)
-				<< " right=" << rightSample.nonBlackSamples << "/" << rightSample.alphaSamples << "/" << rmx::hexString(rightSample.center, 8));
-			if (sample.nonBlackSamples > 0)
-				++sPresentTextureLogCount;
-			else
-				++sPresentTextureBlackLogCount;
-		}
-	}
-#endif
-	return texture;
 }
 
 void GX2Renderer::ensureProcessingTexture()
@@ -1238,198 +716,6 @@ void GX2Renderer::setNativeBlendMode(Drawer& drawer, BlendMode blendMode)
 		drawer.setBlendMode(blendMode);
 		mNativeQueuedBlendMode = blendMode;
 		mHasNativeQueuedBlendMode = true;
-	}
-}
-
-void GX2Renderer::prepareHybridOverlayGeometries(const std::vector<Geometry*>& geometries, std::vector<Geometry*>& outSoftwareGeometries)
-{
-	mNativeOverlayGeometries.clear();
-	mNativeOverlayUsesInitialViewport = false;
-	outSoftwareGeometries.clear();
-	outSoftwareGeometries.reserve(geometries.size());
-	mNativeOverlayGeometries.reserve(geometries.size());
-
-	if (geometries.empty())
-		return;
-
-	const bool usingSpriteMask = isUsingSpriteMask(geometries);
-	bool hasPauseMenuViewport = false;
-	bool allowDepthSensitiveSprites = true;
-	for (const Geometry* geometry : geometries)
-	{
-		if (nullptr != geometry && geometry->getType() == Geometry::Type::VIEWPORT && geometry->mRenderQueue >= 0xfe00)
-		{
-			hasPauseMenuViewport = true;
-		}
-		if (nullptr != geometry && isDepthWritingGeometry(*geometry))
-		{
-			allowDepthSensitiveSprites = false;
-		}
-	}
-
-	size_t overlayStart = geometries.size();
-	if (hasPauseMenuViewport)
-	{
-		static uint32 sPauseSoftwareLogCount = 0;
-		if (sPauseSoftwareLogCount < 8)
-		{
-			RMX_LOG_INFO("GX2Renderer: pause viewport detected; keeping pause geometry in software target");
-		}
-		++sPauseSoftwareLogCount;
-	}
-	(void)usingSpriteMask;
-	(void)allowDepthSensitiveSprites;
-
-	for (size_t i = overlayStart; i < geometries.size(); ++i)
-	{
-		const Geometry* geometry = geometries[i];
-		if (nullptr != geometry && geometry->getType() == Geometry::Type::VIEWPORT && i != overlayStart)
-		{
-			overlayStart = geometries.size();
-			break;
-		}
-	}
-
-	Recti lastViewport;
-	bool hasLastViewport = false;
-	uint32 pinnedTextCount = 0;
-	uint32 pinnedSpriteCount = 0;
-	uint32 pinnedRectCount = 0;
-	for (size_t i = 0; i < geometries.size(); ++i)
-	{
-		Geometry* geometry = geometries[i];
-		if (nullptr != geometry && geometry->getType() == Geometry::Type::VIEWPORT && i < overlayStart)
-		{
-			lastViewport = geometry->as<ViewportGeometry>().mRect;
-			hasLastViewport = true;
-		}
-
-		const bool suffixOverlay = (i >= overlayStart);
-		const bool pinnedOverlay = !hasPauseMenuViewport
-			&& !suffixOverlay
-			&& nullptr != geometry
-			&& canPinNativeOverlayGeometry(*geometry, allowDepthSensitiveSprites);
-
-		if (!suffixOverlay && !pinnedOverlay)
-		{
-			outSoftwareGeometries.push_back(geometry);
-		}
-		else
-		{
-			mNativeOverlayGeometries.push_back(geometry);
-			if (pinnedOverlay)
-			{
-				switch (geometry->getType())
-				{
-					case Geometry::Type::TEXTURED_RECT:	++pinnedTextCount; break;
-					case Geometry::Type::SPRITE:		++pinnedSpriteCount; break;
-					case Geometry::Type::RECT:			++pinnedRectCount; break;
-					default:							break;
-				}
-			}
-		}
-	}
-
-	if (!mNativeOverlayGeometries.empty())
-	{
-		mNativeOverlayInitialViewport = lastViewport;
-		mNativeOverlayUsesInitialViewport = hasLastViewport;
-
-		static uint32 sOverlayLogCount = 0;
-		if (sOverlayLogCount < 12)
-		{
-			RMX_LOG_INFO("GX2Renderer: native overlay split software=" << outSoftwareGeometries.size()
-				<< " nativeOverlay=" << mNativeOverlayGeometries.size()
-				<< " pinnedText=" << pinnedTextCount
-				<< " pinnedSprites=" << pinnedSpriteCount
-				<< " pinnedRects=" << pinnedRectCount
-				<< " pauseViewport=" << (hasPauseMenuViewport ? 1 : 0)
-				<< " depthSensitiveSprites=" << (allowDepthSensitiveSprites ? 1 : 0)
-				<< " initialViewport=" << (mNativeOverlayUsesInitialViewport ? 1 : 0));
-		}
-		++sOverlayLogCount;
-	}
-}
-
-bool GX2Renderer::canPinNativeOverlayGeometry(const Geometry& geometry, bool allowDepthSensitiveSprites) const
-{
-	if (!canDrawNativeOverlayGeometry(geometry, true))
-		return false;
-
-	switch (geometry.getType())
-	{
-		case Geometry::Type::TEXTURED_RECT:
-			return true;
-
-		case Geometry::Type::RECT:
-			return geometry.mRenderQueue >= 0x8000;
-
-		case Geometry::Type::SPRITE:
-		{
-			const SpriteGeometry& spriteGeometry = geometry.as<SpriteGeometry>();
-			if (geometry.mRenderQueue < 0x8000)
-				return false;
-			if (!allowDepthSensitiveSprites && !spriteGeometry.mSpriteInfo.mPriorityFlag && geometry.mRenderQueue < 0xc000)
-				return false;
-			return true;
-		}
-
-		default:
-			return false;
-	}
-}
-
-bool GX2Renderer::canDrawNativeOverlayGeometry(const Geometry& geometry, bool allowDepthSensitiveSprites) const
-{
-	switch (geometry.getType())
-	{
-		case Geometry::Type::RECT:
-		case Geometry::Type::TEXTURED_RECT:
-		case Geometry::Type::VIEWPORT:
-			return supportsNativeGeometry(geometry);
-
-		case Geometry::Type::SPRITE:
-		{
-			const SpriteGeometry& spriteGeometry = geometry.as<SpriteGeometry>();
-			if (!supportsNativeSprite(spriteGeometry))
-				return false;
-
-			const renderitems::SpriteInfo& spriteInfo = spriteGeometry.mSpriteInfo;
-			if (!allowDepthSensitiveSprites && !spriteInfo.mPriorityFlag)
-				return false;
-
-			switch (spriteInfo.getType())
-			{
-				case RenderItem::Type::COMPONENT_SPRITE:
-				case RenderItem::Type::PALETTE_SPRITE:
-				case RenderItem::Type::VDP_SPRITE:
-					return true;
-
-				default:
-					return false;
-			}
-		}
-
-		default:
-			return false;
-	}
-}
-
-bool GX2Renderer::isDepthWritingGeometry(const Geometry& geometry) const
-{
-	switch (geometry.getType())
-	{
-		case Geometry::Type::PLANE:
-			return geometry.as<PlaneGeometry>().mPriorityFlag;
-
-		case Geometry::Type::SPRITE:
-		{
-			const renderitems::SpriteInfo& spriteInfo = geometry.as<SpriteGeometry>().mSpriteInfo;
-			return spriteInfo.mPriorityFlag || spriteInfo.getType() == RenderItem::Type::SPRITE_MASK;
-		}
-
-		default:
-			return false;
 	}
 }
 
@@ -1657,7 +943,4 @@ void GX2Renderer::invalidateNativeRenderTarget()
 {
 	mNativeRenderTargetReady = false;
 	mCurrentTargetAlreadyHasNativeFrame = false;
-	mNativeOverlayGeometries.clear();
-	mNativeOverlayUsesInitialViewport = false;
-	mNativeOverlayInitialViewport = Recti();
 }

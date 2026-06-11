@@ -235,6 +235,16 @@ namespace rmx
 
 	void SystemManager::notifyWiiUProcUIReleaseFromCallback()
 	{
+		if (mProcUIReleaseAcknowledged)
+		{
+			static uint32 sIgnoredReleaseCallbackLogCount = 0;
+			if (sIgnoredReleaseCallbackLogCount < 8)
+			{
+				RMX_LOG_INFO("SystemManager: ignoring stale ProcUI release callback after draw-done acknowledgement");
+				++sIgnoredReleaseCallbackLogCount;
+			}
+			return;
+		}
 		if (mProcUIRenderAllowed)
 		{
 			RMX_LOG_INFO("SystemManager: ProcUI release callback blocked rendering");

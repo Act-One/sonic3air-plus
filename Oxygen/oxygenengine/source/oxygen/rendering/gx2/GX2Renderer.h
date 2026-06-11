@@ -12,7 +12,6 @@
 #include "oxygen/rendering/Renderer.h"
 #include "oxygen/rendering/Geometry.h"
 #include "oxygen/rendering/gx2/GX2RenderResources.h"
-#include "oxygen/rendering/software/SoftwareRenderer.h"
 #include "oxygen/drawing/DrawerTexture.h"
 
 
@@ -37,15 +36,10 @@ public:
 	bool drawPresentedGameScreenToCurrentTarget(const Recti& targetRect);
 
 private:
-	void ensureSoftwareRendererInitialized();
-	bool shouldUseSoftwareGameRendering(const std::vector<Geometry*>& geometries) const;
-	bool supportsNativeRendering(const std::vector<Geometry*>& geometries) const;
 	bool supportsNativeGeometry(const Geometry& geometry) const;
 	bool supportsNativeSprite(const SpriteGeometry& geometry) const;
 	bool requiresOffscreenNativeRendering(const std::vector<Geometry*>& geometries) const;
 	void renderNativeGameScreen(const std::vector<Geometry*>& geometries);
-	void renderHybridGameScreen(const std::vector<Geometry*>& geometries);
-	DrawerTexture& updateGameScreenPresentTexture();
 	void ensureProcessingTexture();
 	void copyNativeGameScreenToProcessingTexture(const Recti& viewport);
 	void resetNativeBlurProcessingState();
@@ -53,10 +47,6 @@ private:
 	void restoreNativeBlurOutputTarget(Drawer& drawer);
 	void resetNativeQueuedState();
 	void setNativeBlendMode(Drawer& drawer, BlendMode blendMode);
-	void prepareHybridOverlayGeometries(const std::vector<Geometry*>& geometries, std::vector<Geometry*>& outSoftwareGeometries);
-	bool canPinNativeOverlayGeometry(const Geometry& geometry, bool allowDepthSensitiveSprites) const;
-	bool canDrawNativeOverlayGeometry(const Geometry& geometry, bool allowDepthSensitiveSprites) const;
-	bool isDepthWritingGeometry(const Geometry& geometry) const;
 	void drawNativeGeometry(const Geometry& geometry, bool& scissorActive);
 	void drawNativePlane(const PlaneGeometry& geometry);
 	void drawNativeSprite(const SpriteGeometry& geometry);
@@ -68,18 +58,11 @@ private:
 	void invalidateNativeRenderTarget();
 
 private:
-	SoftwareRenderer mSoftwareRenderer;
 	GX2RenderResources mRenderResources;
 	Vec2i mGameResolution;
-	bool mSoftwareRendererInitialized = false;
 	bool mNativeRenderTargetReady = false;
 	bool mCurrentTargetAlreadyHasNativeFrame = false;
 	DrawerTexture mProcessingTexture;
-	DrawerTexture mGameScreenPresentTextures[2];
-	uint32 mGameScreenPresentTextureIndex = 0;
-	std::vector<Geometry*> mNativeOverlayGeometries;
-	Recti mNativeOverlayInitialViewport;
-	bool mNativeOverlayUsesInitialViewport = false;
 	bool mHasNativeQueuedBlendMode = false;
 	BlendMode mNativeQueuedBlendMode = BlendMode::OPAQUE;
 	bool mNativeBlurProcessingActive = false;
