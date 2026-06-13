@@ -92,8 +92,11 @@ void AudioOutBase::realtimeUpdate(float secondsPassed)
 void AudioOutBase::reloadRemasteredSoundtrack()
 {
 	mAudioCollection.clearPackage(AudioCollection::Package::REMASTERED);
+	mAudioCollection.clearPackage(AudioCollection::Package::PLUS);
 	mAudioCollection.loadFromJson(L"data/audio/remastered", L"audio_replacements.json", AudioCollection::Package::REMASTERED);
+	mAudioCollection.loadFromJson(L"data/audio/plus", L"audio_replacements.json", AudioCollection::Package::PLUS);
 	mLoadedRemasteredSoundtrack = (mAudioCollection.getNumSourcesByPackageType(AudioCollection::Package::REMASTERED) != 0);
+	mLoadedPlusSoundtrack = (mAudioCollection.getNumSourcesByPackageType(AudioCollection::Package::PLUS) != 0);
 	determineActiveSourceRegistrations();
 }
 

@@ -45,7 +45,7 @@ private:
 
 public:
 	// Audio
-	int mActiveSoundtrack = 1;		// 0 = emulated, 1 = remastered
+	int mActiveSoundtrack = 1;		// 0 = emulated, 1 = remastered, 2 = plus
 
 	// Input
 #if !defined(PLATFORM_VITA)

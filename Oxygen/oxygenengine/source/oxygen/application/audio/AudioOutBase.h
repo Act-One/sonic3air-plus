@@ -39,7 +39,8 @@ public:
 		INVALID		= 0,
 		EMULATED	= 1,
 		REMASTERED	= 2,
-		MODDED		= 3
+		MODDED		= 3,
+		PLUS		= 4
 	};
 
 public:
@@ -57,6 +58,7 @@ public:
 
 	void reloadRemasteredSoundtrack();
 	bool hasLoadedRemasteredSoundtrack() const  { return mLoadedRemasteredSoundtrack; }
+	bool hasLoadedPlusSoundtrack() const		 { return mLoadedPlusSoundtrack; }
 
 	inline float getGlobalVolume() const   { return mGlobalVolume; }
 	void setGlobalVolume(float volume);
@@ -84,6 +86,7 @@ protected:
 	AudioCollection mAudioCollection;
 	AudioPlayer mAudioPlayer;
 	bool mLoadedRemasteredSoundtrack = false;
+	bool mLoadedPlusSoundtrack = false;
 
 	float mGlobalVolume = 1.0f;
 	float mMusicVolume = 1.0f;

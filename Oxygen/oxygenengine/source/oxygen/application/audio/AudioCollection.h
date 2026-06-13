@@ -22,6 +22,7 @@ public:
 		ORIGINAL	= 1,
 		REMASTERED	= 2,
 		MODDED		= 3,
+		PLUS		= 4,
 		_NUM
 	};
 
@@ -91,6 +92,7 @@ public:
 	bool loadFromJson(const std::wstring& basepath, const std::wstring& filename, Package package);
 
 	void determineActiveSourceRegistrations(bool preferOriginalSoundtrack);
+	void determineActiveSourceRegistrations(Package preferredSoundtrackPackage);
 
 	const AudioDefinition* getAudioDefinition(uint64 keyId) const;
 	SourceRegistration* getSourceRegistration(uint64 keyId) const;

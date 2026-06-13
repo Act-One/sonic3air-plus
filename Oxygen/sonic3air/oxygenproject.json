@@ -31,7 +31,8 @@
 		"enginedata.bin":    { "Required": true },
 		"gamedata.bin":      { "Required": true },
 		"audiodata.bin":     { "Required": true },
-		"audioremaster.bin": { "Required": false }
+		"audioremaster.bin": { "Required": false },
+		"audioplus.bin":     { "Required": false }
 	},
 
 

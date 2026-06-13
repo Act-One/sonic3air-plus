@@ -128,6 +128,7 @@ bool EngineDelegate::setupCustomGameProfile()
 		gameProfile.mDataPackages.emplace_back(L"audiodata.bin",     true);
 #if !defined(S3AIR_WII_LOW_MEMORY_PROFILE)
 		gameProfile.mDataPackages.emplace_back(L"audioremaster.bin", false);	// Optional package
+		gameProfile.mDataPackages.emplace_back(L"audioplus.bin",     false);	// Optional package
 #endif
 	}
 

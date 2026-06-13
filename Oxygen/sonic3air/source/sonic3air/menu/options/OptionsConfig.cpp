@@ -276,7 +276,8 @@ void OptionsConfig::buildAudio()
 	{
 		configBuilder.addSetting("Soundtrack Type:", option::SOUNDTRACK)
 			.addOption("Emulated", 0)
-			.addOption("Remastered", 1);
+			.addOption("Remastered", 1)
+			.addOption("Plus", 2);
 
 		configBuilder.addSetting("Sound Test:", option::SOUND_TEST);		// Will be filled with content in "OptionsMenu::initialize()"
 	}

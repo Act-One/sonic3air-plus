@@ -39,7 +39,11 @@ void AudioOut::startup()
 	AudioOutBase::startup();
 
 	// Switch soundtrack selection if remastered soundtrack is not available
-	if (!mLoadedRemasteredSoundtrack)
+	if (ConfigurationImpl::instance().mActiveSoundtrack == 1 && !mLoadedRemasteredSoundtrack)
+	{
+		ConfigurationImpl::instance().mActiveSoundtrack = 0;
+	}
+	if (ConfigurationImpl::instance().mActiveSoundtrack == 2 && !mLoadedPlusSoundtrack && !mLoadedRemasteredSoundtrack)
 	{
 		ConfigurationImpl::instance().mActiveSoundtrack = 0;
 	}
@@ -153,8 +157,18 @@ void AudioOut::enableUnderwaterEffect(float value)
 
 void AudioOut::determineActiveSourceRegistrations()
 {
-	const bool preferOriginal = (ConfigurationImpl::instance().mActiveSoundtrack != 1);
-	mAudioCollection.determineActiveSourceRegistrations(preferOriginal);
+	switch (ConfigurationImpl::instance().mActiveSoundtrack)
+	{
+		case 2:
+			mAudioCollection.determineActiveSourceRegistrations(AudioCollection::Package::PLUS);
+			break;
+		case 1:
+			mAudioCollection.determineActiveSourceRegistrations(AudioCollection::Package::REMASTERED);
+			break;
+		default:
+			mAudioCollection.determineActiveSourceRegistrations(AudioCollection::Package::ORIGINAL);
+			break;
+	}
 }
 
 void AudioOut::playAudioInternal(const SfxHandling& handling, uint64 sfxId, int contextBase, AudioReference* outAudioReference)

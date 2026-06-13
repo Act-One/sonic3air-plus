@@ -265,7 +265,7 @@ GameMenuEntry* GameMenuEntries::getEntryByData(uint32 data)
 {
 	for (GameMenuEntry* entry : mEntries)
 	{
-		if (entry->mData == data)
+		if (nullptr != entry && entry->mData == data)
 			return entry;
 	}
 	return nullptr;
@@ -389,6 +389,9 @@ bool GameMenuEntries::setSelectedIndexByValue(uint32 value)
 	int difference = 0x7fffffff;
 	for (size_t i = 0; i < mEntries.size(); ++i)
 	{
+		if (nullptr == mEntries[i])
+			continue;
+
 		const int diff = std::abs((int)(mEntries[i]->mData - value));
 		if (diff < difference)
 		{
@@ -427,11 +430,11 @@ bool GameMenuEntries::sanitizeSelectedIndex(bool allowNonInteractableEntries)
 		mSelectedEntryIndex = (int)mEntries.size() - 1;
 	}
 
-	if (!allowNonInteractableEntries && !mEntries[mSelectedEntryIndex]->isFullyInteractable())
+	if (nullptr == mEntries[mSelectedEntryIndex] || (!allowNonInteractableEntries && !mEntries[mSelectedEntryIndex]->isFullyInteractable()))
 	{
 		for (int index = (int)mSelectedEntryIndex - 1; index >= 0; --index)
 		{
-			if (mEntries[index]->isFullyInteractable())
+			if (nullptr != mEntries[index] && mEntries[index]->isFullyInteractable())
 			{
 				mSelectedEntryIndex = index;
 				return true;
@@ -439,7 +442,7 @@ bool GameMenuEntries::sanitizeSelectedIndex(bool allowNonInteractableEntries)
 		}
 		for (size_t index = mSelectedEntryIndex + 1; index < mEntries.size(); ++index)
 		{
-			if (mEntries[index]->isFullyInteractable())
+			if (nullptr != mEntries[index] && mEntries[index]->isFullyInteractable())
 			{
 				mSelectedEntryIndex = (int)index;
 				return true;
@@ -466,7 +469,7 @@ size_t GameMenuEntries::getPreviousInteractableIndex(size_t index, bool loop) co
 			break;	// Failed
 
 		// Continue for invisible and non-interactable entries, so they get skipped
-		if (mEntries[index]->isFullyInteractable())
+		if (nullptr != mEntries[index] && mEntries[index]->isFullyInteractable())
 		{
 			// Found a valid index
 			return index;
@@ -491,7 +494,7 @@ size_t GameMenuEntries::getNextInteractableIndex(size_t index, bool loop) const
 			break;	// Failed
 
 		// Continue for invisible and non-interactable entries, so they get skipped
-		if (mEntries[index]->isFullyInteractable())
+		if (nullptr != mEntries[index] && mEntries[index]->isFullyInteractable())
 		{
 			// Found a valid index
 			return index;

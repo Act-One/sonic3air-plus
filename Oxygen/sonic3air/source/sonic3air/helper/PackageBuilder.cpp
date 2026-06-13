@@ -54,6 +54,13 @@ void PackageBuilder::performPacking()
 		FilePackage::createFilePackage(L"audioremaster.bin", L"", includedPaths, excludedPaths, L"_master_image_template/data/", BUILD_NUMBER);
 	}
 
+	// "audioplus.bin" = Sonic 3 A.I.R. Plus audio directory
+	{
+		std::vector<std::wstring> includedPaths = { L"data/audio/plus/" };
+		std::vector<std::wstring> excludedPaths = { };
+		FilePackage::createFilePackage(L"audioplus.bin", L"", includedPaths, excludedPaths, L"_master_image_template/data/", BUILD_NUMBER);
+	}
+
 	// "enginedata.bin" = engine's full data directory
 	{
 		std::vector<std::wstring> includedPaths = { L"data/" };

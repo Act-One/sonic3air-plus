@@ -18,25 +18,39 @@ namespace
 		return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
 	}
 
-	int compareSourceRegistrationPackages(AudioCollection::Package a, AudioCollection::Package b, bool preferOriginalSoundtrack)
+	int getSourceRegistrationPriority(AudioCollection::Package package, AudioCollection::Package preferredSoundtrackPackage)
 	{
-		static_assert((int)AudioCollection::Package::_NUM == 4);
-		const int prioritiesA[4] = { 0, 1, 2, 3 };		// Preferring remastered over original, but modded will always be first
-		const int prioritiesB[4] = { 0, 2, 1, 3 };		// Preferring original over remastered, but modded will always be first
-		const int* priorities = preferOriginalSoundtrack ? prioritiesB : prioritiesA;
+		static_assert((int)AudioCollection::Package::_NUM == 5);
+		if (package == AudioCollection::Package::MODDED)
+			return 100;
 
-		const int prioA = priorities[(int)a];
-		const int prioB = priorities[(int)b];
-		return (prioA == prioB) ? 0 : (prioA < prioB) ? 1 : -1;
+		switch (preferredSoundtrackPackage)
+		{
+			case AudioCollection::Package::ORIGINAL:
+				return (package == AudioCollection::Package::ORIGINAL)   ? 30 :
+					   (package == AudioCollection::Package::REMASTERED) ? 20 :
+					   (package == AudioCollection::Package::PLUS)       ? 10 : 0;
+
+			case AudioCollection::Package::PLUS:
+				return (package == AudioCollection::Package::PLUS)       ? 30 :
+					   (package == AudioCollection::Package::REMASTERED) ? 20 :
+					   (package == AudioCollection::Package::ORIGINAL)   ? 10 : 0;
+
+			case AudioCollection::Package::REMASTERED:
+			default:
+				return (package == AudioCollection::Package::REMASTERED) ? 30 :
+					   (package == AudioCollection::Package::ORIGINAL)   ? 20 :
+					   (package == AudioCollection::Package::PLUS)       ? 10 : 0;
+		}
 	}
 
-	bool shouldPreferSoundRegistration(AudioCollection::SourceRegistration& soundRegToCheck, AudioCollection::SourceRegistration* bestFoundSoFar, bool preferOriginalSoundtrack)
+	bool shouldPreferSoundRegistration(AudioCollection::SourceRegistration& soundRegToCheck, AudioCollection::SourceRegistration* bestFoundSoFar, AudioCollection::Package preferredSoundtrackPackage)
 	{
 		if (nullptr == bestFoundSoFar)
 			return true;
 
-		// Using <= instead of < here, so that with multiple modded sources, the last one will get used - that's the one with highest priority
-		return (compareSourceRegistrationPackages(soundRegToCheck.mPackage, bestFoundSoFar->mPackage, preferOriginalSoundtrack) <= 0);
+		// Allow later registrations with equal priority to win, matching the old mod override behavior.
+		return (getSourceRegistrationPriority(soundRegToCheck.mPackage, preferredSoundtrackPackage) >= getSourceRegistrationPriority(bestFoundSoFar->mPackage, preferredSoundtrackPackage));
 	}
 
 	bool getHexCodeRetranslation(uint64& outKey, uint64 hexCodeString)
@@ -280,13 +294,18 @@ bool AudioCollection::loadFromJson(const std::wstring& basepath, const std::wstr
 
 void AudioCollection::determineActiveSourceRegistrations(bool preferOriginalSoundtrack)
 {
+	determineActiveSourceRegistrations(preferOriginalSoundtrack ? Package::ORIGINAL : Package::REMASTERED);
+}
+
+void AudioCollection::determineActiveSourceRegistrations(Package preferredSoundtrackPackage)
+{
 	for (auto& [key, audioDefinition] : mAudioDefinitions)
 	{
 		// Search for the right one considering settings
 		SourceRegistration* bestSourceReg = nullptr;
 		for (SourceRegistration& soundReg : audioDefinition.mSources)
 		{
-			if (shouldPreferSoundRegistration(soundReg, bestSourceReg, preferOriginalSoundtrack))
+			if (shouldPreferSoundRegistration(soundReg, bestSourceReg, preferredSoundtrackPackage))
 			{
 				bestSourceReg = &soundReg;
 			}
